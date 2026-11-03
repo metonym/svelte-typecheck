@@ -6,7 +6,7 @@ linker = "isolated"
 # `bun fmt`
 [fmt]
 # Planted errors at fixed lines and columns.
-ignorePatterns = ["tests/fixtures/**"]
+ignorePatterns = ["tests/fixtures*/**"]
 
 [fmt.sortImports]
 groups = [
@@ -22,7 +22,7 @@ ignoreCase = false
 
 # `bun lint`
 [lint]
-ignorePatterns = ["tests/fixtures/**", "dist/**"]
+ignorePatterns = ["tests/fixtures*/**", "dist/**"]
 
 [lint.rules]
 "eslint/eqeqeq" = ["error", "smart"]

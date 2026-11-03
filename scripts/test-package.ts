@@ -57,9 +57,17 @@ try {
         "source" in node && node.source ? [String(node.source.value)] : [],
       ),
       ...lexDynamicImports(code)
-        .filter((d) => d.kind === "import")
-        .map((d) => d.source?.value ?? "a computed import()"),
+        .filter((d) => d.kind === "import" && d.source !== null)
+        .map((d) => d.source?.value ?? ""),
     ];
+    // One computed import(): the project's svelte.config.
+    const computed = lexDynamicImports(code).filter(
+      (d) => d.kind === "import" && d.source === null,
+    );
+    assert(
+      computed.length <= 1,
+      `dist/${file} has ${computed.length} computed import()s`,
+    );
     for (const specifier of specifiers)
       assert(ALLOWED.test(specifier), `dist/${file} imports ${specifier}`);
   }

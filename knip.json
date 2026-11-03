@@ -13,10 +13,12 @@
     "scripts/**/*.ts",
     "bench/**/*.ts"
   ],
-  "ignore": ["tests/fixtures/**"],
+  "ignore": ["tests/fixtures*/**"],
   "ignoreDependencies": [
     "@typescript/native-preview",
+    "magic-string",
     "svelte",
+    "svelte-check",
     "svelte3",
     "svelte4",
     "tsrs"
