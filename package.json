@@ -2,7 +2,7 @@
   "name": "svelte-typecheck",
   "version": "0.0.0",
   "license": "MIT",
-  "description": "Type-check Svelte components with bun check, tsrs, tsgo or tsc. Fast, light, svelte-check compatible.",
+  "description": "A drop-in svelte-check replacement that checks with tsc, tsgo, tsrs or bun check. 7 to 14x faster, zero dependencies.",
   "author": "Eric Liu (https://github.com/metonym)",
   "type": "module",
   "main": "./dist/index.js",
