@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
 import {
@@ -23,6 +23,11 @@ const SYNTAX_CODE = /^TS[18]\d{3}$/;
 const STOPPED = /Stopped before type checking/;
 /** What an error's range covers past its start: an identifier, number or string. */
 const TOKEN = /^(?:[\w$]+|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`]*`)/;
+
+/** "No overload matches this call", or a wrong argument: to `__sveltets_2_store_get`. */
+const STORE_ERROR = /^TS(2769|2345)$/;
+/** Unused label, and an unused comma operand. */
+const REACTIVE_NOISE = /^TS(7028|2695)$/;
 
 const SHIMS = fileURLToPath(new URL("./shims/", import.meta.url));
 /** The files the last incremental run wrote. */
@@ -205,7 +210,13 @@ export async function typecheck(
 
   const outputs = new Map<
     string,
-    { output: Output; source: string; svelte: string; isTs: boolean }
+    {
+      output: Output;
+      source: string;
+      svelte: string;
+      isTs: boolean;
+      emitted: ReturnType<typeof emit>;
+    }
   >();
   const writes: Promise<void>[] = [];
   const written = new Set<string>();
@@ -253,6 +264,7 @@ export async function typecheck(
       source: texts[i] ?? "",
       svelte: path,
       isTs: result.isTs,
+      emitted: result,
     });
     write(genPath, result.out.code);
     if (declarations)
@@ -393,9 +405,46 @@ export async function typecheck(
       );
       const source = gen.output.toSource(offset);
       if (source === null) {
+        // svelte-check reports a `$name` that isn't a store at each use.
+        const store = STORE_ERROR.test(d.code)
+          ? gen.emitted.storeDeclarations.find(
+              (s) => s.start <= offset && offset < s.end,
+            )
+          : undefined;
+        if (store) {
+          for (const use of store.uses) {
+            const at = locator(gen.svelte, () => gen.source).position(use);
+            const end = locator(gen.svelte, () => gen.source).position(
+              use + store.name.length + 1,
+            );
+            diagnostics.push({
+              ...d,
+              file: gen.svelte,
+              line: at.line,
+              column: at.column,
+              endLine: end.line,
+              endColumn: end.column,
+              severity: "error",
+              source: gen.isTs ? "ts" : "js",
+              message: `Cannot use '${store.name}' as a store. '${store.name}' needs to be an object with a subscribe method on it.\n\n${d.message}`,
+            });
+          }
+          continue;
+        }
         dropped.push({ ...d, file: abs, severity: "error", source: "ts" });
         continue;
       }
+      // What svelte-check filters out: a `$:` label TypeScript calls unused,
+      // a no-op comma in `$: a, b`, and a transition's third argument.
+      const within = (ranges: [number, number][]) =>
+        ranges.some(([from, to]) => from <= source && source < to);
+      if (
+        (REACTIVE_NOISE.test(d.code) && within(gen.emitted.reactive)) ||
+        (d.code === "TS2554" &&
+          d.message.startsWith("Expected 3 arguments") &&
+          within(gen.emitted.transitions))
+      )
+        continue;
       const start = locator(gen.svelte, () => gen.source).position(source);
       mapped = {
         ...d,
@@ -427,6 +476,19 @@ export async function typecheck(
     diagnostics.push(mapped);
   }
   diagnostics.push(...compiled);
+  // svelte-check warns when a tsconfig includes no components.
+  if (project.tsconfig && !options.components && files.length === 0)
+    diagnostics.push({
+      file: project.tsconfig,
+      line: 1,
+      column: 1,
+      endLine: 1,
+      endColumn: 1,
+      severity: "warning",
+      source: "svelte",
+      code: "100001",
+      message: `No svelte input files were found in config file '${project.tsconfig}'. Did you forget to add svelte files to the 'include' in your ${basename(project.tsconfig)}? Specified 'include' paths were '${JSON.stringify(project.raw.include)}' and 'exclude' paths were '${JSON.stringify(project.raw.exclude)}'`,
+    });
   const reported = errorsOnly
     ? diagnostics.filter((d) => d.severity === "error")
     : diagnostics;

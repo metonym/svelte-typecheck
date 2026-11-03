@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
@@ -76,6 +77,29 @@ describe("svelte-check parity, machine output", () => {
   it("matches svelte-check with generic components", () => {
     const cwd = join(root, "tests/fixtures-generic");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check's message rewrites and filters", () => {
+    const cwd = join(root, "tests/fixtures-filters");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("warns, as svelte-check does, of a tsconfig with no components", () => {
+    const cwd = join(root, "tests/.tmp/no-components");
+    mkdirSync(join(cwd, "src"), { recursive: true });
+    writeFileSync(
+      join(cwd, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { strict: true },
+        include: ["src/**/*.ts"],
+      }),
+    );
+    writeFileSync(join(cwd, "src/a.ts"), "export const a = 1;\n");
+    const warning = (lines: string[]) =>
+      lines.filter((line) => line.includes("No svelte input files"));
+    // svelte-check also reports its own default options' deprecation here.
+    expect(warning(ours([], cwd))).toEqual(warning(svelteCheck([], cwd)));
+    expect(warning(ours([], cwd))).toHaveLength(1);
   }, 60_000);
 
   it("matches svelte-check with preprocessors", () => {
