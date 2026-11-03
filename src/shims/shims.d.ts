@@ -110,6 +110,38 @@ declare function __sveltets_2_ensureTransition(
     | (() => __sveltets_2_SvelteTransitionConfig),
 ): {};
 
+// --- `$$Props`, `$$Events`, `$$Slots`.
+
+/** Checks that `$$Props` agrees with the `export let`s. */
+declare function __sveltets_2_ensureRightProps<Props>(props: Props): {};
+type KeysMatching<Obj, V> = {
+  [K in keyof Obj]-?: Obj[K] extends V ? K : never;
+}[keyof Obj];
+/** `$$Events` as `createEventDispatcher`'s type argument: each event's detail. */
+declare type __sveltets_2_CustomEvents<T> = {
+  [K in KeysMatching<T, CustomEvent>]: T[K] extends CustomEvent
+    ? T[K]["detail"]
+    : T[K];
+};
+/** A `<slot>` whose props `$$Slots` declares. */
+declare function __sveltets_2_createCreateSlot<
+  Slots = Record<string, Record<string, any>>,
+>(): <SlotName extends keyof Slots>(
+  slotName: SlotName,
+  attrs: Slots[SlotName],
+) => Record<string, any>;
+
+// --- `animate:`.
+
+declare var __sveltets_2_AnimationMove: { from: DOMRect; to: DOMRect };
+declare function __sveltets_2_ensureAnimation(animationCall: {
+  delay?: number;
+  duration?: number;
+  easing?: (t: number) => number;
+  css?: (t: number, u: number) => string;
+  tick?: (t: number, u: number) => void;
+}): {};
+
 // --- Events.
 
 /** `createEventDispatcher<Typings>()`'s events, as `CustomEvent`s. */

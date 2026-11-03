@@ -21,6 +21,7 @@ const JSDOC_END = /\s*\*\/\s*$/;
 const USES_ALL_PROPS = /\$\$(restProps|props)\b/;
 
 /** Attributes svelte2tsx passes as numbers when their text is numeric. */
+const TYPING_INTERFACES = new Set(["$$Props", "$$Events", "$$Slots"]);
 const NUMBER_ATTRIBUTES = new Set(
   "aria-colcount aria-colindex aria-colspan aria-level aria-posinset aria-rowcount aria-rowindex aria-rowspan aria-setsize aria-valuemax aria-valuemin aria-valuenow results span marginheight marginwidth maxlength minlength currenttime defaultplaybackrate volume high low optimum start size border cols rows colspan rowspan tabindex".split(
     " ",
@@ -124,6 +125,21 @@ export function emit(
   for (const s of body)
     if (s.type === "ImportDeclaration") copyStatement(s).raw("\n");
 
+  // --- svelte2tsx's typing interfaces: `$$Props`, `$$Events`, `$$Slots`.
+  const typed = new Set<string>();
+  for (const s of body) {
+    const d = s.type === "ExportNamedDeclaration" ? s.declaration : s;
+    if (
+      (d?.type === "TSInterfaceDeclaration" ||
+        d?.type === "TSTypeAliasDeclaration") &&
+      TYPING_INTERFACES.has(d.id?.name)
+    )
+      typed.add(d.id.name);
+  }
+  const strictEvents =
+    typed.has("$$Events") ||
+    instance?.attributes?.some((a: Node) => a.name === "strictEvents");
+
   // --- Generics: `generics="…"` in TS, `@template` blocks in JS. TS 7 reads
   // only the JSDoc block right above a function, so merge the tags into one.
   /** JSDoc blocks moved out of the instance script. */
@@ -182,11 +198,17 @@ export function emit(
     `let $${name} = __sveltets_2_store_get(${name});`;
 
   out.raw(
-    `function $$render${generics}() { let $$props = __sveltets_2_allPropsType(); let $$restProps = __sveltets_2_restPropsType(); let $$slots = __sveltets_2_any(0); ${storeAtStart.map(declareStore).join(" ")}\n`,
+    `function $$render${generics}() { let $$props = __sveltets_2_allPropsType(); let $$restProps = __sveltets_2_restPropsType(); let $$slots = __sveltets_2_any(0); ${typed.has("$$Slots") ? "const __sveltets_createSlot = __sveltets_2_createCreateSlot<$$Slots>(); " : ""}${storeAtStart.map(declareStore).join(" ")}\n`,
   );
 
   // --- Instance script, statement by statement.
-  const props: { name: string; local: string; optional: boolean }[] = [];
+  const props: {
+    name: string;
+    local: string;
+    optional: boolean;
+    /** Its type annotation, for checking `$$Props`. */
+    type?: string;
+  }[] = [];
   const exportsOf: string[] = [];
   /** Copies [from, to), leaving out `@template` blocks. */
   const copyGap = (from: number, to: number) => {
@@ -211,7 +233,19 @@ export function emit(
           if (d.type === "VariableDeclaration" && d.kind === "let")
             for (const decl of d.declarations)
               for (const name of idsOf(decl.id)) {
-                props.push({ name, local: name, optional: decl.init != null });
+                props.push({
+                  name,
+                  local: name,
+                  optional: decl.init != null,
+                  type:
+                    decl.id.type === "Identifier" &&
+                    decl.id.typeAnnotation?.typeAnnotation
+                      ? source.slice(
+                          decl.id.typeAnnotation.typeAnnotation.start,
+                          decl.id.typeAnnotation.typeAnnotation.end,
+                        )
+                      : undefined,
+                });
                 // Stops narrowing to the default; a parent can pass anything.
                 out.raw(
                   `;${name} = __sveltets_2_any(${decl.init ? name : 0});`,
@@ -249,7 +283,27 @@ export function emit(
             .copy(e.right.start, e.right.end)
             .raw("));");
         } else out.raw(";() => {").copy(s.start, s.end).raw("}");
-      } else out.copy(s.start, s.end);
+      } else {
+        // `createEventDispatcher()` dispatches what `$$Events` declares.
+        const call =
+          typed.has("$$Events") && s.type === "VariableDeclaration"
+            ? s.declarations
+                .map((d: Node) => d.init)
+                .find(
+                  (init: Node) =>
+                    init?.type === "CallExpression" &&
+                    init.callee?.name === "createEventDispatcher" &&
+                    !init.typeArguments &&
+                    !init.typeParameters,
+                )
+            : undefined;
+        if (call)
+          out
+            .copy(s.start, call.callee.end)
+            .raw("<__sveltets_2_CustomEvents<$$Events>>")
+            .copy(call.callee.end, s.end);
+        else out.copy(s.start, s.end);
+      }
       const stores = storeAfter.get(s.end);
       if (stores) out.raw(stores.map(declareStore).join(""));
     }
@@ -302,6 +356,15 @@ export function emit(
           const at = nameAt(a);
           out.copy(at, at + a.name.length).raw(";");
         } else attrValue(a.value).raw(";");
+      } else if (a.type === "AnimateDirective") {
+        const at = nameAt(a);
+        out.raw("__sveltets_2_ensureAnimation(").copy(at, at + a.name.length);
+        out.raw(
+          `(svelteHTML.mapElementTag(${tag}),__sveltets_2_AnimationMove,`,
+        );
+        if (a.expression) out.copy(a.expression.start, a.expression.end);
+        else out.raw("{}");
+        out.raw("));");
       } else if (a.type === "TransitionDirective") {
         const at = nameAt(a);
         out.raw("__sveltets_2_ensureTransition(").copy(at, at + a.name.length);
@@ -589,7 +652,12 @@ export function emit(
           nameAttr ? textOf(nameAttr) : "default",
           node.attributes ?? [],
         );
-        out.raw("({");
+        // With `$$Slots`, the slot's props are checked against it.
+        out.raw(
+          typed.has("$$Slots")
+            ? `__sveltets_createSlot(${JSON.stringify(nameAttr ? textOf(nameAttr) : "default")}, {`
+            : "({",
+        );
         for (const a of node.attributes ?? [])
           if (a.type === "Attribute" && a.name !== "name") {
             key(a, a.name);
@@ -708,8 +776,12 @@ export function emit(
   };
   const entries = (pairs: [string, string][]) =>
     pairs.map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
+  // `$$Props` is the props' type, once it agrees with the `export let`s.
+  const propsType = typed.has("$$Props")
+    ? `{ ...__sveltets_2_ensureRightProps<{${props.map((p) => `${JSON.stringify(p.name)}${p.optional ? "?" : ""}: ${p.type ?? `typeof ${p.local}`}`).join(", ")}}>(__sveltets_2_any("") as $$Props) } as $$Props`
+    : `{${entries(props.map((p) => [p.name, p.local]))}}`;
   out.raw(
-    `return { props: {${entries(props.map((p) => [p.name, p.local]))}}, exports: {${entries([...(accessors ? props.map((p): [string, string] => [p.name, p.local]) : []), ...exportsOf.map((e): [string, string] => [e, e])])}}, bindings: "", slots: {`,
+    `return { props: ${propsType}, exports: {${entries([...(accessors ? props.map((p): [string, string] => [p.name, p.local]) : []), ...exportsOf.map((e): [string, string] => [e, e])])}}, bindings: "", slots: ${typed.has("$$Slots") ? "{} as unknown as $$Slots, __slots: {" : "{"}`,
   );
   // A slot's props, as `let:` reads them; `any` for a value the markup scopes.
   for (const [name, attributes] of slots) {
@@ -743,16 +815,26 @@ export function emit(
         .slice(dispatcher.callee.end, dispatcher.end)
         .replace(CALL_PARENS, "")
     : "";
-  out.raw(
-    `}, events: {${typings.startsWith("<") ? `...__sveltets_2_toEventTypings${typings}(), ` : ""}${entries([...forwarded])}} };\n}\n`,
-  );
+  const eventsType = typed.has("$$Events")
+    ? "{} as unknown as $$Events"
+    : `{${typings.startsWith("<") ? `...__sveltets_2_toEventTypings${typings}(), ` : ""}${entries([...forwarded])}}`;
+  out.raw(`}, events: ${eventsType} };\n}\n`);
   const optional = props
     .filter((p) => p.optional)
     .map((p) => JSON.stringify(p.name));
   // `$$restProps` or `$$props` lets a parent pass any prop.
   const anyProp = USES_ALL_PROPS.test(source);
+  // Undeclared events are any `CustomEvent`, unless they're strict.
+  const rendered = strictEvents
+    ? "$$render()"
+    : "__sveltets_2_with_any_event($$render())";
+  // `$$Props` says which props are optional.
+  const withProps = typed.has("$$Props")
+    ? rendered
+    : `__sveltets_2_partial${anyProp ? "_with_any" : ""}(${optional.length > 0 ? `[${optional.join(",")}], ` : ""}${rendered})`;
+  const hasSlots = slots.size > 0 || typed.has("$$Slots");
   out.raw(
-    `const $$Component = ${svelte < 4 ? "__sveltets_2_svelte3_component" : `__sveltets_2_isomorphic_component${slots.size > 0 ? "_slots" : ""}`}(__sveltets_2_partial${anyProp ? "_with_any" : ""}(${optional.length > 0 ? `[${optional.join(",")}], ` : ""}__sveltets_2_with_any_event($$render())));\n`,
+    `const $$Component = ${svelte < 4 ? "__sveltets_2_svelte3_component" : `__sveltets_2_isomorphic_component${hasSlots ? "_slots" : ""}`}(${withProps});\n`,
   );
   if (isTs) out.raw("type $$Component = InstanceType<typeof $$Component>;\n");
   else
