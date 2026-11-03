@@ -1,0 +1,250 @@
+import { existsSync, readFileSync } from "node:fs";
+import { createRequire } from "node:module";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { glob, matcher } from "./glob.ts";
+
+const LINE_COMMENT = /\/\/[^\n]*/g;
+const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
+const TRAILING_COMMA = /,(\s*[}\]])/g;
+const STRING = /"(?:[^"\\]|\\.)*"/g;
+const PLACEHOLDER = /"\0(\d+)"/g;
+const WILDCARD = /[*?{]/;
+const HAS_EXTENSION = /\.[^/]+$/;
+const NODE_MODULES_JS = /\/node_modules\/.+\.[cm]?js$/;
+const DEFAULT_EXCLUDE = ["node_modules", "bower_components", "jspm_packages"];
+
+/** A tsconfig's JSON, comments and trailing commas allowed. */
+function parseJsonc(text: string): unknown {
+  const strings: string[] = [];
+  const stripped = text
+    .replace(STRING, (s) => `"\0${strings.push(s) - 1}"`)
+    .replace(LINE_COMMENT, "")
+    .replace(BLOCK_COMMENT, "")
+    .replace(TRAILING_COMMA, "$1")
+    .replaceAll(PLACEHOLDER, (_, i: string) => strings[Number(i)] ?? "");
+  return JSON.parse(stripped);
+}
+
+interface RawConfig {
+  extends?: string | string[];
+  include?: string[];
+  exclude?: string[];
+  files?: string[];
+  compilerOptions?: { rootDirs?: string[] };
+}
+
+/** `include`, `exclude`, `files` and `rootDirs` as absolute paths, `extends` applied. */
+interface Inputs {
+  include?: string[];
+  exclude?: string[];
+  files?: string[];
+  rootDirs?: string[];
+}
+
+function readInputs(path: string): Inputs {
+  const config = parseJsonc(readFileSync(path, "utf-8")) as RawConfig;
+  const dir = dirname(path);
+  const absolute = (list: string[] | undefined) =>
+    list?.map((p) => resolve(dir, p));
+  let inputs: Inputs = {};
+  const bases =
+    typeof config.extends === "string" ? [config.extends] : config.extends;
+  for (const base of bases ?? []) {
+    const basePath = base.startsWith(".")
+      ? resolve(dir, base)
+      : createRequire(path).resolve(base);
+    inputs = { ...inputs, ...defined(readInputs(basePath)) };
+  }
+  return {
+    ...inputs,
+    ...defined({
+      include: absolute(config.include),
+      exclude: absolute(config.exclude),
+      files: absolute(config.files),
+      rootDirs: absolute(config.compilerOptions?.rootDirs),
+    }),
+  };
+}
+
+function defined(inputs: Inputs): Inputs {
+  return Object.fromEntries(
+    Object.entries(inputs).filter(([, value]) => value !== undefined),
+  );
+}
+
+function findUp(from: string, name: string): string | undefined {
+  for (let dir = from; ; dir = dirname(dir)) {
+    const path = join(dir, name);
+    if (existsSync(path)) return path;
+    if (dirname(dir) === dir) return;
+  }
+}
+
+/** The nearer of tsconfig.json and jsconfig.json, from `dir` up, as svelte-check picks. */
+function findTsconfig(dir: string): string | undefined {
+  const ts = findUp(dir, "tsconfig.json");
+  const js = findUp(dir, "jsconfig.json");
+  return ts && (!js || ts.length >= js.length) ? ts : js;
+}
+
+const toPosix = (path: string) => path.split(sep).join("/");
+
+/** Splits an absolute glob into the folder before its first wildcard and the rest. */
+function splitGlob(pattern: string): [base: string, rest: string] {
+  const parts = toPosix(pattern).split("/");
+  const at = parts.findIndex((part) => WILDCARD.test(part));
+  if (at === -1) return [pattern, ""];
+  return [parts.slice(0, at).join("/") || "/", parts.slice(at).join("/")];
+}
+
+/** A tsconfig `include` entry as a glob for `.svelte` files, as svelte-check reads it. */
+function svelteGlobOf(pattern: string): string | undefined {
+  if (pattern.endsWith(".svelte")) return pattern;
+  if (WILDCARD.test(pattern))
+    return pattern.endsWith("*")
+      ? `${pattern.slice(0, -1)}*.svelte`
+      : undefined;
+  // A folder, or a file that isn't a component.
+  return HAS_EXTENSION.test(pattern) ? undefined : `${pattern}/**/*.svelte`;
+}
+
+/** A matcher for absolute paths, from absolute tsconfig-style patterns. */
+function absoluteMatcher(patterns: string[]): (path: string) => boolean {
+  const globs = patterns.flatMap((p) => {
+    const posix = toPosix(p);
+    return WILDCARD.test(posix) ? [posix] : [posix, `${posix}/**`];
+  });
+  const matches = matcher(globs.map((g) => g.replace(/^\//, "")));
+  return (path) => matches(toPosix(path).replace(/^\//, ""));
+}
+
+/** What a run checks and reports, by svelte-check's rules. */
+export interface Project {
+  /** The tsconfig, or `undefined` for none. */
+  tsconfig?: string;
+  /** The components to check, as absolute paths. */
+  components: string[];
+  /** The tsconfig's `include` and `exclude`, as absolute patterns. */
+  include: string[];
+  exclude: string[];
+  /** The tsconfig's `rootDirs`, as absolute paths. */
+  rootDirs: string[];
+  /** Whether a TS or JS file's errors are reported. */
+  reports(path: string): boolean;
+}
+
+export interface ProjectOptions {
+  workspace: string;
+  /** A path relative to the workspace, `false` for none, or found from the workspace up. */
+  tsconfig?: string | false;
+  /** With no tsconfig: folders and files to skip, relative to the workspace. */
+  ignore?: string[];
+  /** Globs of components relative to the workspace, instead of the tsconfig's. */
+  components?: string[];
+}
+
+/**
+ * The files to check. With a tsconfig (given, or the nearest from the
+ * workspace up), the components it includes, and its TS and JS files'
+ * errors reported too. With none, every component under the workspace but
+ * `ignore`, and only theirs.
+ */
+export function projectOf(options: ProjectOptions): Project {
+  const { workspace } = options;
+  const tsconfig = tsconfigOf(workspace, options.tsconfig);
+  if (options.tsconfig && tsconfig && !existsSync(tsconfig))
+    throw new Error(`Could not find tsconfig/jsconfig file at ${tsconfig}`);
+
+  if (!tsconfig) {
+    const isIgnored = ignoreMatcher(options.ignore ?? []);
+    const components = glob(workspace, options.components ?? ["**/*.svelte"])
+      .filter((rel) => !isIgnored(rel))
+      .map((rel) => join(workspace, rel));
+    return {
+      components,
+      include: [],
+      exclude: [],
+      rootDirs: [],
+      reports: () => false,
+    };
+  }
+
+  const inputs = readInputs(tsconfig);
+  const include =
+    inputs.include ?? (inputs.files ? [] : [join(dirname(tsconfig), "**/*")]);
+  const exclude =
+    inputs.exclude ?? DEFAULT_EXCLUDE.map((p) => join(dirname(tsconfig), p));
+  const files = new Set(inputs.files ?? []);
+  const isExcluded = absoluteMatcher(exclude);
+
+  let components: string[];
+  if (options.components)
+    components = glob(workspace, options.components).map((rel) =>
+      join(workspace, rel),
+    );
+  else {
+    const found = new Set<string>(
+      [...files].filter((f) => f.endsWith(".svelte")),
+    );
+    for (const pattern of include) {
+      const svelteGlob = svelteGlobOf(pattern);
+      if (!svelteGlob) continue;
+      const [base, rest] = splitGlob(svelteGlob);
+      if (!rest) {
+        if (existsSync(base)) found.add(base);
+        continue;
+      }
+      if (!existsSync(base)) continue;
+      for (const rel of glob(base, [rest])) found.add(join(base, rel));
+    }
+    components = [...found].sort();
+  }
+  components = components.filter((path) => !isExcluded(path));
+
+  return {
+    tsconfig,
+    components,
+    include,
+    exclude,
+    rootDirs: inputs.rootDirs ?? [],
+    // As svelte-check: every file in the program, but JS in node_modules.
+    reports: (path) => !NODE_MODULES_JS.test(toPosix(path)),
+  };
+}
+
+/** A path relative to `from`, `./`-prefixed when it doesn't climb, for tsconfig fields. */
+export function relativeTo(from: string, path: string): string {
+  const rel = toPosix(relative(from, path));
+  return rel.startsWith(".") || isAbsolute(rel) ? rel : `./${rel}`;
+}
+
+/**
+ * svelte-check's `--ignore`: a path prefix relative to the workspace, or
+ * `**` at the start (anywhere in the path) or end (a prefix); no other `*`.
+ */
+function ignoreMatcher(patterns: string[]): (path: string) => boolean {
+  const tests = patterns.map((raw) => {
+    let pattern = raw.trim();
+    if (pattern.endsWith("**")) pattern = pattern.slice(0, -2);
+    if (pattern.startsWith("**")) {
+      const rest = pattern.slice(2);
+      if (rest.includes("*")) throw new Error(INVALID_IGNORE);
+      return (path: string) => path.includes(rest);
+    }
+    if (pattern.includes("*")) throw new Error(INVALID_IGNORE);
+    return (path: string) => path.startsWith(pattern);
+  });
+  return (path) => tests.some((test) => test(path));
+}
+
+const INVALID_IGNORE =
+  "Invalid --ignore pattern: only ** at the start or end is supported";
+
+function tsconfigOf(
+  workspace: string,
+  option: string | false | undefined,
+): string | undefined {
+  if (option === false) return;
+  if (option) return resolve(workspace, option);
+  return findTsconfig(workspace);
+}

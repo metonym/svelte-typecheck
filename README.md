@@ -38,22 +38,43 @@ Measured on carbon-components-svelte, where it replaced svelte-check:
 
 ## Usage
 
-```sh
-svelte-typecheck [options]
+A drop-in replacement for svelte-check: the same options, the same output in all four formats, the same exit codes.
+
+```diff
+- "check": "svelte-check --tsconfig ./tsconfig.json"
++ "check": "svelte-typecheck --tsconfig ./tsconfig.json"
 ```
 
-| Option                | Default                                                              |                                                                                                 |
-| :-------------------- | :------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
-| `--workspace <dir>`   | `.`                                                                  | Folder whose components to check                                                                |
-| `--tsconfig <path>`   | `<workspace>/tsconfig.json`                                          | The tsconfig the generated one extends                                                          |
-| `--checker <name>`    | your `typescript`, else the first installed of `tsgo`, `tsrs`, `bun` | Type checker to run                                                                             |
-| `--components <glob>` | `**/*.svelte`                                                        | Components to check, relative to the workspace; repeatable                                      |
-| `--out-dir <dir>`     | `node_modules/.cache/svelte-typecheck/<workspace>`                   | Where the generated code goes                                                                   |
-| `--no-declarations`   |                                                                      | Resolve component imports to their own `.svelte.d.ts`, as a library's generated declarations do |
-| `--svelte <dir>`      | `svelte`, resolved                                                   | The Svelte install to check against, e.g. a Svelte 4 test harness's                             |
-| `--output <format>`   | `human`                                                              | `machine` prints `ERROR "file" line:col "message" TSxxxx`                                       |
+| svelte-check's options        |                                                                                                                                                                                |
+| :---------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--workspace <dir>`           | Project folder (default: the current one)                                                                                                                                      |
+| `--output <format>`           | `human`, `human-verbose` (default), `machine` or `machine-verbose`                                                                                                             |
+| `--tsconfig <path>`           | tsconfig or jsconfig, relative to the workspace (default: the nearest from the workspace up). The components it includes are checked, and its TS and JS files' errors reported |
+| `--no-tsconfig`               | Check every component under the workspace, and no TS or JS files                                                                                                               |
+| `--ignore <list>`             | With `--no-tsconfig`: paths to skip, comma-separated                                                                                                                           |
+| `--config <path>`             | The svelte.config to read preprocessors from                                                                                                                                   |
+| `--diagnostic-sources <list>` | `js`, `svelte` and `css`, comma-separated (default: all)                                                                                                                       |
+| `--threshold error`           | Print errors only                                                                                                                                                              |
+| `--compiler-warnings <list>`  | `code:ignore` or `code:error`, comma-separated                                                                                                                                 |
+| `--fail-on-warnings`          | Exit 1 on a warning too                                                                                                                                                        |
+| `--color`, `--no-color`       | Force color on or off                                                                                                                                                          |
+| `--tsgo`                      | Check with tsgo                                                                                                                                                                |
 
-It exits 1 on a type error and 2 on a usage error, or if the generated code doesn't parse (a svelte-typecheck bug, never a silent pass).
+| Its own               |                                                                                                 |
+| :-------------------- | :---------------------------------------------------------------------------------------------- |
+| `--checker <name>`    | `tsc` (default: your `typescript`), `tsgo`, `tsrs` or `bun`                                     |
+| `--components <glob>` | Components to check, relative to the workspace, instead of the tsconfig's; repeatable           |
+| `--out-dir <dir>`     | Where the generated code goes (default: `node_modules/.cache/svelte-typecheck/<workspace>`)     |
+| `--no-declarations`   | Resolve component imports to their own `.svelte.d.ts`, as a library's generated declarations do |
+| `--svelte <dir>`      | The Svelte install to check against, e.g. a Svelte 4 test harness's                             |
+
+### Differences from svelte-check
+
+- **CSS diagnostics** (`--diagnostic-sources css`): accepted, but nothing is reported. svelte-check runs a CSS language service on `<style>`, a dependency this package leaves out; Svelte's compiler still reports invalid CSS.
+- **Preprocessors** come from `svelte.config.{js,mjs,cjs}`, not a `vite.config`, which would need Vite.
+- **`COMPLETED <n> FILES`** counts components, not every file in TypeScript's program.
+- **`--diagnostic-sources svelte`** with a tsconfig reports no type errors, as svelte-check's docs say; svelte-check itself reports them.
+- **`--incremental`** and **`--tsgo-experimental-api`** are accepted and do nothing: every run is fast.
 
 ### API
 

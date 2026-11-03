@@ -1,8 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
-import { createRequire } from "node:module";
-import { dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
 import {
@@ -11,8 +10,8 @@ import {
   svelteDirOf,
 } from "./compiler.ts";
 import { emit } from "./emit.ts";
-import { glob, matcher } from "./glob.ts";
 import { createLocator, type Output } from "./output.ts";
+import { projectOf, relativeTo } from "./project.ts";
 import type { Diagnostic, TypecheckOptions, TypecheckResult } from "./types.ts";
 
 /** `path(line,col): error TSxxxx: message`, as tsc, tsgo, tsrs and `bun check` print. */
@@ -22,41 +21,26 @@ const JS_FILE = /\.[cm]?jsx?$/;
 /** Errors that stop a checker before it type-checks anything. */
 const SYNTAX_CODE = /^TS[18]\d{3}$/;
 const STOPPED = /Stopped before type checking/;
-const LINE_COMMENT = /\/\/[^\n]*/g;
-const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
-const TRAILING_COMMA = /,(\s*[}\]])/g;
-const STRING = /"(?:[^"\\]|\\.)*"/g;
+/** What an error's range covers past its start: an identifier, number or string. */
+const TOKEN = /^(?:[\w$]+|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`]*`)/;
 
 const SHIMS = fileURLToPath(new URL("./shims/", import.meta.url));
 
+/** svelte-check's compiler options with no tsconfig. */
+const DEFAULT_COMPILER_OPTIONS = {
+  allowJs: true,
+  noEmit: true,
+  declaration: false,
+  skipLibCheck: true,
+  maxNodeModuleJsDepth: 2,
+  allowSyntheticDefaultImports: true,
+  target: "esnext",
+  module: "esnext",
+  moduleResolution: "bundler",
+};
+
 /** Thrown when generated code doesn't parse: an emitter bug, not a type error. */
 export class EmitError extends Error {}
-
-/** A tsconfig's JSON, comments and trailing commas allowed. */
-function parseJsonc(text: string): unknown {
-  const strings: string[] = [];
-  const stripped = text
-    .replace(STRING, (s) => `"\0${strings.push(s) - 1}"`)
-    .replace(LINE_COMMENT, "")
-    .replace(BLOCK_COMMENT, "")
-    .replace(TRAILING_COMMA, "$1")
-    .replaceAll(/"\0(\d+)"/g, (_, i: string) => strings[Number(i)] ?? "");
-  return JSON.parse(stripped);
-}
-
-/** The `exclude` a tsconfig ends up with: the nearest one in its `extends` chain. */
-function excludeOf(path: string): { exclude: string[]; from: string } {
-  const config = parseJsonc(readFileSync(path, "utf-8")) as {
-    extends?: string;
-    exclude?: string[];
-  };
-  if (config.exclude) return { exclude: config.exclude, from: dirname(path) };
-  if (!config.extends) return { exclude: [], from: dirname(path) };
-  const base = config.extends.startsWith(".")
-    ? resolve(dirname(path), config.extends)
-    : createRequire(path).resolve(config.extends);
-  return excludeOf(base);
-}
 
 function run(command: string, args: string[], cwd: string): Promise<string> {
   return new Promise((done, fail) => {
@@ -73,24 +57,29 @@ function run(command: string, args: string[], cwd: string): Promise<string> {
   });
 }
 
+interface RawDiagnostic {
+  file: string;
+  line: number;
+  column: number;
+  code: string;
+  message: string;
+}
+
 /** Errors as the checker prints them, multi-line messages joined. */
-function parseDiagnostics(text: string): Diagnostic[] {
-  const found: Diagnostic[] = [];
+function parseDiagnostics(text: string): RawDiagnostic[] {
+  const found: RawDiagnostic[] = [];
   let continues = false;
   for (const line of text.split("\n")) {
     const m = DIAGNOSTIC.exec(line);
-    if (m) {
-      const file = m[1] ?? "";
+    if (m)
       found.push({
-        file,
+        file: m[1] ?? "",
         line: Number(m[2]),
         column: Number(m[3]),
-        severity: "error",
-        source: JS_FILE.test(file) ? "js" : "ts",
         code: m[4] ?? "",
         message: m[5] ?? "",
       });
-    } else if (continues && CONTINUATION.test(line)) {
+    else if (continues && CONTINUATION.test(line)) {
       const last = found.at(-1);
       if (last) last.message += `\n${line}`;
     }
@@ -100,21 +89,35 @@ function parseDiagnostics(text: string): Diagnostic[] {
   return found;
 }
 
+/** The deepest folder that holds every path. */
+function commonDir(paths: string[]): string {
+  let common = dirname(paths[0] ?? sep);
+  for (const path of paths)
+    while (!`${path}${sep}`.startsWith(`${common}${sep}`) && common !== sep)
+      common = dirname(common);
+  return common;
+}
+
 /**
- * Type-checks a workspace's Svelte components: each one becomes TypeScript
- * (or JS with JSDoc) under `outDir`, next to a tsconfig that extends the
- * workspace's, a checker runs on it, and each error maps back to its
- * `.svelte` line. Errors in generated code are dropped.
+ * Type-checks Svelte components, as svelte-check does: with a tsconfig
+ * (given, or the nearest from the workspace up), the components it
+ * includes, and its TS and JS files' errors too; with none, every component
+ * under the workspace. Each component becomes TypeScript under `outDir`,
+ * next to a tsconfig that extends the project's, a checker runs on it, and
+ * each error maps back to its `.svelte` line. Errors in generated code are
+ * dropped. Svelte's compiler reports its warnings in the same pass.
  */
 export async function typecheck(
   options: TypecheckOptions = {},
 ): Promise<TypecheckResult> {
   const cwd = resolve(options.cwd ?? process.cwd());
   const workspace = resolve(cwd, options.workspace ?? ".");
-  const baseConfig = resolve(
-    cwd,
-    options.tsconfig ?? join(workspace, "tsconfig.json"),
-  );
+  const project = projectOf({
+    workspace,
+    tsconfig: options.tsconfig,
+    ignore: options.ignore,
+    components: options.components,
+  });
   const outDir = resolve(
     cwd,
     options.outDir ??
@@ -144,20 +147,13 @@ export async function typecheck(
       `No type checker found: install \`typescript\` (or one of ${CHECKERS.slice(1).join(", ")}), or name one with \`checker\`.`,
     );
 
-  const base = excludeOf(baseConfig);
-  const excluded = base.exclude
-    .map((pattern) => relative(workspace, resolve(base.from, pattern)))
-    .filter((pattern) => !pattern.startsWith(".."));
-
   const started = performance.now();
   await rm(outDir, { recursive: true, force: true });
-  const isExcluded = matcher(excluded);
-  const files = glob(workspace, options.components ?? ["**/*.svelte"]).filter(
-    (rel) => !isExcluded(rel),
-  );
-  const texts = await Promise.all(
-    files.map((rel) => readFile(join(workspace, rel), "utf-8")),
-  );
+  const files = project.components;
+  const texts = await Promise.all(files.map((path) => readFile(path, "utf-8")));
+  // Generated code mirrors the sources under one root, so `rootDirs` maps
+  // a relative import between them.
+  const root = commonDir([workspace, ...files]);
 
   const outputs = new Map<
     string,
@@ -171,31 +167,26 @@ export async function typecheck(
       ),
     );
   const failed: TypecheckResult["failed"] = [];
-  for (const [i, rel] of files.entries()) {
-    const path = join(workspace, rel);
-    const genFrom = join(genDir, dirname(rel));
+  for (const [i, path] of files.entries()) {
+    const genFrom = join(genDir, relative(root, dirname(path)));
     let result: ReturnType<typeof emit>;
     try {
       result = emit(texts[i] ?? "", {
         svelte: svelteMajor,
-        // A relative import that leaves the workspace is relative to the
+        // A relative import that leaves the root is relative to the
         // generated file's folder instead.
         rewriteImport(specifier) {
           if (!specifier.startsWith(".")) return;
           const target = resolve(dirname(path), specifier);
-          if (target.startsWith(`${workspace}/`)) return;
-          const next = relative(genFrom, target);
-          return next.startsWith(".") ? next : `./${next}`;
+          if (target.startsWith(`${root}${sep}`)) return;
+          return relativeTo(genFrom, target);
         },
       });
     } catch (error) {
-      failed.push({
-        file: relative(cwd, path),
-        message: (error as Error).message,
-      });
+      failed.push({ file: path, message: (error as Error).message });
       continue;
     }
-    const name = rel.slice(rel.lastIndexOf("/") + 1, -".svelte".length);
+    const name = path.slice(path.lastIndexOf(sep) + 1, -".svelte".length);
     const genPath = join(
       genFrom,
       `++${name}.svelte.${result.isTs ? "ts" : "js"}`,
@@ -215,28 +206,26 @@ export async function typecheck(
   }
 
   const tsconfig = join(outDir, "tsconfig.json");
-  const workspaceRel = relative(outDir, workspace);
+  const rel = (path: string) => relativeTo(outDir, path);
   write(
     tsconfig,
     JSON.stringify(
       {
-        extends: relative(outDir, baseConfig),
+        ...(project.tsconfig ? { extends: rel(project.tsconfig) } : {}),
         compilerOptions: {
-          rootDirs: [workspaceRel, "svelte"],
+          ...(project.tsconfig ? {} : DEFAULT_COMPILER_OPTIONS),
+          rootDirs: [rel(root), "svelte"],
           allowArbitraryExtensions: true,
           noEmit: true,
         },
         // Listed rather than globbed: `include` skips dot folders and
         // `node_modules`, where the generated code lives by default.
         files: [join(SHIMS, "shims.d.ts"), svelteHtml, ...outputs.keys()].map(
-          (path) => relative(outDir, path),
+          rel,
         ),
-        // The workspace's own TypeScript, which can import components.
-        include: declarations ? [workspaceRel] : [],
-        exclude: [
-          `${workspaceRel}/**/node_modules`,
-          ...excluded.map((pattern) => join(workspaceRel, pattern)),
-        ],
+        // The project's own TypeScript, which can import components.
+        include: declarations ? project.include.map(rel) : [],
+        exclude: project.exclude.map(rel),
       },
       null,
       2,
@@ -255,35 +244,42 @@ export async function typecheck(
     : Promise.resolve({ output: "", at: emitted });
   const compiled: Diagnostic[] = [];
   const preprocessors = sources.has("svelte")
-    ? await preprocessorsOf(workspace)
+    ? await preprocessorsOf(
+        options.config
+          ? dirname(resolve(workspace, options.config))
+          : workspace,
+        options.config ? resolve(workspace, options.config) : undefined,
+      )
     : undefined;
   const perFile = sources.has("svelte")
     ? await Promise.all(
-        files.map((rel, i) =>
+        files.map((path, i) =>
           preprocessedDiagnostics(
             texts[i] ?? "",
-            relative(cwd, join(workspace, rel)),
+            relative(cwd, path),
             svelteDir,
             preprocessors,
           ),
         ),
       )
     : [];
-  for (const [i, rel] of files.entries()) {
-    const file = relative(cwd, join(workspace, rel));
+  for (const [i, path] of files.entries())
     for (const d of perFile[i] ?? []) {
       const level = options.compilerWarnings?.[d.code];
       if (d.severity === "warning" && level === "ignore") continue;
-      const severity = level === "error" ? "error" : d.severity;
-      compiled.push({ file, ...d, severity, source: "svelte" });
+      compiled.push({
+        file: path,
+        ...d,
+        severity: level === "error" ? "error" : d.severity,
+        source: "svelte",
+      });
     }
-  }
   const compiledAt = performance.now();
   const { output: text, at: checked } = await checking;
 
   const raw = parseDiagnostics(text);
   const inOutput = (file: string) =>
-    resolve(cwd, file).startsWith(`${outDir}/`);
+    resolve(cwd, file).startsWith(`${outDir}${sep}`);
   // A syntax error in generated code stops the checker before it
   // type-checks anything, so it must fail the run, not pass it.
   const syntax = raw.filter(
@@ -298,13 +294,19 @@ export async function typecheck(
     );
 
   const locators = new Map<string, ReturnType<typeof createLocator>>();
-  const locator = (key: string, content: string) => {
+  const locator = (key: string, content: () => string) => {
     let found = locators.get(key);
     if (!found) {
-      found = createLocator(content);
+      found = createLocator(content());
       locators.set(key, found);
     }
     return found;
+  };
+  /** The end of the token an error starts at, as the editor underlines it. */
+  const endOf = (source: string, offset: number, file: string) => {
+    const length = TOKEN.exec(source.slice(offset))?.[0].length ?? 0;
+    const end = locator(file, () => source).position(offset + length);
+    return { endLine: end.line, endColumn: end.column };
   };
   const diagnostics: Diagnostic[] = [];
   const dropped: Diagnostic[] = [];
@@ -314,41 +316,62 @@ export async function typecheck(
     const gen = outputs.get(abs);
     let mapped: Diagnostic;
     if (gen) {
-      const offset = locator(abs, gen.output.code).offset(d.line, d.column);
+      const offset = locator(abs, () => gen.output.code).offset(
+        d.line,
+        d.column,
+      );
       const source = gen.output.toSource(offset);
       if (source === null) {
-        dropped.push(d);
+        dropped.push({ ...d, file: abs, severity: "error", source: "ts" });
         continue;
       }
-      const { line, column } = locator(gen.svelte, gen.source).position(source);
+      const start = locator(gen.svelte, () => gen.source).position(source);
       mapped = {
         ...d,
-        file: relative(cwd, gen.svelte),
-        line,
-        column,
+        file: gen.svelte,
+        line: start.line,
+        column: start.column,
+        ...endOf(gen.source, source, gen.svelte),
+        severity: "error",
         source: gen.isTs ? "ts" : "js",
       };
-    } else if (inOutput(d.file)) {
-      dropped.push(d);
+    } else if (inOutput(d.file) || !project.reports(abs)) {
+      if (inOutput(d.file))
+        dropped.push({ ...d, file: abs, severity: "error", source: "ts" });
       continue;
-    } else mapped = { ...d, file: relative(cwd, abs) };
+    } else {
+      const content = readFileSync(abs, "utf-8");
+      const offset = locator(abs, () => content).offset(d.line, d.column);
+      mapped = {
+        ...d,
+        file: abs,
+        ...endOf(content, offset, abs),
+        severity: "error",
+        source: JS_FILE.test(abs) ? "js" : "ts",
+      };
+    }
     const key = `${mapped.file}:${mapped.line}:${mapped.column}:${mapped.code}`;
     if (seen.has(key)) continue;
     seen.add(key);
     diagnostics.push(mapped);
   }
   diagnostics.push(...compiled);
-  if (errorsOnly) {
-    const kept = diagnostics.filter((d) => d.severity === "error");
-    diagnostics.length = 0;
-    diagnostics.push(...kept);
-  }
-  diagnostics.sort(
+  const reported = errorsOnly
+    ? diagnostics.filter((d) => d.severity === "error")
+    : diagnostics;
+  // Components first, then TS and JS files, as svelte-check lists them.
+  const isComponent = (d: Diagnostic) => (d.file.endsWith(".svelte") ? 0 : 1);
+  reported.sort(
     (a, b) =>
-      a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column,
+      isComponent(a) - isComponent(b) ||
+      a.file.localeCompare(b.file) ||
+      a.line - b.line ||
+      a.column - b.column,
   );
   return {
-    diagnostics,
+    diagnostics: reported,
+    workspace,
+    tsconfig: project.tsconfig,
     components: outputs.size,
     dropped,
     failed,
