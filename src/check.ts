@@ -5,7 +5,11 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
-import { compilerDiagnostics, svelteDirOf } from "./compiler.ts";
+import {
+  preprocessedDiagnostics,
+  preprocessorsOf,
+  svelteDirOf,
+} from "./compiler.ts";
 import { emit } from "./emit.ts";
 import { glob, matcher } from "./glob.ts";
 import { createLocator, type Output } from "./output.ts";
@@ -250,19 +254,30 @@ export async function typecheck(
       ).then((output) => ({ output, at: performance.now() }))
     : Promise.resolve({ output: "", at: emitted });
   const compiled: Diagnostic[] = [];
-  if (sources.has("svelte"))
-    for (const [i, rel] of files.entries()) {
-      const file = relative(cwd, join(workspace, rel));
-      for (const d of compilerDiagnostics(texts[i] ?? "", file, {
-        cwd,
-        svelte: svelteDir,
-      })) {
-        const level = options.compilerWarnings?.[d.code];
-        if (d.severity === "warning" && level === "ignore") continue;
-        const severity = level === "error" ? "error" : d.severity;
-        compiled.push({ file, ...d, severity, source: "svelte" });
-      }
+  const preprocessors = sources.has("svelte")
+    ? await preprocessorsOf(workspace)
+    : undefined;
+  const perFile = sources.has("svelte")
+    ? await Promise.all(
+        files.map((rel, i) =>
+          preprocessedDiagnostics(
+            texts[i] ?? "",
+            relative(cwd, join(workspace, rel)),
+            svelteDir,
+            preprocessors,
+          ),
+        ),
+      )
+    : [];
+  for (const [i, rel] of files.entries()) {
+    const file = relative(cwd, join(workspace, rel));
+    for (const d of perFile[i] ?? []) {
+      const level = options.compilerWarnings?.[d.code];
+      if (d.severity === "warning" && level === "ignore") continue;
+      const severity = level === "error" ? "error" : d.severity;
+      compiled.push({ file, ...d, severity, source: "svelte" });
     }
+  }
   const compiledAt = performance.now();
   const { output: text, at: checked } = await checking;
 

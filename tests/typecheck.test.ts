@@ -100,4 +100,17 @@ describe("typecheck", () => {
       expect(diagnostics.map((d) => d.code)).toContain(code);
     });
   });
+
+  it("runs svelte.config's preprocessors first, positions mapped back", async () => {
+    const { diagnostics } = await typecheck({
+      cwd: root,
+      workspace: "tests/fixtures-preprocess",
+      outDir: "node_modules/.cache/svelte-typecheck/test-preprocess",
+    });
+    // Where svelte-check reports it; the stripped block moved it up 5 lines,
+    // and `#!custom` would be a CSS error without the style preprocessor.
+    expect(
+      diagnostics.map((d) => `${d.line}:${d.column} ${d.severity} ${d.code}`),
+    ).toEqual(["10:1 warning a11y_missing_attribute"]);
+  }, 30_000);
 });

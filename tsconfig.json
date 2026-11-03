@@ -17,5 +17,5 @@
     "types": ["bun-types", "bun-types/test-globals"]
   },
   "include": ["bench", "scripts", "src", "tests", "ostia.config.ts"],
-  "exclude": ["tests/fixtures", "src/shims", "bench/corpus"]
+  "exclude": ["tests/fixtures*", "src/shims", "bench/corpus"]
 }
