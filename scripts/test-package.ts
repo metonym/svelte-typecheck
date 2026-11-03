@@ -18,7 +18,7 @@ const root = resolve(import.meta.dir, "..");
 const dist = join(root, "dist");
 const dir = mkdtempSync(join(tmpdir(), "svelte-typecheck-package-"));
 const ALLOWED = /^(node:|\.\/|svelte\/compiler$)/;
-const MACHINE_ERROR = /^ERROR "(.+)" (\d+:\d+) .* (TS\d+)$/gm;
+const MACHINE_ERROR = /^\d+ ERROR "(.+)" (\d+:\d+) /gm;
 
 function run(command: string, args: string[], cwd: string) {
   return spawnSync(command, args, { cwd, encoding: "utf-8" });
@@ -139,16 +139,18 @@ try {
       ["bun", "tsrs", "tsgo"].every((name) => !existsSync(join(entry, name))),
     )
     .join(delimiter);
-  const nodeOnly = spawnSync(process.env.NODE ?? "node", [bin], {
-    cwd: project,
-    encoding: "utf-8",
-    env: { ...process.env, PATH: noBun },
-  });
+  const nodeOnly = spawnSync(
+    process.env.NODE ?? "node",
+    [
+      "--input-type=module",
+      "-e",
+      'const { typecheck } = await import("svelte-typecheck"); console.log((await typecheck()).checker);',
+    ],
+    { cwd: project, encoding: "utf-8", env: { ...process.env, PATH: noBun } },
+  );
   assert(
-    nodeOnly.status === 1 &&
-      nodeOnly.stderr.includes(" errors, ") &&
-      nodeOnly.stderr.includes(" tsc "),
-    `node without Bun: exit ${nodeOnly.status}\n${nodeOnly.stdout}${nodeOnly.stderr}`,
+    nodeOnly.stdout.trim() === "tsc",
+    `node without Bun picked ${nodeOnly.stdout}${nodeOnly.stderr}`,
   );
 
   write(project, {

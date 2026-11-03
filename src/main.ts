@@ -1,43 +1,63 @@
 import { parseArgs } from "node:util";
 import { EmitError, typecheck } from "./check.ts";
+import {
+  colors,
+  OUTPUT_FORMATS,
+  type OutputFormat,
+  summarize,
+  writer,
+} from "./format.ts";
 import type { Checker, DiagnosticSource } from "./types.ts";
 
 const HELP = `Usage: svelte-typecheck [options]
 
-Type-checks the Svelte components in a workspace.
+Type-checks Svelte components, as svelte-check does.
 
-Options:
-  --workspace <dir>     Folder whose components to check (default: .)
-  --tsconfig <path>     tsconfig to extend (default: <workspace>/tsconfig.json)
-  --checker <name>      tsc, tsgo, tsrs or bun (default: the project's
-                        TypeScript, then the first installed)
-  --components <glob>   Components to check, relative to the workspace;
-                        repeatable (default: **/*.svelte)
-  --out-dir <dir>       Where to write the generated code
-                        (default: node_modules/.cache/svelte-typecheck/<workspace>)
-  --no-declarations     Resolve component imports to their own .svelte.d.ts
-  --svelte <dir>        Svelte package to check against (default: resolved)
+svelte-check's options:
+  --workspace <dir>         Project folder (default: the current one)
+  --output <format>         human, human-verbose, machine or machine-verbose
+                            (default: human-verbose)
+  --tsconfig <path>         tsconfig or jsconfig, relative to the workspace;
+                            its TS and JS files' errors are reported too
+                            (default: the nearest from the workspace up)
+  --no-tsconfig             Check every component under the workspace, and
+                            no TS or JS files
+  --ignore <list>           With --no-tsconfig: paths to skip, relative to
+                            the workspace, comma-separated
+  --config <path>           svelte.config to read preprocessors from
   --diagnostic-sources <list>
-                        js, svelte and css, comma-separated (default: all;
-                        css reports nothing)
-  --threshold <level>   error reports errors only (default: warning)
+                            js, svelte and css, comma-separated (default: all;
+                            css reports nothing)
+  --threshold <level>       error reports errors only (default: warning)
   --compiler-warnings <list>
-                        code:ignore or code:error, comma-separated
-  --fail-on-warnings    Exit 1 on a warning too
-  --output <format>     human or machine (default: human)
-  -h, --help            Show this help
-  -v, --version         Show the version
+                            code:ignore or code:error, comma-separated
+  --fail-on-warnings        Exit 1 on a warning too
+  --color, --no-color       Force color on or off
+  --tsgo                    Check with tsgo (same as --checker tsgo)
+  -h, --help                Show this help
+  -v, --version             Show the version
 
-Exits 1 on a type error, 2 on a usage or emit error.`;
+svelte-typecheck's own:
+  --checker <name>          tsc, tsgo, tsrs or bun (default: the project's
+                            TypeScript, then the first installed)
+  --components <glob>       Components to check, relative to the workspace,
+                            instead of the tsconfig's; repeatable
+  --out-dir <dir>           Where to write the generated code (default:
+                            node_modules/.cache/svelte-typecheck/<workspace>)
+  --no-declarations         Resolve component imports to their own
+                            .svelte.d.ts
+  --svelte <dir>            Svelte package to check against
+
+Exits 1 on an error, or a warning with --fail-on-warnings.`;
 
 /** Runs the CLI and returns its exit code. */
-export async function main(argv: string[]): Promise<0 | 1 | 2> {
+export async function main(argv: string[]): Promise<0 | 1> {
   let values: ReturnType<typeof parse>["values"];
   try {
     values = parse(argv).values;
   } catch (error) {
     console.error(`${(error as Error).message}\n\n${HELP}`);
-    return 2;
+    return 1;
   }
   if (values.help) {
     console.log(HELP);
@@ -48,11 +68,21 @@ export async function main(argv: string[]): Promise<0 | 1 | 2> {
     console.log(version);
     return 0;
   }
+  const format = formatOf(values.output);
+  const out = writer(
+    format,
+    (text) => process.stdout.write(text),
+    colors(colorFlag(values.color, values["no-color"])),
+  );
+  const workspace = values.workspace ?? ".";
   try {
     const result = await typecheck({
-      workspace: values.workspace,
-      tsconfig: values.tsconfig,
-      checker: values.checker as Checker | undefined,
+      workspace,
+      tsconfig: values["no-tsconfig"] ? false : values.tsconfig,
+      ignore: values.ignore?.split(","),
+      config: values.config,
+      checker: (values.checker ?? (values.tsgo ? "tsgo" : undefined)) as
+        Checker | undefined,
       components: values.components,
       outDir: values["out-dir"],
       declarations: !values["no-declarations"],
@@ -60,35 +90,40 @@ export async function main(argv: string[]): Promise<0 | 1 | 2> {
       diagnosticSources: values["diagnostic-sources"]
         ?.split(",")
         .map((source) => source.trim()) as DiagnosticSource[] | undefined,
-      threshold: values.threshold === "error" ? "error" : "warning",
       compilerWarnings: parseCompilerWarnings(values["compiler-warnings"]),
     });
-    const machine = values.output === "machine";
+    out.start(result.workspace);
+    // The threshold hides warnings, which still count, as in svelte-check.
+    const errorsOnly = values.threshold === "error";
     for (const d of result.diagnostics)
-      console.log(
-        machine
-          ? `${d.severity.toUpperCase()} ${JSON.stringify(d.file)} ${d.line}:${d.column} ${JSON.stringify(d.message)} ${d.code}`
-          : `${d.file}:${d.line}:${d.column} - ${d.severity} ${d.code}: ${d.message}`,
-      );
+      if (!errorsOnly || d.severity === "error")
+        out.diagnostic(d, result.workspace);
     for (const f of result.failed)
-      console.error(`${f.file}: failed to parse: ${f.message}`);
-    const errors = result.diagnostics.filter(
-      (d) => d.severity === "error",
-    ).length;
-    const warnings = result.diagnostics.length - errors;
-    console.error(
-      `${result.components} components, ${errors} errors, ${warnings} warnings [emit ${Math.round(result.timings.emit)} ms, ${result.checker}${result.checkerVersion ? ` ${result.checkerVersion}` : ""} ${Math.round(result.timings.check)} ms]`,
-    );
-    if (result.failed.length > 0) return 2;
-    return errors > 0 || (values["fail-on-warnings"] && warnings > 0) ? 1 : 0;
+      out.failure(new Error(`${f.file}: failed to parse: ${f.message}`));
+    const summary = summarize(result.diagnostics, result.components);
+    out.completion(summary);
+    const fails =
+      summary.errors > 0 ||
+      result.failed.length > 0 ||
+      (values["fail-on-warnings"] && summary.warnings > 0);
+    return fails ? 1 : 0;
   } catch (error) {
-    console.error(
+    out.failure(
       error instanceof EmitError
-        ? `${error.message}\nThis is a svelte-typecheck bug; please report it.`
-        : (error as Error).message,
+        ? new Error(
+            `${error.message}\nThis is a svelte-typecheck bug; please report it.`,
+          )
+        : (error as Error),
     );
-    return 2;
+    return 1;
   }
+}
+
+/** svelte-check's default: human-verbose, or machine in Claude Code. */
+function formatOf(output: string | undefined): OutputFormat {
+  if (output && (OUTPUT_FORMATS as string[]).includes(output))
+    return output as OutputFormat;
+  return process.env.CLAUDECODE === "1" ? "machine" : "human-verbose";
 }
 
 function parse(argv: string[]) {
@@ -96,17 +131,26 @@ function parse(argv: string[]) {
     args: argv,
     options: {
       workspace: { type: "string" },
+      output: { type: "string" },
       tsconfig: { type: "string" },
+      "no-tsconfig": { type: "boolean", default: false },
+      ignore: { type: "string" },
+      config: { type: "string" },
+      "diagnostic-sources": { type: "string" },
+      threshold: { type: "string" },
+      "compiler-warnings": { type: "string" },
+      "fail-on-warnings": { type: "boolean", default: false },
+      color: { type: "boolean", default: false },
+      "no-color": { type: "boolean", default: false },
+      tsgo: { type: "boolean", default: false },
+      // svelte-check's, accepted for a drop-in; this always works like them.
+      incremental: { type: "boolean", default: false },
+      "tsgo-experimental-api": { type: "boolean", default: false },
       checker: { type: "string" },
       components: { type: "string", multiple: true },
       "out-dir": { type: "string" },
       "no-declarations": { type: "boolean", default: false },
       svelte: { type: "string" },
-      output: { type: "string", default: "human" },
-      "diagnostic-sources": { type: "string" },
-      threshold: { type: "string" },
-      "compiler-warnings": { type: "string" },
-      "fail-on-warnings": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
@@ -124,4 +168,10 @@ function parseCompilerWarnings(
     if (code && (level === "ignore" || level === "error")) levels[code] = level;
   }
   return levels;
+}
+
+function colorFlag(on: boolean, off: boolean): boolean | undefined {
+  if (on) return true;
+  if (off) return false;
+  return;
 }

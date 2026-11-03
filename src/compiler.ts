@@ -9,6 +9,7 @@ interface Warning {
   code: string;
   message: string;
   start?: { line: number; column: number };
+  end?: { line: number; column: number };
 }
 /** A `preprocess` entry from svelte.config.js. */
 type Preprocessor = Record<string, unknown>;
@@ -36,8 +37,9 @@ const CONFIG_FILES = [
  */
 export async function preprocessorsOf(
   dir: string,
+  explicit?: string,
 ): Promise<Preprocessor[] | undefined> {
-  const path = configOf(dir);
+  const path = explicit ?? configOf(dir);
   if (!path) return;
   const config = (await import(pathToFileURL(path).href)) as {
     default?: { preprocess?: Preprocessor | Preprocessor[] };
@@ -97,8 +99,7 @@ function diagnosticsOf(
       severity: "warning",
       code: w.code,
       message: w.message,
-      line: w.start?.line ?? 1,
-      column: (w.start?.column ?? 0) + 1,
+      ...positionsOf(w),
     }));
   } catch (error) {
     const e = error as Warning;
@@ -107,11 +108,22 @@ function diagnosticsOf(
         severity: "error",
         code: e.code ?? "compile_error",
         message: e.message,
-        line: e.start?.line ?? 1,
-        column: (e.start?.column ?? 0) + 1,
+        ...positionsOf(e),
       },
     ];
   }
+}
+
+/** Svelte's 1-based line and 0-based column, as 1-based both. */
+function positionsOf(w: Warning) {
+  const line = w.start?.line ?? 1;
+  const column = (w.start?.column ?? 0) + 1;
+  return {
+    line,
+    column,
+    endLine: w.end?.line ?? line,
+    endColumn: w.end ? w.end.column + 1 : column,
+  };
 }
 
 /**
@@ -152,8 +164,14 @@ export async function preprocessedDiagnostics(
       ? (JSON.parse(processed.map) as { mappings: string })
       : processed.map;
   const toOriginal = originalPosition(map);
-  return diagnosticsOf(compiler, processed.code, filename).map((d) => ({
-    ...d,
-    ...toOriginal(d.line, d.column),
-  }));
+  return diagnosticsOf(compiler, processed.code, filename).map((d) => {
+    const start = toOriginal(d.line, d.column);
+    const end = toOriginal(d.endLine ?? d.line, d.endColumn ?? d.column);
+    return {
+      ...d,
+      ...start,
+      endLine: end.line,
+      endColumn: end.column,
+    };
+  });
 }

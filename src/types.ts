@@ -4,16 +4,28 @@ export type Checker = "bun" | "tsrs" | "tsgo" | "tsc";
 export interface TypecheckOptions {
   /** The project root the other paths resolve against. Default: `process.cwd()`. */
   cwd?: string;
-  /** The folder whose components to check. Default: `"."`. */
+  /** The project folder, relative to `cwd`. Default: `"."`. */
   workspace?: string;
-  /** The tsconfig the generated one extends. Default: `<workspace>/tsconfig.json`. */
-  tsconfig?: string;
+  /**
+   * The tsconfig or jsconfig, relative to the workspace. With one, the
+   * components it includes are checked, and its TS and JS files' errors are
+   * reported too. Default: the nearest from the workspace up. `false`: none,
+   * so every component under the workspace, and only theirs.
+   */
+  tsconfig?: string | false;
+  /**
+   * With no tsconfig: paths to skip, relative to the workspace, as
+   * svelte-check's `--ignore` (a prefix, or `**` at the start or end).
+   */
+  ignore?: string[];
+  /** The svelte.config to read preprocessors from, relative to the workspace. Default: the nearest. */
+  config?: string;
   /**
    * Default: the project's own TypeScript (`tsc`; native in TypeScript 7),
    * then the first of `tsgo`, `tsrs` and `bun` that's installed.
    */
   checker?: Checker;
-  /** Globs of the components to check, relative to the workspace. Default: `["**\/*.svelte"]`. */
+  /** Globs of the components to check, relative to the workspace, instead of the tsconfig's. */
   components?: string[];
   /** Where to write the generated code. Default: `node_modules/.cache/svelte-typecheck/<workspace>`. */
   outDir?: string;
@@ -42,9 +54,13 @@ export type DiagnosticSource = "js" | "svelte" | "css";
 
 /** An error or warning, at its line and column (both 1-based) in the source. */
 export interface Diagnostic {
+  /** An absolute path. */
   file: string;
   line: number;
   column: number;
+  /** Where the range ends, when known. */
+  endLine?: number;
+  endColumn?: number;
   severity: "error" | "warning";
   /** `ts` or `js` for a type error (by the file's language), `svelte` for the compiler. */
   source: "ts" | "js" | "svelte";
@@ -55,6 +71,10 @@ export interface Diagnostic {
 
 export interface TypecheckResult {
   diagnostics: Diagnostic[];
+  /** The workspace, as an absolute path. */
+  workspace: string;
+  /** The tsconfig used, if any. */
+  tsconfig?: string;
   /** How many components were checked. */
   components: number;
   /** Errors in generated code, which map to no source. */
@@ -75,4 +95,6 @@ export interface CompilerDiagnostic {
   message: string;
   line: number;
   column: number;
+  endLine?: number;
+  endColumn?: number;
 }

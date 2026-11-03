@@ -1,4 +1,4 @@
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { typecheck } from "../src/check.ts";
 import type { Checker } from "../src/types.ts";
 
@@ -37,7 +37,7 @@ describe("typecheck", () => {
           .filter((d) => d.source !== "svelte")
           .map(
             (d) =>
-              `${d.file.replace("tests/fixtures/", "")}:${d.line}:${d.column} ${d.code}`,
+              `${relative(join(root, "tests/fixtures"), d.file)}:${d.line}:${d.column} ${d.code}`,
           ),
       ).toEqual(EXPECTED);
       expect(result.dropped).toEqual([]);
@@ -58,9 +58,11 @@ describe("typecheck", () => {
       const { diagnostics } = await check({ diagnosticSources: ["svelte"] });
       expect(diagnostics).toEqual([
         {
-          file: "tests/fixtures/Warnings.svelte",
+          file: join(root, "tests/fixtures/Warnings.svelte"),
           line: 5,
           column: 1,
+          endLine: 5,
+          endColumn: 14,
           severity: "warning",
           source: "svelte",
           code: "a11y_missing_attribute",
