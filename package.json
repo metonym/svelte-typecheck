@@ -15,7 +15,7 @@
     "./package.json": "./package.json"
   },
   "bin": {
-    "svelte-typecheck": "./dist/cli.js"
+    "svelte-typecheck": "dist/cli.js"
   },
   "sideEffects": false,
   "engines": {

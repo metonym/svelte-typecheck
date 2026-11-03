@@ -7,7 +7,7 @@ const root = resolve(import.meta.dir, "..");
 const src = join(root, "src");
 const dist = join(root, "dist");
 const ENTRIES = ["index", "cli"];
-const DIST_PREFIX = /"\.\/dist\//;
+const DIST_PREFIX = /"(\.\/)?dist\//;
 const TS_SUFFIX = /\.ts$/;
 const PACKAGE_JSON = /[\\/]package\.json$/;
 const STRIP_FIELDS = ["devDependencies", "scripts"];
@@ -134,7 +134,11 @@ async function writeManifest() {
     join(root, "package.json"),
   ).json();
   for (const field of STRIP_FIELDS) delete manifest[field];
-  const text = JSON.stringify(manifest, null, 2).replaceAll('"./dist/', '"./');
+  // `bin` paths have no `./`: `npm pkg fix` strips it, and publish drops
+  // a bin it has to correct.
+  const text = JSON.stringify(manifest, null, 2)
+    .replaceAll('"./dist/', '"./')
+    .replaceAll('"dist/', '"');
   if (DIST_PREFIX.test(text)) fail("package.json still points into dist/");
   await writeFile(join(dist, "package.json"), `${text}\n`);
 }

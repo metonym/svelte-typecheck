@@ -71,6 +71,14 @@ try {
     "dist/package.json has dependencies",
   );
 
+  // npm publish drops a field it has to correct, such as a `bin` path
+  // with `./`, after only a warning.
+  const publish = run("npm", ["publish", "--dry-run"], dist);
+  assert(
+    !publish.stderr.includes("npm warn publish"),
+    `npm publish would correct dist/package.json:\n${publish.stderr}`,
+  );
+
   const tarball = ok(
     "npm",
     ["pack", "--pack-destination", dir, "--silent"],
