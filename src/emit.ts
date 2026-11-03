@@ -28,6 +28,16 @@ const NUMBER_ATTRIBUTES = new Set(
   ),
 );
 
+/** A generated `$name` declaration, and the source's `$name` uses. */
+interface StoreDeclaration {
+  /** The declaration, as generated offsets. */
+  start: number;
+  end: number;
+  name: string;
+  /** Source offsets of `$name`. */
+  uses: number[];
+}
+
 export interface EmitOptions {
   /** A new specifier for an import that leaves the workspace, if any. */
   rewriteImport?: (specifier: string) => string | undefined;
@@ -79,6 +89,9 @@ export function emit(
     ),
   );
   let uid = 0;
+  /** `$:` statements and transition directives, as source ranges. */
+  const reactive: [number, number][] = [];
+  const transitions: [number, number][] = [];
   /** Each `<slot>`'s attributes, by slot name. */
   const slots = new Map<string, Node[]>();
   /** Events the component forwards: an element's DOM event, or `any`. */
@@ -198,10 +211,14 @@ export function emit(
   const storeAfter = new Map<number, string[]>();
   const storeAtStart: string[] = [];
   const seenStores = new Set<string>();
+  /** Each store's `$name` uses, as source offsets. */
+  const storeUses = new Map<string, number[]>();
   for (const scope of [scopes.instance, scopes.module])
     for (const b of scope?.declarations?.values() ?? [])
       for (const r of b.references) {
-        if (!r.store || seenStores.has(b.name)) continue;
+        if (!r.store) continue;
+        storeUses.set(b.name, [...(storeUses.get(b.name) ?? []), r.node.start]);
+        if (seenStores.has(b.name)) continue;
         seenStores.add(b.name);
         const decl = b.declaration;
         const top =
@@ -214,12 +231,24 @@ export function emit(
           storeAfter.set(top.end, [...(storeAfter.get(top.end) ?? []), b.name]);
         else storeAtStart.push(b.name);
       }
-  const declareStore = (name: string) =>
-    `let $${name} = __sveltets_2_store_get(${name});`;
+  /** Generated `$name` declarations, which check that `name` is a store. */
+  const storeDeclarations: StoreDeclaration[] = [];
+  const declareStore = (name: string) => {
+    const start = out.code.length;
+    out.raw(`let $${name} = __sveltets_2_store_get(${name});`);
+    storeDeclarations.push({
+      start,
+      end: out.code.length,
+      name,
+      uses: storeUses.get(name) ?? [],
+    });
+  };
 
   out.raw(
-    `function $$render${generics}() { let $$props = __sveltets_2_allPropsType(); let $$restProps = __sveltets_2_restPropsType(); let $$slots = __sveltets_2_any(0); ${typed.has("$$Slots") ? "const __sveltets_createSlot = __sveltets_2_createCreateSlot<$$Slots>(); " : ""}${storeAtStart.map(declareStore).join(" ")}\n`,
+    `function $$render${generics}() { let $$props = __sveltets_2_allPropsType(); let $$restProps = __sveltets_2_restPropsType(); let $$slots = __sveltets_2_any(0); ${typed.has("$$Slots") ? "const __sveltets_createSlot = __sveltets_2_createCreateSlot<$$Slots>(); " : ""}`,
   );
+  for (const name of storeAtStart) declareStore(name);
+  out.raw("\n");
 
   // --- Instance script, statement by statement.
   const props: {
@@ -287,6 +316,7 @@ export function emit(
               });
           }
       } else if (s.type === "LabeledStatement" && s.label.name === "$") {
+        reactive.push([s.start, s.end]);
         const e =
           s.body.type === "ExpressionStatement" ? s.body.expression : null;
         const declares =
@@ -324,8 +354,7 @@ export function emit(
             .copy(call.callee.end, s.end);
         else out.copy(s.start, s.end);
       }
-      const stores = storeAfter.get(s.end);
-      if (stores) out.raw(stores.map(declareStore).join(""));
+      for (const name of storeAfter.get(s.end) ?? []) declareStore(name);
     }
     copyGap(cursor, instance.content.end);
   }
@@ -386,6 +415,7 @@ export function emit(
         else out.raw("{}");
         out.raw("));");
       } else if (a.type === "TransitionDirective") {
+        transitions.push([a.start, a.end]);
         const at = nameAt(a);
         out.raw("__sveltets_2_ensureTransition(").copy(at, at + a.name.length);
         out.raw(`(svelteHTML.mapElementTag(${tag}),`);
@@ -901,5 +931,5 @@ export function emit(
   }
   out.raw("export default $$Component;\n");
 
-  return { out, isTs };
+  return { out, isTs, reactive, transitions, storeDeclarations };
 }

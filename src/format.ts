@@ -80,7 +80,16 @@ function codeFrame(d: Diagnostic, c: Colors): string {
 
 /** The numeric code svelte-check reports for a TypeScript error, else the compiler's. */
 function codeOf(d: Diagnostic): string | number {
-  return d.code.startsWith("TS") ? Number(d.code.slice(2)) : d.code;
+  if (d.code.startsWith("TS")) return Number(d.code.slice(2));
+  return NUMERIC.test(d.code) ? Number(d.code) : d.code;
+}
+const NUMERIC = /^\d+$/;
+
+/** svelte-check names a diagnostic's source except for a TS or JS file's type error. */
+function sourceOf(d: Diagnostic): string | undefined {
+  return d.file.endsWith(".svelte") || d.source === "svelte"
+    ? d.source
+    : undefined;
 }
 
 const COMPILER_CODE = /^[a-z][\w-]*[-_][\w-]*$/;
@@ -150,7 +159,7 @@ export function writer(
               message: d.message,
               code: codeOf(d),
               codeDescription: codeDescriptionOf(d),
-              source: d.file.endsWith(".svelte") ? d.source : undefined,
+              source: sourceOf(d),
             }),
           );
         else
@@ -160,8 +169,7 @@ export function writer(
         return;
       }
       write(`${workspace}${sep}${c.green(filename)}:${d.line}:${d.column}\n`);
-      // svelte-check names the source in components only.
-      const source = d.file.endsWith(".svelte") ? `(${d.source})` : "";
+      const source = sourceOf(d) ? `(${d.source})` : "";
       const message = verbose
         ? `${d.message} ${source}\n${c.cyan(codeFrame(d, c).trimEnd())}`
         : `${d.message} ${source}`;

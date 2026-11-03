@@ -129,6 +129,8 @@ export interface Project {
   exclude: string[];
   /** The tsconfig's `rootDirs`, as absolute paths. */
   rootDirs: string[];
+  /** The tsconfig's own `include` and `exclude`, as written. */
+  raw: { include?: string[]; exclude?: string[] };
   /** Whether a TS or JS file's errors are reported. */
   reports(path: string): boolean;
 }
@@ -165,6 +167,7 @@ export function projectOf(options: ProjectOptions): Project {
       include: [],
       exclude: [],
       rootDirs: [],
+      raw: {},
       reports: () => false,
     };
   }
@@ -207,6 +210,7 @@ export function projectOf(options: ProjectOptions): Project {
     include,
     exclude,
     rootDirs: inputs.rootDirs ?? [],
+    raw: parseJsonc(readFileSync(tsconfig, "utf-8")) as RawConfig,
     // As svelte-check: every file in the program, but JS in node_modules.
     reports: (path) => !NODE_MODULES_JS.test(toPosix(path)),
   };
