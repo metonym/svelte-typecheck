@@ -1,0 +1,18 @@
+{
+  "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": [
+    "src/{index,cli}.ts",
+    "scripts/*.ts",
+    "bench/*.bench.ts",
+    "bench/check.ts",
+    "ostia.config.ts"
+  ],
+  "project": [
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "scripts/**/*.ts",
+    "bench/**/*.ts"
+  ],
+  "ignore": ["tests/fixtures/**"],
+  "ignoreDependencies": ["@typescript/native-preview", "tsrs"]
+}

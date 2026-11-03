@@ -1,0 +1,63 @@
+{
+  "name": "svelte-typecheck",
+  "version": "0.0.0",
+  "license": "MIT",
+  "description": "Type-check Svelte components with bun check, tsrs, tsgo or tsc. Fast, light, svelte-check compatible.",
+  "author": "Eric Liu (https://github.com/metonym)",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "svelte-typecheck": "./dist/cli.js"
+  },
+  "sideEffects": false,
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "bun scripts/build.ts",
+    "test": "bun test ./tests",
+    "test:package": "bun scripts/test-package.ts",
+    "bench": "ostia bench bench/svelte-typecheck.bench.ts",
+    "typecheck": "bun check",
+    "knip": "knip-bun",
+    "fmt": "bun fmt",
+    "lint": "bun fmt --check && bun lint --no-script --max-warnings 0"
+  },
+  "peerDependencies": {
+    "svelte": "^3.59.0 || ^4.0.0 || ^5.0.0"
+  },
+  "devDependencies": {
+    "@typescript/native-preview": "^7.0.0-dev.20260707.2",
+    "bun-types": "1.4.4",
+    "knip": "^6.43.0",
+    "ostia": "^0.2.12",
+    "sveast": "^0.9.6",
+    "svelte": "^5.57.3",
+    "tsrs": "0.20.1-ts7.1.0-beta",
+    "typescript": "^6.0.3"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/metonym/svelte-typecheck.git"
+  },
+  "homepage": "https://github.com/metonym/svelte-typecheck",
+  "bugs": "https://github.com/metonym/svelte-typecheck/issues",
+  "keywords": [
+    "svelte",
+    "typecheck",
+    "typescript",
+    "svelte-check",
+    "tsgo",
+    "tsrs",
+    "bun",
+    "ci"
+  ]
+}

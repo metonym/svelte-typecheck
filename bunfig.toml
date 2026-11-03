@@ -1,0 +1,43 @@
+[install]
+# Each package sees only the dependencies it declares, as after an npm
+# install, so an undeclared import fails here before it fails for users.
+linker = "isolated"
+
+# `bun fmt`
+[fmt]
+# Planted errors at fixed lines and columns.
+ignorePatterns = ["tests/fixtures/**"]
+
+[fmt.sortImports]
+groups = [
+  "builtin",
+  "external",
+  ["internal", "subpath"],
+  "parent",
+  ["sibling", "index"],
+  "unknown",
+]
+newlinesBetween = false
+ignoreCase = false
+
+# `bun lint`
+[lint]
+ignorePatterns = ["tests/fixtures/**", "dist/**"]
+
+[lint.rules]
+"eslint/eqeqeq" = ["error", "smart"]
+"eslint/no-await-in-loop" = "error"
+"eslint/no-nested-ternary" = "error"
+"eslint/no-param-reassign" = "error"
+"eslint/no-useless-rename" = "error"
+"import/no-cycle" = "error"
+"typescript/consistent-type-definitions" = ["error", "interface"]
+"typescript/consistent-type-imports" = "error"
+"typescript/no-explicit-any" = "error"
+"typescript/no-non-null-assertion" = "error"
+"typescript/no-shadow" = "error"
+"unicorn/explicit-length-check" = "error"
+"unicorn/no-array-for-each" = "error"
+"unicorn/prefer-node-protocol" = "error"
+"unicorn/prefer-regexp-test" = "error"
+"unicorn/prefer-string-starts-ends-with" = "error"
