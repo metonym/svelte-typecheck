@@ -368,3 +368,31 @@ declare function __sveltets_2_svelte3_component<
 ): new (
   options: import("svelte").ComponentConstructorOptions<Props>,
 ) => import("svelte").SvelteComponentTyped<Props, Events, Slots> & Exports;
+
+// Svelte 5's runes components, snippets and function bindings.
+
+/** A runes component: a function, typed by its `$props()`. */
+declare function __sveltets_2_fn_component<
+  Props extends Record<string, any>,
+  Exports extends Record<string, any>,
+  Bindings extends string,
+>(klass: {
+  props: Props;
+  exports?: Exports;
+  bindings?: Bindings;
+  // @ts-ignore Svelte 5 only
+}): import("svelte").Component<Props, Exports, Bindings>;
+/** The props a runes component lets a parent `bind:`. */
+declare function __sveltets_$$bindings<Bindings extends string[]>(
+  ...bindings: Bindings
+): Bindings[number];
+/** `{@render x()}`, which takes only a snippet's result. */
+declare function __sveltets_2_ensureSnippet(
+  // @ts-ignore Svelte 5 only
+  val: ReturnType<import("svelte").Snippet> | undefined | null,
+): any;
+/** `bind:x={get, set}`: `set` takes what `get` returns. */
+declare function __sveltets_2_get_set_binding<T>(
+  get: (() => T) | null | undefined,
+  set: (t: T) => void,
+): T;

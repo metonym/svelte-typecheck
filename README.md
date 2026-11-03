@@ -24,7 +24,7 @@ src/Errors.svelte:13:33 - error TS2339: Property 'nope' does not exist on type '
 | Type checker   | TypeScript's JS API (TS 5 or 6) | Any checker that reads a tsconfig: `bun check`, tsrs, tsgo, `tsc` |
 | TypeScript 7   | Needs `typescript@~6` beside it | Works: never imports `typescript`                                 |
 | Dependencies   | 6, plus `typescript` (24 MB)    | 1: [sveast](https://github.com/metonym/sveast), which has none    |
-| Svelte 3, 4, 5 | Yes                             | Yes (runes not yet; see Limits)                                   |
+| Svelte 3, 4, 5 | Yes                             | Yes, runes included                                               |
 
 Measured on carbon-components-svelte, where it replaced svelte-check:
 
@@ -113,7 +113,6 @@ The helper types the generated code calls are adapted from svelte2tsx's (MIT), a
 
 ## Limits
 
-- **Svelte 5 runes** (`$props()`, `$state`, snippet types for `{@render}`) aren't typed yet; legacy syntax is, on Svelte 3, 4 and 5.
 - No SvelteKit auto-typing (`./$types`) or CSS diagnostics.
 - Your editor still runs the Svelte language server, so the two can disagree at the edges.
 

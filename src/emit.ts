@@ -1,4 +1,4 @@
-import { isReference, parse, walk } from "sveast";
+import { isReference, isRunesMode, parse, walk } from "sveast";
 import { analyzeScopes } from "sveast/scope";
 import { Output } from "./output.ts";
 
@@ -27,6 +27,16 @@ const NUMBER_ATTRIBUTES = new Set(
     " ",
   ),
 );
+
+/** A generated `$$bindings` check for a component's `bind:`, and the directive. */
+interface BindingCheck {
+  /** The check, as generated offsets. */
+  start: number;
+  end: number;
+  /** The directive, as source offsets. */
+  from: number;
+  to: number;
+}
 
 /** A generated `$name` declaration, and the source's `$name` uses. */
 interface StoreDeclaration {
@@ -72,6 +82,40 @@ function jsdocTemplates(generics: string) {
   });
 }
 
+const JSDOC_TYPE = /@type\b/;
+
+/** The type svelte2tsx infers for a prop from its default. */
+// eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+function typeOfDefault(init: any, source: string): string {
+  if (init.type === "TSAsExpression")
+    return source.slice(init.typeAnnotation.start, init.typeAnnotation.end);
+  if (init.type === "Literal") {
+    if (typeof init.value === "string") return "string";
+    if (typeof init.value === "number") return "number";
+    if (typeof init.value === "boolean") return "boolean";
+    return "any";
+  }
+  if (init.type === "Identifier" && init.name !== "undefined")
+    return `typeof ${init.name}`;
+  if (init.type === "ArrowFunctionExpression") return "Function";
+  if (init.type === "ObjectExpression") return "Record<string, any>";
+  if (init.type === "ArrayExpression") return "any[]";
+  return "any";
+}
+
+/** The `$props()` declarator of a statement, if it has one. */
+// eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+function propsDeclaratorOf(s: any) {
+  if (s.type !== "VariableDeclaration") return;
+  return s.declarations.find(
+    // eslint-disable-next-line typescript/no-explicit-any -- as above
+    (d: any) =>
+      d.init?.type === "CallExpression" &&
+      d.init.callee.type === "Identifier" &&
+      d.init.callee.name === "$props",
+  );
+}
+
 export function emit(
   source: string,
   { rewriteImport, svelte = 5 }: EmitOptions = {},
@@ -96,6 +140,9 @@ export function emit(
   const slots = new Map<string, Node[]>();
   /** Events the component forwards: an element's DOM event, or `any`. */
   const forwarded = new Map<string, string>();
+  /** Svelte 5 compiles runes components to functions, typed by `$props()`. */
+  const runes = svelte >= 5 && isRunesMode(source);
+  const bindingChecks: BindingCheck[] = [];
 
   function textOf(attribute: Node) {
     const value = Array.isArray(attribute.value)
@@ -244,121 +291,6 @@ export function emit(
     });
   };
 
-  out.raw(
-    `function $$render${generics}() { let $$props = __sveltets_2_allPropsType(); let $$restProps = __sveltets_2_restPropsType(); let $$slots = __sveltets_2_any(0); ${typed.has("$$Slots") ? "const __sveltets_createSlot = __sveltets_2_createCreateSlot<$$Slots>(); " : ""}`,
-  );
-  for (const name of storeAtStart) declareStore(name);
-  out.raw("\n");
-
-  // --- Instance script, statement by statement.
-  const props: {
-    name: string;
-    local: string;
-    optional: boolean;
-    /** Its type annotation, for checking `$$Props`. */
-    type?: string;
-  }[] = [];
-  const exportsOf: string[] = [];
-  /** Copies [from, to), leaving out `@template` blocks. */
-  const copyGap = (from: number, to: number) => {
-    let at = from;
-    for (const [s, e] of templateBlocks) {
-      if (e <= at || s >= to) continue;
-      out.copy(at, s);
-      at = e;
-    }
-    out.copy(at, to);
-  };
-  if (instance) {
-    let cursor = instance.content.start;
-    for (const s of body) {
-      copyGap(cursor, s.start);
-      cursor = s.end;
-      if (s.type === "ImportDeclaration" || genericAliases.has(s)) continue;
-      if (s.type === "ExportNamedDeclaration") {
-        const d = s.declaration;
-        if (d) {
-          out.copy(d.start, d.end);
-          if (d.type === "VariableDeclaration" && d.kind === "let")
-            for (const decl of d.declarations)
-              for (const name of idsOf(decl.id)) {
-                props.push({
-                  name,
-                  local: name,
-                  optional: decl.init != null,
-                  type:
-                    decl.id.type === "Identifier" &&
-                    decl.id.typeAnnotation?.typeAnnotation
-                      ? source.slice(
-                          decl.id.typeAnnotation.typeAnnotation.start,
-                          decl.id.typeAnnotation.typeAnnotation.end,
-                        )
-                      : undefined,
-                });
-                // Stops narrowing to the default; a parent can pass anything.
-                out.raw(
-                  `;${name} = __sveltets_2_any(${decl.init ? name : 0});`,
-                );
-              }
-          else
-            for (const name of d.declarations
-              ? d.declarations.flatMap((x: Node) => idsOf(x.id))
-              : [d.id?.name])
-              if (name) exportsOf.push(name);
-        } else
-          for (const spec of s.specifiers) {
-            const binding = scopes.instance.get(spec.local.name);
-            if (binding?.kind === "let" || binding?.kind === "prop")
-              props.push({
-                name: spec.exported.name,
-                local: spec.local.name,
-                optional: true,
-              });
-          }
-      } else if (s.type === "LabeledStatement" && s.label.name === "$") {
-        reactive.push([s.start, s.end]);
-        const e =
-          s.body.type === "ExpressionStatement" ? s.body.expression : null;
-        const declares =
-          e?.type === "AssignmentExpression" &&
-          e.operator === "=" &&
-          idsOf(e.left).some((n) => {
-            const b = scopes.instance.get(n);
-            return b?.kind === "reactive" && b.declaration?.start === s.start;
-          });
-        if (declares) {
-          out.raw("let ").copy(e.left.start, e.left.end);
-          out
-            .raw(" = __sveltets_2_invalidate(() => (")
-            .copy(e.right.start, e.right.end)
-            .raw("));");
-        } else out.raw(";() => {").copy(s.start, s.end).raw("}");
-      } else {
-        // `createEventDispatcher()` dispatches what `$$Events` declares.
-        const call =
-          typed.has("$$Events") && s.type === "VariableDeclaration"
-            ? s.declarations
-                .map((d: Node) => d.init)
-                .find(
-                  (init: Node) =>
-                    init?.type === "CallExpression" &&
-                    init.callee?.name === "createEventDispatcher" &&
-                    !init.typeArguments &&
-                    !init.typeParameters,
-                )
-            : undefined;
-        if (call)
-          out
-            .copy(s.start, call.callee.end)
-            .raw("<__sveltets_2_CustomEvents<$$Events>>")
-            .copy(call.callee.end, s.end);
-        else out.copy(s.start, s.end);
-      }
-      for (const name of storeAfter.get(s.end) ?? []) declareStore(name);
-    }
-    copyGap(cursor, instance.content.end);
-  }
-
   // --- Markup.
   const attrValue = (value: Node) => {
     if (value === true) return out.raw("true");
@@ -394,7 +326,7 @@ export function emit(
           out
             .copy(a.expression.start, a.expression.end)
             .raw(` = ${elementId};`);
-        else
+        else if (!isGetSet(a.expression))
           out
             .raw("() => ")
             .copy(a.expression.start, a.expression.end)
@@ -463,9 +395,24 @@ export function emit(
       out.raw(",");
     } else if (a.type === "BindDirective" && a.name !== "this") {
       key(a, `bind:${a.name}`);
-      expression(a.expression).raw(",");
-    }
+      bound(a.expression).raw(",");
+    } else if (a.type === "AttachTag") attach(a);
   };
+  /** `bind:x={get, set}` as svelte2tsx checks it: `set` takes what `get` returns. */
+  const isGetSet = (e: Node) =>
+    e.type === "SequenceExpression" && e.expressions.length === 2;
+  const bound = (e: Node) => {
+    if (!isGetSet(e)) return expression(e);
+    const [get, set] = e.expressions;
+    out.raw("__sveltets_2_get_set_binding(").copy(get.start, get.end).raw(",");
+    return out.copy(set.start, set.end).raw(")");
+  };
+  /** `{@attach fn}`, which the element's typings take under a symbol key. */
+  const attach = (a: Node) =>
+    out
+      .raw('[Symbol("@attach")]:')
+      .copy(a.expression.start, a.expression.end)
+      .raw(",");
   const attributeKey = (a: Node): string | null => {
     if (a.type === "Attribute") return a.name;
     if (a.type === "OnDirective") return `on:${a.name}`;
@@ -480,6 +427,13 @@ export function emit(
     inComponent: boolean,
   ) => {
     const id = `$$_el${uid++}`;
+    const boundary = node.type === "SvelteBoundary";
+    // An error about the whole attributes object points at the tag name's
+    // last letter, as svelte2tsx maps it, or `<svelte:element this>`'s value.
+    const objectAt =
+      node.type === "RegularElement"
+        ? node.start + node.name.length
+        : (node.tag?.start ?? node.start + 1);
     // A key can't repeat in an object literal (several `on:click`s can), so
     // each repeat gets its own `createElement` call.
     const seen = new Set<string>();
@@ -506,9 +460,7 @@ export function emit(
       out.raw(", ");
       if (actions.length > 0)
         out.raw(`__sveltets_2_union(${actions.join(",")}), `);
-      // An error about the whole attributes object points at the tag, or at
-      // `<svelte:element this>`'s expression.
-      out.from(node.tag?.start ?? node.start + 1, () => out.raw("{"));
+      out.from(objectAt, () => out.raw("{"));
       for (const a of node.attributes ?? []) {
         const k = attributeKey(a);
         if (k !== null && seen.has(k)) repeats.push(a);
@@ -517,11 +469,15 @@ export function emit(
           elementAttribute(a, inComponent);
         }
       }
+      // `<svelte:boundary>`'s snippets are its props.
+      if (boundary)
+        for (const c of node.fragment.nodes)
+          if (c.type === "SnippetBlock") snippetProp(c);
       out.raw("})");
     });
     out.raw(";");
     for (const a of repeats)
-      out.from(node.tag?.start ?? node.start + 1, () => {
+      out.from(objectAt, () => {
         out.raw("svelteHTML.createElement(");
         tag();
         out.raw(", {");
@@ -529,7 +485,7 @@ export function emit(
         out.raw("});");
       });
     directives(node, id, tagText);
-    fragment(node.fragment);
+    fragment(node.fragment, !boundary);
     out.raw("}\n");
   };
 
@@ -584,34 +540,38 @@ export function emit(
         } else if (a.type === "SpreadAttribute")
           out.raw("...").copy(a.expression.start, a.expression.end).raw(",");
         else if (a.type === "BindDirective" && a.name !== "this") {
-          key(a, a.name);
-          out.copy(a.expression.start, a.expression.end).raw(",");
-        }
+          // An error on a bound prop points at its name, after `bind:`.
+          out.from(nameAt(a), () => out.raw(JSON.stringify(a.name))).raw(":");
+          if (isGetSet(a.expression)) bound(a.expression).raw(",");
+          else out.copy(a.expression.start, a.expression.end).raw(",");
+        } else if (a.type === "AttachTag") attach(a);
       }
-      for (const s of snippets) {
-        out.from(s.expression.start, () =>
-          out.raw(JSON.stringify(s.expression.name)),
-        );
-        out.raw(":(");
-        for (const [i, p] of (s.parameters as Node[]).entries()) {
-          if (i) out.raw(",");
-          out.copy(p.start, p.end);
-        }
-        out.raw(") => { async () => {");
-        fragment(s.body);
-        out.raw("}; return __sveltets_2_any(0); },");
-      }
+      for (const s of snippets) snippetProp(s);
       out.raw("} });");
     });
     for (const a of node.attributes ?? []) {
       if (a.type === "BindDirective") {
         if (a.name === "this")
           out.copy(a.expression.start, a.expression.end).raw(` = ${id};`);
-        else
-          out
-            .raw("() => ")
-            .copy(a.expression.start, a.expression.end)
-            .raw(" = __sveltets_2_any(null);");
+        else {
+          if (!isGetSet(a.expression))
+            out
+              .raw("() => ")
+              .copy(a.expression.start, a.expression.end)
+              .raw(" = __sveltets_2_any(null);");
+          // Svelte 5 checks that the component's prop is bindable.
+          if (svelte >= 5) {
+            const start = out.code.length;
+            out.raw(`${id}.$$bindings`);
+            bindingChecks.push({
+              start,
+              end: out.code.length,
+              from: a.start,
+              to: a.end,
+            });
+            out.raw(` = ${JSON.stringify(a.name)};`);
+          }
+        }
       } else if (a.type === "OnDirective" && !a.expression) {
         if (!forwarded.has(a.name))
           forwarded.set(a.name, "__sveltets_2_any(0)");
@@ -649,8 +609,12 @@ export function emit(
         return;
       case "ExpressionTag":
       case "HtmlTag":
-      case "RenderTag":
         return expression(node.expression).raw(";");
+      case "RenderTag":
+        return out
+          .raw(";__sveltets_2_ensureSnippet(")
+          .copy(node.expression.start, node.expression.end)
+          .raw(");");
       case "RegularElement":
         return element(
           node,
@@ -674,10 +638,16 @@ export function emit(
           "__sveltets_2_any(0)",
           false,
         );
+      case "SvelteBoundary":
+        return element(
+          node,
+          () => out.raw('"svelte:boundary"'),
+          "__sveltets_2_any(0)",
+          false,
+        );
       case "SvelteHead":
       case "SvelteFragment":
       case "TitleElement":
-      case "SvelteBoundary":
         return fragment(node.fragment);
       case "SvelteOptions":
         return;
@@ -765,29 +735,55 @@ export function emit(
       case "KeyBlock":
         expression(node.expression).raw(";");
         return fragment(node.fragment);
-      case "SnippetBlock": {
-        out
-          .raw("function ")
-          .copy(node.expression.start, node.expression.end)
-          .raw("(");
-        for (const [i, p] of (node.parameters as Node[]).entries()) {
-          if (i) out.raw(",");
-          out.copy(p.start, p.end);
-        }
-        out.raw(") { async () => {");
-        fragment(node.body);
-        return out.raw("}; return __sveltets_2_any(0); }\n");
-      }
       default:
         if (node.fragment) fragment(node.fragment);
     }
   };
 
-  /** `{@const}` tags first: they're visible to the whole fragment. */
-  function fragment(f: Node) {
+  /** A snippet's parameters, as written. */
+  function parameters(node: Node) {
+    for (const [i, p] of (node.parameters as Node[]).entries()) {
+      if (i) out.raw(",");
+      out.copy(p.start, p.end);
+    }
+  }
+  /** A snippet passed as a prop: a component's, or `<svelte:boundary>`'s. */
+  function snippetProp(node: Node) {
+    out.from(node.expression.start, () =>
+      out.raw(JSON.stringify(node.expression.name)),
+    );
+    out.raw(":(");
+    parameters(node);
+    out.raw(") => { async () => {");
+    fragment(node.body);
+    out.raw("}; return __sveltets_2_any(0); },");
+  }
+  /** A snippet as svelte2tsx declares it: an arrow that returns a snippet's result. */
+  function snippet(node: Node) {
+    out.raw("const ").copy(node.expression.start, node.expression.end);
+    out.raw(
+      isTs
+        ? ` = ${node.typeParams ? `<${node.typeParams}>` : ""}(`
+        : " = /** @returns {ReturnType<import('svelte').Snippet>} */ (",
+    );
+    parameters(node);
+    out.raw(
+      `)${isTs ? ": ReturnType<import('svelte').Snippet>" : ""} => { async () => {`,
+    );
+    fragment(node.body);
+    out.raw("}; return __sveltets_2_any(0); };\n");
+  }
+
+  /**
+   * Snippets first, as svelte2tsx hoists them, then `{@const}` tags: both
+   * are visible to the whole fragment. The root's snippets start `$$render`.
+   */
+  function fragment(f: Node, hoist = f !== ast.fragment) {
     if (!f) return;
+    if (hoist)
+      for (const n of f.nodes) if (n.type === "SnippetBlock") snippet(n);
     consts(f.nodes);
-    for (const n of f.nodes) child(n);
+    for (const n of f.nodes) if (n.type !== "SnippetBlock") child(n);
   }
   function consts(nodes: Node[]) {
     for (const n of nodes)
@@ -798,6 +794,220 @@ export function emit(
           .copy(d.declarations[0].start, d.declarations[0].end)
           .raw(";");
       }
+  }
+
+  out.raw(
+    runes
+      ? `function $$render${generics}() { `
+      : `function $$render${generics}() { let $$props = __sveltets_2_allPropsType(); let $$restProps = __sveltets_2_restPropsType(); let $$slots = __sveltets_2_any(0); ${typed.has("$$Slots") ? "const __sveltets_createSlot = __sveltets_2_createCreateSlot<$$Slots>(); " : ""}`,
+  );
+  for (const name of storeAtStart) declareStore(name);
+  out.raw("\n");
+  // The root's snippets, which the instance script can read.
+  for (const n of ast.fragment.nodes) if (n.type === "SnippetBlock") snippet(n);
+
+  // --- Instance script, statement by statement.
+  const props: {
+    name: string;
+    local: string;
+    optional: boolean;
+    /** Its type annotation, for checking `$$Props`. */
+    type?: string;
+  }[] = [];
+  /** `[exported, local]` names of what the instance script exports. */
+  const exportsOf: [string, string][] = [];
+  /** In runes mode: the props object, typed as `$props()` is. */
+  let runesProps: string | undefined;
+  /** In runes mode: the props `$bindable()` marks. */
+  const bindings: string[] = [];
+  /** `let {…} = $props()` as svelte2tsx types it, `gap` the text before it. */
+  const propsRune = (s: Node, d: Node, gapStart: number) => {
+    const pattern = d.id;
+    const locals: string[] = [];
+    const inferred: string[] = [];
+    let withUnknown = pattern.type !== "ObjectPattern";
+    for (const p of pattern.type === "ObjectPattern"
+      ? pattern.properties
+      : []) {
+      const value =
+        p.value?.type === "AssignmentPattern" ? p.value.left : p.value;
+      if (
+        p.type === "RestElement" ||
+        p.computed ||
+        p.key.type !== "Identifier" ||
+        value.type !== "Identifier"
+      ) {
+        withUnknown = true;
+        continue;
+      }
+      const name = p.key.name;
+      let init =
+        p.value.type === "AssignmentPattern" ? p.value.right : undefined;
+      const call = init?.type === "TSAsExpression" ? init.expression : init;
+      if (call?.type === "CallExpression" && call.callee.name === "$bindable") {
+        bindings.push(name);
+        locals.push(value.name);
+        init = call.arguments[0];
+        if (!init) {
+          inferred.push(`${name}?: any`);
+          continue;
+        }
+      }
+      inferred.push(
+        init ? `${name}?: ${typeOfDefault(init, source)}` : `${name}: any`,
+      );
+    }
+    const propsStr =
+      inferred.length > 0
+        ? `{ ${inferred.join(", ")} }${withUnknown ? " & Record<string, any>" : ""}`
+        : "Record<string, any>";
+    // An identifier or `{}` names a type it never declares: any props.
+    const declared =
+      inferred.length > 0 || (withUnknown && pattern.type === "ObjectPattern");
+    const annotation = pattern.typeAnnotation?.typeAnnotation;
+    if (isTs && annotation) {
+      if (annotation.type === "TSTypeReference") {
+        runesProps = `{} as any as ${source.slice(annotation.start, annotation.end)}`;
+        out.copy(s.start, s.end);
+      } else {
+        // A literal type gets a name, as svelte2tsx gives it.
+        out
+          .raw(";type $$ComponentProps = ")
+          .copy(annotation.start, annotation.end);
+        out.raw(";").copy(s.start, annotation.start).raw("$$ComponentProps");
+        out.copy(annotation.end, s.end);
+        runesProps = "{} as any as $$ComponentProps";
+      }
+    } else if (isTs) {
+      if (declared) {
+        out.raw(`;type $$ComponentProps = ${propsStr};`);
+        out.copy(s.start, pattern.end).raw(": $$ComponentProps");
+        out.copy(pattern.end, s.end);
+      } else out.copy(s.start, s.end);
+      runesProps = declared ? "{} as any as $$ComponentProps" : "{} as any";
+    } else {
+      // The last JSDoc `@type` right before it.
+      const comment = [
+        ...source.slice(gapStart, pattern.start).matchAll(JSDOC_BLOCK),
+      ]
+        .map((m) => m[0])
+        .findLast((c) => JSDOC_TYPE.test(c));
+      if (comment || !declared) out.copy(s.start, s.end);
+      else {
+        out.copy(s.start, pattern.start);
+        out.raw(
+          `/** @typedef {${propsStr}} $$ComponentProps *//** @type {$$ComponentProps} */`,
+        );
+        out.copy(pattern.start, s.end);
+      }
+      runesProps = `${comment ?? `/** @type {${declared ? "$$ComponentProps" : "any"}} */`}({})`;
+    }
+    // Reads each bindable prop, as svelte2tsx does.
+    if (locals.length > 0) out.raw(`;${locals.map((l) => `${l};`).join("")}`);
+  };
+
+  /** Copies [from, to), leaving out `@template` blocks. */
+  const copyGap = (from: number, to: number) => {
+    let at = from;
+    for (const [s, e] of templateBlocks) {
+      if (e <= at || s >= to) continue;
+      out.copy(at, s);
+      at = e;
+    }
+    out.copy(at, to);
+  };
+  if (instance) {
+    let cursor = instance.content.start;
+    for (const s of body) {
+      const gapStart = cursor;
+      copyGap(cursor, s.start);
+      cursor = s.end;
+      if (s.type === "ImportDeclaration" || genericAliases.has(s)) continue;
+      if (s.type === "ExportNamedDeclaration") {
+        const d = s.declaration;
+        if (d) {
+          out.copy(d.start, d.end);
+          if (d.type === "VariableDeclaration" && d.kind === "let")
+            for (const decl of d.declarations)
+              for (const name of idsOf(decl.id)) {
+                props.push({
+                  name,
+                  local: name,
+                  optional: decl.init != null,
+                  type:
+                    decl.id.type === "Identifier" &&
+                    decl.id.typeAnnotation?.typeAnnotation
+                      ? source.slice(
+                          decl.id.typeAnnotation.typeAnnotation.start,
+                          decl.id.typeAnnotation.typeAnnotation.end,
+                        )
+                      : undefined,
+                });
+                // Stops narrowing to the default; a parent can pass anything.
+                out.raw(
+                  `;${name} = __sveltets_2_any(${decl.init ? name : 0});`,
+                );
+              }
+          else
+            for (const name of d.declarations
+              ? d.declarations.flatMap((x: Node) => idsOf(x.id))
+              : [d.id?.name])
+              if (name) exportsOf.push([name, name]);
+        } else
+          for (const spec of s.specifiers) {
+            const binding = scopes.instance.get(spec.local.name);
+            if (runes) exportsOf.push([spec.exported.name, spec.local.name]);
+            else if (binding?.kind === "let" || binding?.kind === "prop")
+              props.push({
+                name: spec.exported.name,
+                local: spec.local.name,
+                optional: true,
+              });
+          }
+      } else if (s.type === "LabeledStatement" && s.label.name === "$") {
+        reactive.push([s.start, s.end]);
+        const e =
+          s.body.type === "ExpressionStatement" ? s.body.expression : null;
+        const declares =
+          e?.type === "AssignmentExpression" &&
+          e.operator === "=" &&
+          idsOf(e.left).some((n) => {
+            const b = scopes.instance.get(n);
+            return b?.kind === "reactive" && b.declaration?.start === s.start;
+          });
+        if (declares) {
+          out.raw("let ").copy(e.left.start, e.left.end);
+          out
+            .raw(" = __sveltets_2_invalidate(() => (")
+            .copy(e.right.start, e.right.end)
+            .raw("));");
+        } else out.raw(";() => {").copy(s.start, s.end).raw("}");
+      } else if (runes && propsDeclaratorOf(s)) {
+        propsRune(s, propsDeclaratorOf(s), gapStart);
+      } else {
+        // `createEventDispatcher()` dispatches what `$$Events` declares.
+        const call =
+          typed.has("$$Events") && s.type === "VariableDeclaration"
+            ? s.declarations
+                .map((d: Node) => d.init)
+                .find(
+                  (init: Node) =>
+                    init?.type === "CallExpression" &&
+                    init.callee?.name === "createEventDispatcher" &&
+                    !init.typeArguments &&
+                    !init.typeParameters,
+                )
+            : undefined;
+        if (call)
+          out
+            .copy(s.start, call.callee.end)
+            .raw("<__sveltets_2_CustomEvents<$$Events>>")
+            .copy(call.callee.end, s.end);
+        else out.copy(s.start, s.end);
+      }
+      for (const name of storeAfter.get(s.end) ?? []) declareStore(name);
+    }
+    copyGap(cursor, instance.content.end);
   }
 
   out.raw("\nasync () => {\n");
@@ -843,12 +1053,23 @@ export function emit(
   };
   const entries = (pairs: [string, string][]) =>
     pairs.map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
+  if (runes) {
+    runesExport();
+    return {
+      out,
+      isTs,
+      reactive,
+      transitions,
+      storeDeclarations,
+      bindingChecks,
+    };
+  }
   // `$$Props` is the props' type, once it agrees with the `export let`s.
   const propsType = typed.has("$$Props")
     ? `{ ...__sveltets_2_ensureRightProps<{${props.map((p) => `${JSON.stringify(p.name)}${p.optional ? "?" : ""}: ${p.type ?? `typeof ${p.local}`}`).join(", ")}}>(__sveltets_2_any("") as $$Props) } as $$Props`
     : `{${entries(props.map((p) => [p.name, p.local]))}}`;
   out.raw(
-    `return { props: ${propsType}, exports: {${entries([...(accessors ? props.map((p): [string, string] => [p.name, p.local]) : []), ...exportsOf.map((e): [string, string] => [e, e])])}}, bindings: "", slots: ${typed.has("$$Slots") ? "{} as unknown as $$Slots, __slots: {" : "{"}`,
+    `return { props: ${propsType}, exports: {${entries([...(accessors ? props.map((p): [string, string] => [p.name, p.local]) : []), ...exportsOf])}}, bindings: "", slots: ${typed.has("$$Slots") ? "{} as unknown as $$Slots, __slots: {" : "{"}`,
   );
   // A slot's props, as `let:` reads them; `any` for a value the markup scopes.
   for (const [name, attributes] of slots) {
@@ -931,5 +1152,36 @@ export function emit(
   }
   out.raw("export default $$Component;\n");
 
-  return { out, isTs, reactive, transitions, storeDeclarations };
+  return { out, isTs, reactive, transitions, storeDeclarations, bindingChecks };
+
+  /** A runes component: a function typed by `$props()`, as svelte2tsx types it. */
+  function runesExport() {
+    const exported = `{${entries(exportsOf)}}`;
+    const bindable = `__sveltets_$$bindings(${bindings.length > 0 ? bindings.map((b) => JSON.stringify(b)).join(", ") : '""'})`;
+    const none = isTs
+      ? "{} as Record<string, never>"
+      : "/** @type {Record<string, never>} */({})";
+    out.raw(
+      `return { props: ${runesProps ?? none}, exports: ${exported}, bindings: ${bindable}, slots: {}, events: {} };\n}\n`,
+    );
+    if (isTs && typeParams.length > 0) {
+      const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[1] ?? p);
+      const args = `<${names.join(", ")}>`;
+      const part = (name: string) =>
+        `ReturnType<__sveltets_Render${args}["${name}"]>`;
+      out.raw(
+        `class __sveltets_Render${generics} { props() { return $$render${args}().props; } events() { return $$render${args}().events; } slots() { return $$render${args}().slots; } bindings() { return ${bindable}; } exports() { return $$render${args}().exports; } }\n` +
+          `interface $$IsomorphicComponent { new ${generics}(options: import("svelte").ComponentConstructorOptions<${part("props")}>): import("svelte").SvelteComponent<${part("props")}, ${part("events")}, ${part("slots")}> & { $$bindings?: ${part("bindings")} } & ${part("exports")}; ${generics}(internal: unknown, props: ${part("props")} & {}): ${part("exports")}; z_$$bindings?: ReturnType<__sveltets_Render<${names.map(() => "any").join(", ")}>["bindings"]>; }\n` +
+          `const $$Component: $$IsomorphicComponent = null as any;\ntype $$Component${generics} = InstanceType<typeof $$Component${args}>;\n`,
+      );
+    } else {
+      out.raw("const $$Component = __sveltets_2_fn_component($$render());\n");
+      out.raw(
+        isTs
+          ? "type $$Component = ReturnType<typeof $$Component>;\n"
+          : "/** @typedef {ReturnType<typeof $$Component>} $$Component */\n",
+      );
+    }
+    out.raw("export default $$Component;\n");
+  }
 }
