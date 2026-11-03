@@ -79,6 +79,11 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check with runes, snippets, attachments and function bindings", () => {
+    const cwd = join(root, "tests/fixtures-runes");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check's message rewrites and filters", () => {
     const cwd = join(root, "tests/fixtures-filters");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));

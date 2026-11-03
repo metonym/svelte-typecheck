@@ -96,6 +96,7 @@ function parseDiagnostics(text: string): RawDiagnostic[] {
   return found;
 }
 
+const JS_EXTENSION = /\.[cm]?jsx?$/;
 const RELATIVE_IMPORT = /\bfrom\s*["'](\.{1,2}\/[^"']+)["']/g;
 
 /**
@@ -126,13 +127,35 @@ function programOrder(
     order.set(path, Number.POSITIVE_INFINITY);
     for (const [, specifier] of read(path).matchAll(RELATIVE_IMPORT)) {
       const target = resolve(dirname(path), specifier ?? "");
-      for (const candidate of [target, `${target}.ts`, `${target}.js`])
+      // `./a.js` names `./a.ts` too, as TypeScript resolves it.
+      for (const candidate of [
+        target,
+        `${target}.ts`,
+        `${target}.js`,
+        target.replace(JS_EXTENSION, (ext) => ext.replace("j", "t")),
+      ])
         if (known.has(candidate)) visit(candidate);
     }
     order.set(path, next++);
   };
   for (const root of roots) visit(root);
   return order;
+}
+
+const NON_BINDABLE =
+  "Cannot use 'bind:' with this property. It is declared as non-bindable inside the component.\n";
+
+/** svelte-check's message for a `bind:` of a prop that isn't `$bindable()`. */
+function nonBindableMessage(message: string): string {
+  if (
+    message.startsWith("Type '") &&
+    message.includes("is not assignable to type '")
+  ) {
+    const at = message.indexOf(`Type '"`) + `Type '"`.length;
+    const prop = message.slice(at, message.indexOf('"', at));
+    return `${NON_BINDABLE}To mark a property as bindable: 'let { ${prop} = $bindable() } = $props()'`;
+  }
+  return `${NON_BINDABLE}To mark a property as bindable: 'let { prop = $bindable() } = $props()'\n\n${message}`;
 }
 
 /** The deepest folder that holds every path. */
@@ -289,9 +312,13 @@ export async function typecheck(
         },
         // Listed rather than globbed: `include` skips dot folders and
         // `node_modules`, where the generated code lives by default.
-        files: [join(SHIMS, "shims.d.ts"), svelteHtml, ...outputs.keys()].map(
-          rel,
-        ),
+        files: [
+          join(SHIMS, "shims.d.ts"),
+          svelteHtml,
+          // Svelte 5's runes, as globals, as svelte2tsx references them.
+          ...(svelteMajor >= 5 ? [join(svelteDir, "types/index.d.ts")] : []),
+          ...outputs.keys(),
+        ].map(rel),
         // The project's own TypeScript, which can import components.
         include: declarations ? project.include.map(rel) : [],
         exclude: project.exclude.map(rel),
@@ -429,6 +456,33 @@ export async function typecheck(
               message: `Cannot use '${store.name}' as a store. '${store.name}' needs to be an object with a subscribe method on it.\n\n${d.message}`,
             });
           }
+          continue;
+        }
+        // svelte-check names a `bind:` of a prop that isn't `$bindable()`.
+        const binding =
+          d.code === "TS2322"
+            ? gen.emitted.bindingChecks.find(
+                (b) => b.start <= offset && offset < b.end,
+              )
+            : undefined;
+        if (binding) {
+          const at = locator(gen.svelte, () => gen.source).position(
+            binding.from,
+          );
+          const end = locator(gen.svelte, () => gen.source).position(
+            binding.to,
+          );
+          diagnostics.push({
+            ...d,
+            file: gen.svelte,
+            line: at.line,
+            column: at.column,
+            endLine: end.line,
+            endColumn: end.column,
+            severity: "error",
+            source: gen.isTs ? "ts" : "js",
+            message: nonBindableMessage(d.message),
+          });
           continue;
         }
         dropped.push({ ...d, file: abs, severity: "error", source: "ts" });
