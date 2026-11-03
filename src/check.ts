@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
@@ -10,8 +11,10 @@ import {
   svelteDirOf,
 } from "./compiler.ts";
 import { emit } from "./emit.ts";
+import { glob } from "./glob.ts";
+import { isKitFile, isKitRouteFile, kitFile } from "./kit.ts";
 import { createLocator, type Output } from "./output.ts";
-import { projectOf, relativeTo } from "./project.ts";
+import { projectOf, relativeTo, scriptsOf } from "./project.ts";
 import type { Diagnostic, TypecheckOptions, TypecheckResult } from "./types.ts";
 
 /** `path(line,col): error TSxxxx: message`, as tsc, tsgo, tsrs and `bun check` print. */
@@ -96,18 +99,20 @@ function parseDiagnostics(text: string): RawDiagnostic[] {
   return found;
 }
 
-const JS_EXTENSION = /\.[cm]?jsx?$/;
-const RELATIVE_IMPORT = /\bfrom\s*["'](\.{1,2}\/[^"']+)["']/g;
+const STATIC_IMPORT = /(?:\bfrom\s*|^\s*import\s*)["']([^"']+)["']/gm;
+const DYNAMIC_IMPORT = /\bimport\s*\(\s*["']([^"']+)["']\s*\)/g;
+const JS_EXTENSION = /\.([cm]?)js(x?)$/;
 
 /**
  * Files in TypeScript's program order: roots as it lists a folder (files
- * before subfolders, by name), each after the files it imports.
+ * before subfolders, by name), each after the files it imports: its static
+ * imports, then its `import()`s and import types, as TypeScript collects them.
  */
 function programOrder(
   paths: string[],
   read: (path: string) => string,
+  resolveImport: (from: string, specifier: string) => string | undefined,
 ): Map<string, number> {
-  const known = new Set(paths);
   const roots = [...paths].sort((a, b) => {
     const pa = a.split(sep);
     const pb = b.split(sep);
@@ -125,21 +130,94 @@ function programOrder(
   const visit = (path: string) => {
     if (order.has(path)) return;
     order.set(path, Number.POSITIVE_INFINITY);
-    for (const [, specifier] of read(path).matchAll(RELATIVE_IMPORT)) {
-      const target = resolve(dirname(path), specifier ?? "");
-      // `./a.js` names `./a.ts` too, as TypeScript resolves it.
-      for (const candidate of [
-        target,
-        `${target}.ts`,
-        `${target}.js`,
-        target.replace(JS_EXTENSION, (ext) => ext.replace("j", "t")),
-      ])
-        if (known.has(candidate)) visit(candidate);
+    const text = read(path);
+    for (const m of [
+      ...text.matchAll(STATIC_IMPORT),
+      ...text.matchAll(DYNAMIC_IMPORT),
+    ]) {
+      const target = resolveImport(path, m[1] ?? "");
+      if (target) visit(target);
     }
     order.set(path, next++);
   };
   for (const root of roots) visit(root);
   return order;
+}
+
+/**
+ * A module resolver for ordering, close enough to TypeScript's: relative
+ * imports, through `rootDirs` (SvelteKit's `./$types`) when the file isn't
+ * there, and `paths`. Packages aren't followed.
+ */
+function importResolver(rootDirs: string[], paths: Record<string, string[]>) {
+  const exists = new Map<string, boolean>();
+  const isFile = (path: string) => {
+    let found = exists.get(path);
+    if (found === undefined) {
+      found = statSync(path, { throwIfNoEntry: false })?.isFile() ?? false;
+      exists.set(path, found);
+    }
+    return found;
+  };
+  // `./a.js` names `./a.ts`, `./a.d.ts` too, as TypeScript resolves it.
+  const fileAt = (target: string) =>
+    [
+      target,
+      `${target}.ts`,
+      `${target}.d.ts`,
+      `${target}.js`,
+      target.replace(JS_EXTENSION, ".$1ts$2"),
+      target.replace(JS_EXTENSION, ".d.$1ts"),
+      join(target, "index.ts"),
+      join(target, "index.js"),
+    ].find(
+      (path) => !path.includes(`${sep}node_modules${sep}`) && isFile(path),
+    );
+  const throughRootDirs = (target: string) => {
+    const from = rootDirs
+      .filter((dir) => target.startsWith(`${dir}${sep}`))
+      .sort((a, b) => b.length - a.length)[0];
+    if (!from) return;
+    const suffix = relative(from, target);
+    for (const dir of rootDirs) {
+      if (dir === from) continue;
+      const found = fileAt(join(dir, suffix));
+      if (found) return found;
+    }
+    return;
+  };
+  const patterns = Object.entries(paths).map(([key, targets]) => {
+    const star = key.indexOf("*");
+    return { key, star, targets };
+  });
+  return (from: string, specifier: string): string | undefined => {
+    if (specifier.startsWith(".")) {
+      const target = resolve(dirname(from), specifier);
+      return fileAt(target) ?? throughRootDirs(target);
+    }
+    for (const { key, star, targets } of patterns) {
+      let rest: string;
+      if (star === -1) {
+        if (specifier !== key) continue;
+        rest = "";
+      } else {
+        const prefix = key.slice(0, star);
+        const suffix = key.slice(star + 1);
+        if (
+          !specifier.startsWith(prefix) ||
+          !specifier.endsWith(suffix) ||
+          specifier.length < prefix.length + suffix.length
+        )
+          continue;
+        rest = specifier.slice(prefix.length, specifier.length - suffix.length);
+      }
+      for (const target of targets) {
+        const found = fileAt(target.replace("*", rest));
+        if (found) return found;
+      }
+    }
+    return;
+  };
 }
 
 const NON_BINDABLE =
@@ -158,9 +236,31 @@ function nonBindableMessage(message: string): string {
   return `${NON_BINDABLE}To mark a property as bindable: 'let { prop = $bindable() } = $props()'\n\n${message}`;
 }
 
+const NOTHING_EMITTED = {
+  reactive: [],
+  transitions: [],
+  storeDeclarations: [],
+  bindingChecks: [],
+};
+
+/** SvelteKit's major version, from the project's `@sveltejs/kit`, or 0. */
+function kitMajor(root: string): number {
+  try {
+    const path = createRequire(join(root, "package.json")).resolve(
+      "@sveltejs/kit/package.json",
+    );
+    const { version } = JSON.parse(readFileSync(path, "utf-8")) as {
+      version: string;
+    };
+    return Number.parseInt(version, 10);
+  } catch {
+    return 0;
+  }
+}
+
 /** The deepest folder that holds every path. */
 function commonDir(paths: string[]): string {
-  let common = dirname(paths[0] ?? sep);
+  let common = paths[0] ?? sep;
   for (const path of paths)
     while (!`${path}${sep}`.startsWith(`${common}${sep}`) && common !== sep)
       common = dirname(common);
@@ -229,7 +329,11 @@ export async function typecheck(
   const texts = await Promise.all(files.map((path) => readFile(path, "utf-8")));
   // Generated code mirrors the sources under one root, so `rootDirs` maps
   // a relative import between them.
-  const root = commonDir([workspace, ...files]);
+  // The tsconfig's folder, where its `rootDirs` (SvelteKit's) start.
+  const root = commonDir([
+    project.tsconfig ? dirname(project.tsconfig) : workspace,
+    ...files.map((file) => dirname(file)),
+  ]);
 
   const outputs = new Map<
     string,
@@ -238,7 +342,12 @@ export async function typecheck(
       source: string;
       svelte: string;
       isTs: boolean;
-      emitted: ReturnType<typeof emit>;
+      emitted: Pick<
+        ReturnType<typeof emit>,
+        "reactive" | "transitions" | "storeDeclarations" | "bindingChecks"
+      >;
+      /** A SvelteKit file's typed copy, whose syntax errors are the user's. */
+      kit?: boolean;
     }
   >();
   const writes: Promise<void>[] = [];
@@ -264,6 +373,7 @@ export async function typecheck(
     try {
       result = emit(texts[i] ?? "", {
         svelte: svelteMajor,
+        basename: basename(path),
         // A relative import that leaves the root is relative to the
         // generated file's folder instead.
         rewriteImport(specifier) {
@@ -297,6 +407,57 @@ export async function typecheck(
       );
   }
 
+  // SvelteKit: its files get the types svelte-check gives them, in copies
+  // that replace them, and the `./$types` they import, mirrored next to the
+  // generated code, import those copies.
+  const mirror = (path: string) => join(genDir, relative(root, path));
+  const under = (path: string, dir: string) => path.startsWith(`${dir}${sep}`);
+  const kitProject =
+    project.tsconfig !== undefined &&
+    (project.rootDirs.some((dir) => dir.includes(".svelte-kit")) ||
+      files.some((path) => isKitRouteFile(basename(path))));
+  const replaced: string[] = [];
+  if (kitProject) {
+    const hooksModule =
+      kitMajor(root) >= 3 ? "@sveltejs/kit/hooks" : "@sveltejs/kit";
+    for (const path of scriptsOf(project, isKitFile)) {
+      if (!under(path, root)) continue;
+      const source = readFileSync(path, "utf-8");
+      const output = kitFile(path, source, hooksModule);
+      if (!output) continue;
+      replaced.push(path);
+      outputs.set(mirror(path), {
+        output,
+        source,
+        svelte: path,
+        isTs: !JS_FILE.test(path),
+        emitted: NOTHING_EMITTED,
+        kit: true,
+      });
+      write(mirror(path), output.code);
+    }
+  }
+  const rootDirs: string[] = [];
+  for (const dir of project.rootDirs) {
+    if (dir === root || under(dir, outDir)) continue;
+    if (!(kitProject && under(dir, root) && existsSync(dir))) {
+      rootDirs.push(dir);
+      continue;
+    }
+    // A rootDir in the project, such as SvelteKit's `.svelte-kit/types`.
+    replaced.push(dir);
+    rootDirs.push(mirror(dir));
+    for (const file of glob(dir, ["**/*.d.ts"]))
+      write(mirror(join(dir, file)), readFileSync(join(dir, file), "utf-8"));
+  }
+  // An alias (`$lib/*`) finds a component's generated code before its source.
+  const paths = Object.fromEntries(
+    Object.entries(project.paths).map(([key, targets]) => [
+      key,
+      targets.flatMap((t) => (under(t, root) ? [mirror(t), t] : [t])),
+    ]),
+  );
+
   const tsconfig = join(outDir, "tsconfig.json");
   const rel = (path: string) => relativeTo(outDir, path);
   write(
@@ -306,7 +467,17 @@ export async function typecheck(
         ...(project.tsconfig ? { extends: rel(project.tsconfig) } : {}),
         compilerOptions: {
           ...(project.tsconfig ? {} : DEFAULT_COMPILER_OPTIONS),
-          rootDirs: [rel(root), "svelte"],
+          rootDirs: [rel(root), "svelte", ...rootDirs.map(rel)],
+          ...(Object.keys(paths).length > 0
+            ? {
+                paths: Object.fromEntries(
+                  Object.entries(paths).map(([key, targets]) => [
+                    key,
+                    targets.map(rel),
+                  ]),
+                ),
+              }
+            : {}),
           allowArbitraryExtensions: true,
           noEmit: true,
         },
@@ -321,7 +492,7 @@ export async function typecheck(
         ].map(rel),
         // The project's own TypeScript, which can import components.
         include: declarations ? project.include.map(rel) : [],
-        exclude: project.exclude.map(rel),
+        exclude: [...project.exclude, ...replaced].map(rel),
       },
       null,
       2,
@@ -393,7 +564,10 @@ export async function typecheck(
   // A syntax error in generated code stops the checker before it
   // type-checks anything, so it must fail the run, not pass it.
   const syntax = raw.filter(
-    (d) => inOutput(d.file) && SYNTAX_CODE.test(d.code),
+    (d) =>
+      inOutput(d.file) &&
+      SYNTAX_CODE.test(d.code) &&
+      !outputs.get(resolve(cwd, d.file))?.kit,
   );
   if (syntax.length > 0 || STOPPED.test(text))
     throw new EmitError(
@@ -548,14 +722,14 @@ export async function typecheck(
     : diagnostics;
   // In TypeScript's program order, as svelte-check lists them: a file's
   // imports before it; in a file, the compiler's before the checker's.
+  const generatedOf = new Map(
+    [...outputs.values()].map((gen) => [gen.svelte, gen.output.code]),
+  );
   const order = programOrder(
     [...new Set(reported.map((d) => d.file))],
-    (file) => {
-      const component = files.indexOf(file);
-      return component === -1
-        ? readFileSync(file, "utf-8")
-        : (texts[component] ?? "");
-    },
+    // Generated code, whose imports include SvelteKit's `./$types`.
+    (file) => generatedOf.get(file) ?? readFileSync(file, "utf-8"),
+    importResolver([root, ...project.rootDirs], project.paths),
   );
   const sourceRank = (d: Diagnostic) => (d.source === "svelte" ? 0 : 1);
   reported.sort(

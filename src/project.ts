@@ -30,15 +30,22 @@ interface RawConfig {
   include?: string[];
   exclude?: string[];
   files?: string[];
-  compilerOptions?: { rootDirs?: string[] };
+  compilerOptions?: {
+    rootDirs?: string[];
+    baseUrl?: string;
+    paths?: Record<string, string[]>;
+  };
 }
 
-/** `include`, `exclude`, `files` and `rootDirs` as absolute paths, `extends` applied. */
+/** `include`, `exclude`, `files`, `rootDirs` and `paths` as absolute paths, `extends` applied. */
 interface Inputs {
   include?: string[];
   exclude?: string[];
   files?: string[];
   rootDirs?: string[];
+  baseUrl?: string;
+  /** Relative to `baseUrl`, or the folder of the tsconfig that sets them. */
+  paths?: Record<string, string[]>;
 }
 
 function readInputs(path: string): Inputs {
@@ -55,13 +62,25 @@ function readInputs(path: string): Inputs {
       : createRequire(path).resolve(base);
     inputs = { ...inputs, ...defined(readInputs(basePath)) };
   }
+  const options = config.compilerOptions;
+  const baseUrl = options?.baseUrl ? resolve(dir, options.baseUrl) : undefined;
+  const pathsBase = baseUrl ?? inputs.baseUrl ?? dir;
   return {
     ...inputs,
     ...defined({
       include: absolute(config.include),
       exclude: absolute(config.exclude),
       files: absolute(config.files),
-      rootDirs: absolute(config.compilerOptions?.rootDirs),
+      rootDirs: absolute(options?.rootDirs),
+      baseUrl,
+      paths:
+        options?.paths &&
+        Object.fromEntries(
+          Object.entries(options.paths).map(([key, targets]) => [
+            key,
+            targets.map((t) => resolve(pathsBase, t)),
+          ]),
+        ),
     }),
   };
 }
@@ -129,6 +148,8 @@ export interface Project {
   exclude: string[];
   /** The tsconfig's `rootDirs`, as absolute paths. */
   rootDirs: string[];
+  /** The tsconfig's `paths`, with absolute targets. */
+  paths: Record<string, string[]>;
   /** The tsconfig's own `include` and `exclude`, as written. */
   raw: { include?: string[]; exclude?: string[] };
   /** Whether a TS or JS file's errors are reported. */
@@ -167,6 +188,7 @@ export function projectOf(options: ProjectOptions): Project {
       include: [],
       exclude: [],
       rootDirs: [],
+      paths: {},
       raw: {},
       reports: () => false,
     };
@@ -210,10 +232,70 @@ export function projectOf(options: ProjectOptions): Project {
     include,
     exclude,
     rootDirs: inputs.rootDirs ?? [],
+    // A package's subpath imports (`#lib/*`) work as `paths` do, after them.
+    paths: { ...importsOf(dirname(tsconfig)), ...inputs.paths },
     raw: parseJsonc(readFileSync(tsconfig, "utf-8")) as RawConfig,
     // As svelte-check: every file in the program, but JS in node_modules.
     reports: (path) => !NODE_MODULES_JS.test(toPosix(path)),
   };
+}
+
+/** The nearest package.json's `imports`, as `paths` with absolute targets. */
+function importsOf(dir: string): Record<string, string[]> {
+  const path = findUp(dir, "package.json");
+  if (!path) return {};
+  let imports: unknown;
+  try {
+    ({ imports } = JSON.parse(readFileSync(path, "utf-8")) as {
+      imports?: unknown;
+    });
+  } catch {
+    return {};
+  }
+  const paths: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(imports ?? {})) {
+    const target = importTarget(value);
+    if (key.startsWith("#") && target?.startsWith("./"))
+      paths[key] = [resolve(dirname(path), target)];
+  }
+  return paths;
+}
+
+/** An `imports` entry's target, preferring its `types` condition. */
+function importTarget(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  if (Array.isArray(value)) return importTarget(value[0]);
+  if (!value || typeof value !== "object") return;
+  const conditions = value as Record<string, unknown>;
+  for (const condition of ["types", "import", "default"])
+    if (condition in conditions) return importTarget(conditions[condition]);
+  return importTarget(Object.values(conditions)[0]);
+}
+
+/** The TS and JS files a project's `include` names that pass `test`. */
+export function scriptsOf(
+  project: Project,
+  test: (path: string) => boolean,
+): string[] {
+  const isExcluded = absoluteMatcher(project.exclude);
+  const found = new Set<string>();
+  for (const pattern of project.include) {
+    const scriptGlob =
+      WILDCARD.test(pattern) || HAS_EXTENSION.test(pattern)
+        ? pattern
+        : `${pattern}/**/*`;
+    const [base, rest] = splitGlob(scriptGlob);
+    if (!rest) {
+      if (existsSync(base) && test(base)) found.add(base);
+      continue;
+    }
+    if (!existsSync(base)) continue;
+    for (const rel of glob(base, [rest])) {
+      const path = join(base, rel);
+      if (test(path) && !isExcluded(path)) found.add(path);
+    }
+  }
+  return [...found].sort();
 }
 
 /** A path relative to `from`, `./`-prefixed when it doesn't climb, for tsconfig fields. */

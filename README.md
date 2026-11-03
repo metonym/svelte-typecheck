@@ -113,7 +113,7 @@ The helper types the generated code calls are adapted from svelte2tsx's (MIT), a
 
 ## Limits
 
-- No SvelteKit auto-typing (`./$types`) or CSS diagnostics.
+- No CSS diagnostics.
 - Your editor still runs the Svelte language server, so the two can disagree at the edges.
 
 ## License

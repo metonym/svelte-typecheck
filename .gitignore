@@ -5,3 +5,4 @@ dist
 bench/corpus
 .ostia
 tests/.tmp
+.svelte-kit
