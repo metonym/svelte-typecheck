@@ -124,7 +124,9 @@ export function writer(
   const verbose = format.endsWith("verbose");
   const log = (message: string) => write(`${Date.now()} ${message}\n`);
   return {
-    start(workspace: string) {
+    start(workspace: string, clearScreen = false) {
+      if (!machine && clearScreen && process.stdout.isTTY)
+        write("\u001B[2J\u001B[3J\u001B[H");
       if (machine) log(`START ${JSON.stringify(workspace)}`);
       else if (verbose)
         write(
@@ -167,7 +169,7 @@ export function writer(
         `${d.severity === "error" ? c.red("Error") : c.yellow("Warn")}: ${message}\n\n`,
       );
     },
-    completion(summary: Summary) {
+    completion(summary: Summary, watching = false) {
       const { files, errors, warnings, filesWithProblems } = summary;
       if (machine) {
         log(
@@ -180,6 +182,7 @@ export function writer(
       if (errors) write(c.red(message));
       else if (warnings) write(c.yellow(message));
       else write(c.green(message));
+      if (watching) write("Watching for file changes...");
     },
     failure(error: Error) {
       if (machine) log(`FAILURE ${JSON.stringify(error.message)}`);

@@ -25,6 +25,8 @@ const STOPPED = /Stopped before type checking/;
 const TOKEN = /^(?:[\w$]+|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`]*`)/;
 
 const SHIMS = fileURLToPath(new URL("./shims/", import.meta.url));
+/** The files the last incremental run wrote. */
+const MANIFEST = "manifest.json";
 
 /** svelte-check's compiler options with no tsconfig. */
 const DEFAULT_COMPILER_OPTIONS = {
@@ -148,7 +150,14 @@ export async function typecheck(
     );
 
   const started = performance.now();
-  await rm(outDir, { recursive: true, force: true });
+  const incremental = options.incremental ?? false;
+  // An incremental run keeps the last run's code and rewrites what changed.
+  const previous = incremental
+    ? await readFile(join(outDir, MANIFEST), "utf-8")
+        .then((text) => new Set(JSON.parse(text) as string[]))
+        .catch(() => new Set<string>())
+    : new Set<string>();
+  if (!incremental) await rm(outDir, { recursive: true, force: true });
   const files = project.components;
   const texts = await Promise.all(files.map((path) => readFile(path, "utf-8")));
   // Generated code mirrors the sources under one root, so `rootDirs` maps
@@ -160,12 +169,21 @@ export async function typecheck(
     { output: Output; source: string; svelte: string; isTs: boolean }
   >();
   const writes: Promise<void>[] = [];
-  const write = (path: string, content: string) =>
+  const written = new Set<string>();
+  const write = (path: string, content: string) => {
+    written.add(path);
     writes.push(
-      mkdir(dirname(path), { recursive: true }).then(() =>
-        writeFile(path, content),
-      ),
+      (incremental
+        ? readFile(path, "utf-8").catch(() => undefined)
+        : Promise.resolve(undefined)
+      ).then(async (old) => {
+        if (old === content) return;
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, content);
+      }),
     );
+  };
+
   const failed: TypecheckResult["failed"] = [];
   for (const [i, path] of files.entries()) {
     const genFrom = join(genDir, relative(root, dirname(path)));
@@ -231,6 +249,10 @@ export async function typecheck(
       2,
     ),
   );
+  write(join(outDir, MANIFEST), JSON.stringify([...written].sort()));
+  // Code for a component that's gone, which an import could still find.
+  for (const path of previous)
+    if (!written.has(path)) writes.push(rm(path, { force: true }));
   await Promise.all(writes);
   const emitted = performance.now();
 
@@ -238,7 +260,17 @@ export async function typecheck(
   const checking = sources.has("js")
     ? run(
         command.command,
-        [...command.prefix, ...checkerArgs(checker, tsconfig)],
+        [
+          ...command.prefix,
+          ...checkerArgs(checker, tsconfig),
+          ...(incremental && checker !== "bun"
+            ? [
+                "--incremental",
+                "--tsBuildInfoFile",
+                join(outDir, "tsbuildinfo"),
+              ]
+            : []),
+        ],
         cwd,
       ).then((output) => ({ output, at: performance.now() }))
     : Promise.resolve({ output: "", at: emitted });

@@ -7,7 +7,13 @@ import {
   summarize,
   writer,
 } from "./format.ts";
-import type { Checker, DiagnosticSource } from "./types.ts";
+import type {
+  Checker,
+  DiagnosticSource,
+  TypecheckOptions,
+  TypecheckResult,
+} from "./types.ts";
+import { watch } from "./watch.ts";
 
 const HELP = `Usage: svelte-typecheck [options]
 
@@ -33,6 +39,10 @@ svelte-check's options:
                             code:ignore or code:error, comma-separated
   --fail-on-warnings        Exit 1 on a warning too
   --color, --no-color       Force color on or off
+  --watch                   Check again when a file changes
+  --preserveWatchOutput     Don't clear the screen between watch runs
+  --incremental             Keep generated code between runs, and let the
+                            checker reuse its last run
   --tsgo                    Check with tsgo (same as --checker tsgo)
   -h, --help                Show this help
   -v, --version             Show the version
@@ -74,48 +84,63 @@ export async function main(argv: string[]): Promise<0 | 1> {
     (text) => process.stdout.write(text),
     colors(colorFlag(values.color, values["no-color"])),
   );
-  const workspace = values.workspace ?? ".";
-  try {
-    const result = await typecheck({
-      workspace,
-      tsconfig: values["no-tsconfig"] ? false : values.tsconfig,
-      ignore: values.ignore?.split(","),
-      config: values.config,
-      checker: (values.checker ?? (values.tsgo ? "tsgo" : undefined)) as
-        Checker | undefined,
-      components: values.components,
-      outDir: values["out-dir"],
-      declarations: !values["no-declarations"],
-      svelte: values.svelte,
-      diagnosticSources: values["diagnostic-sources"]
-        ?.split(",")
-        .map((source) => source.trim()) as DiagnosticSource[] | undefined,
-      compilerWarnings: parseCompilerWarnings(values["compiler-warnings"]),
-    });
-    out.start(result.workspace);
+  const options: TypecheckOptions = {
+    workspace: values.workspace ?? ".",
+    tsconfig: values["no-tsconfig"] ? false : values.tsconfig,
+    ignore: values.ignore?.split(","),
+    config: values.config,
+    checker: (values.checker ??
+      (values.tsgo || values["tsgo-experimental-api"] ? "tsgo" : undefined)) as
+      Checker | undefined,
+    components: values.components,
+    outDir: values["out-dir"],
+    declarations: !values["no-declarations"],
+    svelte: values.svelte,
+    diagnosticSources: values["diagnostic-sources"]
+      ?.split(",")
+      .map((source) => source.trim()) as DiagnosticSource[] | undefined,
+    compilerWarnings: parseCompilerWarnings(values["compiler-warnings"]),
+    incremental: values.incremental,
+  };
+  const errorsOnly = values.threshold === "error";
+  const failOnWarnings = values["fail-on-warnings"];
+
+  /** Prints a run as svelte-check does and returns its exit code. */
+  const report = (result: TypecheckResult | Error, watching: boolean) => {
+    if (result instanceof Error) {
+      out.failure(
+        result instanceof EmitError
+          ? new Error(
+              `${result.message}\nThis is a svelte-typecheck bug; please report it.`,
+            )
+          : result,
+      );
+      return 1;
+    }
+    out.start(result.workspace, watching && !values.preserveWatchOutput);
     // The threshold hides warnings, which still count, as in svelte-check.
-    const errorsOnly = values.threshold === "error";
     for (const d of result.diagnostics)
       if (!errorsOnly || d.severity === "error")
         out.diagnostic(d, result.workspace);
     for (const f of result.failed)
       out.failure(new Error(`${f.file}: failed to parse: ${f.message}`));
     const summary = summarize(result.diagnostics, result.components);
-    out.completion(summary);
-    const fails =
-      summary.errors > 0 ||
+    out.completion(summary, watching);
+    return summary.errors > 0 ||
       result.failed.length > 0 ||
-      (values["fail-on-warnings"] && summary.warnings > 0);
-    return fails ? 1 : 0;
+      (failOnWarnings && summary.warnings > 0)
+      ? 1
+      : 0;
+  };
+
+  if (values.watch) {
+    watch(options, (result) => report(result, true));
+    return new Promise(() => {});
+  }
+  try {
+    return report(await typecheck(options), false);
   } catch (error) {
-    out.failure(
-      error instanceof EmitError
-        ? new Error(
-            `${error.message}\nThis is a svelte-typecheck bug; please report it.`,
-          )
-        : (error as Error),
-    );
-    return 1;
+    return report(error as Error, false);
   }
 }
 
@@ -143,8 +168,10 @@ function parse(argv: string[]) {
       color: { type: "boolean", default: false },
       "no-color": { type: "boolean", default: false },
       tsgo: { type: "boolean", default: false },
-      // svelte-check's, accepted for a drop-in; this always works like them.
       incremental: { type: "boolean", default: false },
+      watch: { type: "boolean", default: false },
+      preserveWatchOutput: { type: "boolean", default: false },
+      // svelte-check's, accepted for a drop-in.
       "tsgo-experimental-api": { type: "boolean", default: false },
       checker: { type: "string" },
       components: { type: "string", multiple: true },

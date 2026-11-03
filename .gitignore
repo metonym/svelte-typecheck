@@ -4,3 +4,4 @@ dist
 *.tgz
 bench/corpus
 .ostia
+tests/.tmp
