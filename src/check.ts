@@ -91,6 +91,45 @@ function parseDiagnostics(text: string): RawDiagnostic[] {
   return found;
 }
 
+const RELATIVE_IMPORT = /\bfrom\s*["'](\.{1,2}\/[^"']+)["']/g;
+
+/**
+ * Files in TypeScript's program order: roots as it lists a folder (files
+ * before subfolders, by name), each after the files it imports.
+ */
+function programOrder(
+  paths: string[],
+  read: (path: string) => string,
+): Map<string, number> {
+  const known = new Set(paths);
+  const roots = [...paths].sort((a, b) => {
+    const pa = a.split(sep);
+    const pb = b.split(sep);
+    for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+      if (pa[i] === pb[i]) continue;
+      const aFile = i === pa.length - 1;
+      const bFile = i === pb.length - 1;
+      if (aFile !== bFile) return aFile ? -1 : 1;
+      return (pa[i] ?? "") < (pb[i] ?? "") ? -1 : 1;
+    }
+    return pa.length - pb.length;
+  });
+  const order = new Map<string, number>();
+  let next = 0;
+  const visit = (path: string) => {
+    if (order.has(path)) return;
+    order.set(path, Number.POSITIVE_INFINITY);
+    for (const [, specifier] of read(path).matchAll(RELATIVE_IMPORT)) {
+      const target = resolve(dirname(path), specifier ?? "");
+      for (const candidate of [target, `${target}.ts`, `${target}.js`])
+        if (known.has(candidate)) visit(candidate);
+    }
+    order.set(path, next++);
+  };
+  for (const root of roots) visit(root);
+  return order;
+}
+
 /** The deepest folder that holds every path. */
 function commonDir(paths: string[]): string {
   let common = dirname(paths[0] ?? sep);
@@ -391,15 +430,26 @@ export async function typecheck(
   const reported = errorsOnly
     ? diagnostics.filter((d) => d.severity === "error")
     : diagnostics;
-  // Components first, then TS and JS files, as svelte-check lists them.
-  const isComponent = (d: Diagnostic) => (d.file.endsWith(".svelte") ? 0 : 1);
+  // In TypeScript's program order, as svelte-check lists them: a file's
+  // imports before it; in a file, the compiler's before the checker's.
+  const order = programOrder(
+    [...new Set(reported.map((d) => d.file))],
+    (file) => {
+      const component = files.indexOf(file);
+      return component === -1
+        ? readFileSync(file, "utf-8")
+        : (texts[component] ?? "");
+    },
+  );
+  const sourceRank = (d: Diagnostic) => (d.source === "svelte" ? 0 : 1);
   reported.sort(
     (a, b) =>
-      isComponent(a) - isComponent(b) ||
-      a.file.localeCompare(b.file) ||
+      (order.get(a.file) ?? 0) - (order.get(b.file) ?? 0) ||
+      sourceRank(a) - sourceRank(b) ||
       a.line - b.line ||
       a.column - b.column,
   );
+
   return {
     diagnostics: reported,
     workspace,

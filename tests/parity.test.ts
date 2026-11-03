@@ -68,6 +68,11 @@ describe("svelte-check parity, machine output", () => {
     60_000,
   );
 
+  it("matches svelte-check with $$Props, $$Events, $$Slots, strictEvents and animate:", () => {
+    const cwd = join(root, "tests/fixtures-typed");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check with preprocessors", () => {
     const cwd = join(root, "tests/fixtures-preprocess");
     // svelte-check's css source (not supported) flags the custom style.
