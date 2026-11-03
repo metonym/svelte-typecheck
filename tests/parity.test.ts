@@ -73,6 +73,11 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check with generic components", () => {
+    const cwd = join(root, "tests/fixtures-generic");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check with preprocessors", () => {
     const cwd = join(root, "tests/fixtures-preprocess");
     // svelte-check's css source (not supported) flags the custom style.
