@@ -123,6 +123,15 @@ export function summarize(diagnostics: Diagnostic[], files: number): Summary {
   };
 }
 
+const DRIVE = /^[A-Z]:/;
+
+/** A workspace as svelte-check prints it: a file URI's path, whose drive letter is lowercase on Windows. */
+function displayed(workspace: string): string {
+  return process.platform === "win32"
+    ? workspace.replace(DRIVE, (drive) => drive.toLowerCase())
+    : workspace;
+}
+
 /** Writes a run as svelte-check would, to `write`. */
 export function writer(
   format: OutputFormat,
@@ -136,10 +145,10 @@ export function writer(
     start(workspace: string, clearScreen = false) {
       if (!machine && clearScreen && process.stdout.isTTY)
         write("\u001B[2J\u001B[3J\u001B[H");
-      if (machine) log(`START ${JSON.stringify(workspace)}`);
+      if (machine) log(`START ${JSON.stringify(displayed(workspace))}`);
       else if (verbose)
         write(
-          `Loading svelte-typecheck in workspace: ${workspace}\nGetting Svelte diagnostics...\n\n`,
+          `Loading svelte-typecheck in workspace: ${displayed(workspace)}\nGetting Svelte diagnostics...\n\n`,
         );
     },
     diagnostic(d: Diagnostic, workspace: string) {
@@ -168,7 +177,9 @@ export function writer(
           );
         return;
       }
-      write(`${workspace}${sep}${c.green(filename)}:${d.line}:${d.column}\n`);
+      write(
+        `${displayed(workspace)}${sep}${c.green(filename)}:${d.line}:${d.column}\n`,
+      );
       const source = sourceOf(d) ? `(${d.source})` : "";
       const message = verbose
         ? `${d.message} ${source}\n${c.cyan(codeFrame(d, c).trimEnd())}`

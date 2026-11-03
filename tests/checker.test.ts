@@ -1,6 +1,7 @@
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { typecheck } from "../src/check.ts";
-import { checkerCommand } from "../src/checker.ts";
+import { checkerCommand, onPath } from "../src/checker.ts";
 
 const root = join(import.meta.dir, "..");
 
@@ -18,6 +19,26 @@ describe("checkerCommand", () => {
     expect(checkerCommand("tsc", join(root, "tests/fixtures"))?.version).toBe(
       checkerCommand("tsc", root)?.version,
     );
+  });
+});
+
+describe("onPath", () => {
+  it("finds a Windows command by PATHEXT's extensions", () => {
+    const dir = join(root, "tests/.tmp/path");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "fake-checker.cmd"), "");
+    const { PATH, PATHEXT } = process.env;
+    process.env.PATH = dir;
+    process.env.PATHEXT = ".EXE;.CMD";
+    try {
+      expect(onPath("fake-checker", "win32")).toBe(
+        join(dir, "fake-checker.cmd"),
+      );
+      expect(onPath("fake-checker", "linux")).toBeUndefined();
+    } finally {
+      process.env.PATH = PATH;
+      process.env.PATHEXT = PATHEXT;
+    }
   });
 });
 

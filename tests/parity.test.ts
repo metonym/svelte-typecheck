@@ -3,6 +3,15 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
+// A package's own bin on Node: `node_modules/.bin` holds shell shims on Windows.
+const SVELTE_CHECK = [
+  "node",
+  join(root, "node_modules/svelte-check/bin/svelte-check"),
+];
+const SVELTE_KIT = [
+  "node",
+  join(root, "node_modules/@sveltejs/kit/svelte-kit.js"),
+];
 const TIMESTAMP = /^\d+ /;
 
 /** A CLI's machine output without timestamps or the file count. */
@@ -23,15 +32,7 @@ function machine(command: string[], cwd: string): string[] {
 }
 
 const svelteCheck = (args: string[], cwd: string) =>
-  machine(
-    [
-      join(root, "node_modules/.bin/svelte-check"),
-      "--output",
-      "machine",
-      ...args,
-    ],
-    cwd,
-  );
+  machine([...SVELTE_CHECK, "--output", "machine", ...args], cwd);
 const ours = (args: string[], cwd: string) =>
   machine(
     [
@@ -87,7 +88,7 @@ describe("svelte-check parity, machine output", () => {
   it("matches svelte-check in a SvelteKit project", () => {
     const cwd = join(root, "tests/fixtures-kit");
     // SvelteKit writes `./$types` and the tsconfig the project extends.
-    spawnSync(join(root, "node_modules/.bin/svelte-kit"), ["sync"], { cwd });
+    spawnSync(SVELTE_KIT[0] ?? "", [...SVELTE_KIT.slice(1), "sync"], { cwd });
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
@@ -143,7 +144,7 @@ describe("svelte-check parity, other formats", () => {
     "matches svelte-check's %s output",
     (format) => {
       expect(output([process.execPath, join(root, "src/cli.ts")], format)).toBe(
-        output([join(root, "node_modules/.bin/svelte-check")], format),
+        output(SVELTE_CHECK, format),
       );
     },
     60_000,
