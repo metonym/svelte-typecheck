@@ -35,8 +35,8 @@ export interface EmitOptions {
   svelte?: number;
 }
 
-/** `generics="T extends A = B, U"` as JSDoc: `@template {A} [T=B]`, `@template U`. */
-function jsdocTemplates(generics: string) {
+/** `T extends A = B, U` as its parameters, top-level commas only. */
+function genericParams(generics: string): string[] {
   const params: string[] = [];
   let depth = 0;
   let current = "";
@@ -49,15 +49,17 @@ function jsdocTemplates(generics: string) {
     } else current += c;
   }
   params.push(current);
-  return params
-    .map((p) => p.trim())
-    .filter(Boolean)
-    .map((p) => {
-      const m = p.match(GENERIC_PARAM);
-      if (!m) return ` * @template ${p}`;
-      const [, name, constraint, fallback] = m;
-      return ` * @template ${constraint ? `{${constraint}} ` : ""}${fallback ? `[${name}=${fallback}]` : name}`;
-    });
+  return params.map((p) => p.trim()).filter(Boolean);
+}
+
+/** `generics="T extends A = B, U"` as JSDoc: `@template {A} [T=B]`, `@template U`. */
+function jsdocTemplates(generics: string) {
+  return genericParams(generics).map((p) => {
+    const m = p.match(GENERIC_PARAM);
+    if (!m) return ` * @template ${p}`;
+    const [, name, constraint, fallback] = m;
+    return ` * @template ${constraint ? `{${constraint}} ` : ""}${fallback ? `[${name}=${fallback}]` : name}`;
+  });
 }
 
 export function emit(
@@ -144,11 +146,28 @@ export function emit(
   // only the JSDoc block right above a function, so merge the tags into one.
   /** JSDoc blocks moved out of the instance script. */
   const templateBlocks: [number, number][] = [];
+  /** The component's type parameters, in TS: `generics="…"` and `$$Generic`. */
+  const typeParams: string[] = [];
+  /** `type T = $$Generic<C>` statements, which become type parameters. */
+  const genericAliases = new Set<Node>();
+  if (instance && isTs)
+    for (const s of body) {
+      const ref = s.type === "TSTypeAliasDeclaration" ? s.typeAnnotation : null;
+      if (ref?.type !== "TSTypeReference" || ref.typeName?.name !== "$$Generic")
+        continue;
+      genericAliases.add(s);
+      const arg = (ref.typeArguments ?? ref.typeParameters)?.params?.[0];
+      typeParams.push(
+        arg
+          ? `${s.id.name} extends ${source.slice(arg.start, arg.end)}`
+          : s.id.name,
+      );
+    }
   let generics = "";
   if (instance) {
     const tags: string[] = [];
     const attr = instance.attributes.find((a: Node) => a.name === "generics");
-    if (attr && isTs) generics = `<${textOf(attr)}>`;
+    if (attr && isTs) typeParams.unshift(...genericParams(textOf(attr)));
     else if (attr) tags.push(...jsdocTemplates(textOf(attr)));
     const text = source.slice(instance.content.start, instance.content.end);
     for (const m of text.matchAll(JSDOC_BLOCK)) {
@@ -173,6 +192,7 @@ export function emit(
     }
     if (tags.length > 0 && !isTs) out.raw(`/**\n${tags.join("\n")}\n */\n`);
   }
+  if (typeParams.length > 0) generics = `<${typeParams.join(", ")}>`;
 
   // --- Stores: `$name` is declared right after `name`, or at the start.
   const storeAfter = new Map<number, string[]>();
@@ -225,7 +245,7 @@ export function emit(
     for (const s of body) {
       copyGap(cursor, s.start);
       cursor = s.end;
-      if (s.type === "ImportDeclaration") continue;
+      if (s.type === "ImportDeclaration" || genericAliases.has(s)) continue;
       if (s.type === "ExportNamedDeclaration") {
         const d = s.declaration;
         if (d) {
@@ -774,6 +794,23 @@ export function emit(
         });
     return scoped;
   };
+  /** An `{#each}` item's type, as svelte2tsx gives a slot prop that is one. */
+  const eachItemOf = (value: Node): string | undefined => {
+    const parts = Array.isArray(value) ? value : [value];
+    const only = parts.length === 1 ? parts[0] : undefined;
+    if (only?.type !== "ExpressionTag" || only.expression.type !== "Identifier")
+      return;
+    const b = scopes.bindingOf(only.expression);
+    if (b?.kind === "each-index") return "0";
+    const block = b?.declaration;
+    if (
+      b?.kind !== "each" ||
+      block?.context?.type !== "Identifier" ||
+      markupScoped({ type: "ExpressionTag", expression: block.expression })
+    )
+      return;
+    return `__sveltets_2_unwrapArr(${source.slice(block.expression.start, block.expression.end)})`;
+  };
   const entries = (pairs: [string, string][]) =>
     pairs.map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
   // `$$Props` is the props' type, once it agrees with the `export let`s.
@@ -789,7 +826,9 @@ export function emit(
     for (const a of attributes)
       if (a.type === "Attribute" && a.name !== "name") {
         out.raw(`${JSON.stringify(a.name)}: `);
-        if (markupScoped(a.value)) out.raw("__sveltets_2_any(0)");
+        const each = eachItemOf(a.value);
+        if (each) out.raw(each);
+        else if (markupScoped(a.value)) out.raw("__sveltets_2_any(0)");
         else attrValue(a.value);
         out.raw(", ");
       } else if (
@@ -833,12 +872,33 @@ export function emit(
     ? rendered
     : `__sveltets_2_partial${anyProp ? "_with_any" : ""}(${optional.length > 0 ? `[${optional.join(",")}], ` : ""}${rendered})`;
   const hasSlots = slots.size > 0 || typed.has("$$Slots");
-  out.raw(
-    `const $$Component = ${svelte < 4 ? "__sveltets_2_svelte3_component" : `__sveltets_2_isomorphic_component${hasSlots ? "_slots" : ""}`}(${withProps});\n`,
-  );
-  if (isTs) out.raw("type $$Component = InstanceType<typeof $$Component>;\n");
-  else
-    out.raw("/** @typedef {InstanceType<typeof $$Component>} $$Component */\n");
+  if (isTs && typeParams.length > 0 && svelte >= 4) {
+    // A generic component's type takes the parameters a use infers.
+    const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[1] ?? p);
+    const args = `<${names.join(", ")}>`;
+    // A function, since `$$` in a replacement string means `$`.
+    const wrapped = withProps.replaceAll(
+      "$$render()",
+      () => `$$render${args}()`,
+    );
+    const part = (name: string) =>
+      `ReturnType<__sveltets_Render${args}["${name}"]>`;
+    const children = hasSlots ? " & { children?: any }" : "";
+    out.raw(
+      `class __sveltets_Render${generics} { props() { return ${wrapped}.props; } events() { return ${wrapped}.events; } slots() { return ${wrapped}.slots; } bindings() { return ""; } exports() { return $$render${args}().exports; } }\n` +
+        `interface $$IsomorphicComponent { new ${generics}(options: import("svelte").ComponentConstructorOptions<${part("props")}${children}>): import("svelte").SvelteComponent<${part("props")}, ${part("events")}, ${part("slots")}> & { $$bindings?: ${part("bindings")} } & ${part("exports")}; ${generics}(internal: unknown, props: ${part("props")} & { $$events?: ${part("events")}; $$slots?: ${part("slots")}${hasSlots ? "; children?: any" : ""} }): ${part("exports")}; z_$$bindings?: ReturnType<__sveltets_Render<${names.map(() => "any").join(", ")}>["bindings"]>; }\n` +
+        `const $$Component: $$IsomorphicComponent = null as any;\ntype $$Component${generics} = InstanceType<typeof $$Component${args}>;\n`,
+    );
+  } else {
+    out.raw(
+      `const $$Component = ${svelte < 4 ? "__sveltets_2_svelte3_component" : `__sveltets_2_isomorphic_component${hasSlots ? "_slots" : ""}`}(${withProps});\n`,
+    );
+    if (isTs) out.raw("type $$Component = InstanceType<typeof $$Component>;\n");
+    else
+      out.raw(
+        "/** @typedef {InstanceType<typeof $$Component>} $$Component */\n",
+      );
+  }
   out.raw("export default $$Component;\n");
 
   return { out, isTs };

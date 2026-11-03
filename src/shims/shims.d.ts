@@ -58,6 +58,9 @@ declare function __sveltets_2_store_get<
 
 // --- Markup.
 
+/** An `{#each}` item, as a slot prop that is one is typed. */
+declare function __sveltets_2_unwrapArr<T>(arr: ArrayLike<T>): T;
+
 /** `{#each}` accepts an array or iterable, and in Svelte 5 `null`. */
 declare function __sveltets_2_ensureArray<
   T extends ArrayLike<unknown> | Iterable<unknown>,
