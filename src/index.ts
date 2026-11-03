@@ -4,6 +4,7 @@ export type {
   Checker,
   CompilerDiagnostic,
   Diagnostic,
+  DiagnosticSource,
   TypecheckOptions,
   TypecheckResult,
 } from "./types.ts";

@@ -138,7 +138,7 @@ try {
   });
   assert(
     nodeOnly.status === 1 &&
-      nodeOnly.stderr.includes(" errors [") &&
+      nodeOnly.stderr.includes(" errors, ") &&
       nodeOnly.stderr.includes(" tsc "),
     `node without Bun: exit ${nodeOnly.status}\n${nodeOnly.stdout}${nodeOnly.stderr}`,
   );
@@ -148,8 +148,9 @@ try {
 import { compilerDiagnostics, typecheck } from "svelte-typecheck";
 
 const result = await typecheck({ checker: "tsc" });
-assert.equal(result.components, 3);
-assert.equal(result.diagnostics.length, 12);
+assert.equal(result.components, 4);
+assert.equal(result.diagnostics.filter((d) => d.severity === "error").length, 12);
+assert.equal(result.diagnostics.filter((d) => d.source === "svelte").length, 1);
 assert.deepEqual(result.dropped, []);
 const [warning] = compilerDiagnostics('<img src="a.png">', "Img.svelte");
 assert.equal(warning.code, "a11y_missing_attribute");

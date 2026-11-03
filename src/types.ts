@@ -25,14 +25,30 @@ export interface TypecheckOptions {
   declarations?: boolean;
   /** The Svelte package to check against. Default: `svelte`, resolved from `cwd`. */
   svelte?: string;
+  /**
+   * What to report: `js` for type errors (in TS and JS), `svelte` for the
+   * compiler's warnings and errors. `css` is accepted, as svelte-check
+   * takes it, and reports nothing. Default: all.
+   */
+  diagnosticSources?: DiagnosticSource[];
+  /** `error` reports errors only. Default: `warning`. */
+  threshold?: "warning" | "error";
+  /** Compiler warnings to drop (`ignore`) or report as errors, by code. */
+  compilerWarnings?: Record<string, "ignore" | "error">;
 }
 
-/** A type error, at its line and column (both 1-based) in the source. */
+/** A kind of check, as svelte-check's `--diagnostic-sources` names them. */
+export type DiagnosticSource = "js" | "svelte" | "css";
+
+/** An error or warning, at its line and column (both 1-based) in the source. */
 export interface Diagnostic {
   file: string;
   line: number;
   column: number;
-  /** `TS2322` and the like. */
+  severity: "error" | "warning";
+  /** `ts` or `js` for a type error (by the file's language), `svelte` for the compiler. */
+  source: "ts" | "js" | "svelte";
+  /** `TS2322`, or a compiler code such as `a11y_missing_attribute`. */
   code: string;
   message: string;
 }
@@ -48,8 +64,8 @@ export interface TypecheckResult {
   checker: Checker;
   /** The checker's version, when its package says. */
   checkerVersion?: string;
-  /** Milliseconds spent emitting and checking. */
-  timings: { emit: number; check: number };
+  /** Milliseconds spent emitting, type-checking and compiling. */
+  timings: { emit: number; check: number; compile: number };
 }
 
 /** A warning or error the Svelte compiler reports for a component. */
