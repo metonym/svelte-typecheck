@@ -14,5 +14,11 @@
     "bench/**/*.ts"
   ],
   "ignore": ["tests/fixtures/**"],
-  "ignoreDependencies": ["@typescript/native-preview", "tsrs"]
+  "ignoreDependencies": [
+    "@typescript/native-preview",
+    "svelte",
+    "svelte3",
+    "svelte4",
+    "tsrs"
+  ]
 }

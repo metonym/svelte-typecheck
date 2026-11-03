@@ -41,6 +41,8 @@
     "ostia": "^0.2.12",
     "sveast": "^0.9.6",
     "svelte": "^5.57.3",
+    "svelte3": "npm:svelte@^3.59.2",
+    "svelte4": "npm:svelte@^4.2.20",
     "tsrs": "0.20.1-ts7.1.0-beta",
     "typescript": "^6.0.3"
   },

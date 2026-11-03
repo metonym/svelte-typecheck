@@ -5,6 +5,7 @@ import { createRequire } from "node:module";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
+import { compilerDiagnostics, svelteDirOf } from "./compiler.ts";
 import { emit } from "./emit.ts";
 import { glob, matcher } from "./glob.ts";
 import { createLocator, type Output } from "./output.ts";
@@ -13,6 +14,7 @@ import type { Diagnostic, TypecheckOptions, TypecheckResult } from "./types.ts";
 /** `path(line,col): error TSxxxx: message`, as tsc, tsgo, tsrs and `bun check` print. */
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 const CONTINUATION = /^\s+\S/;
+const JS_FILE = /\.[cm]?jsx?$/;
 /** Errors that stop a checker before it type-checks anything. */
 const SYNTAX_CODE = /^TS[18]\d{3}$/;
 const STOPPED = /Stopped before type checking/;
@@ -73,15 +75,18 @@ function parseDiagnostics(text: string): Diagnostic[] {
   let continues = false;
   for (const line of text.split("\n")) {
     const m = DIAGNOSTIC.exec(line);
-    if (m)
+    if (m) {
+      const file = m[1] ?? "";
       found.push({
-        file: m[1] ?? "",
+        file,
         line: Number(m[2]),
         column: Number(m[3]),
+        severity: "error",
+        source: JS_FILE.test(file) ? "js" : "ts",
         code: m[4] ?? "",
         message: m[5] ?? "",
       });
-    else if (continues && CONTINUATION.test(line)) {
+    } else if (continues && CONTINUATION.test(line)) {
       const last = found.at(-1);
       if (last) last.message += `\n${line}`;
     }
@@ -113,11 +118,9 @@ export async function typecheck(
   );
   const genDir = join(outDir, "svelte");
   const declarations = options.declarations ?? true;
-  const svelteDir = options.svelte
-    ? resolve(cwd, options.svelte)
-    : dirname(
-        createRequire(join(cwd, "package.json")).resolve("svelte/package.json"),
-      );
+  const svelteDir = svelteDirOf(cwd, options.svelte);
+  const sources = new Set(options.diagnosticSources ?? ["js", "svelte"]);
+  const errorsOnly = options.threshold === "error";
   const { version } = JSON.parse(
     readFileSync(join(svelteDir, "package.json"), "utf-8"),
   ) as { version: string };
@@ -148,13 +151,13 @@ export async function typecheck(
   const files = glob(workspace, options.components ?? ["**/*.svelte"]).filter(
     (rel) => !isExcluded(rel),
   );
-  const sources = await Promise.all(
+  const texts = await Promise.all(
     files.map((rel) => readFile(join(workspace, rel), "utf-8")),
   );
 
   const outputs = new Map<
     string,
-    { output: Output; source: string; svelte: string }
+    { output: Output; source: string; svelte: string; isTs: boolean }
   >();
   const writes: Promise<void>[] = [];
   const write = (path: string, content: string) =>
@@ -169,7 +172,7 @@ export async function typecheck(
     const genFrom = join(genDir, dirname(rel));
     let result: ReturnType<typeof emit>;
     try {
-      result = emit(sources[i] ?? "", {
+      result = emit(texts[i] ?? "", {
         svelte: svelteMajor,
         // A relative import that leaves the workspace is relative to the
         // generated file's folder instead.
@@ -195,8 +198,9 @@ export async function typecheck(
     );
     outputs.set(genPath, {
       output: result.out,
-      source: sources[i] ?? "",
+      source: texts[i] ?? "",
       svelte: path,
+      isTs: result.isTs,
     });
     write(genPath, result.out.code);
     if (declarations)
@@ -237,12 +241,30 @@ export async function typecheck(
   await Promise.all(writes);
   const emitted = performance.now();
 
-  const text = await run(
-    command.command,
-    [...command.prefix, ...checkerArgs(checker, tsconfig)],
-    cwd,
-  );
-  const checked = performance.now();
+  // The compiler pass runs while the checker's process works.
+  const checking = sources.has("js")
+    ? run(
+        command.command,
+        [...command.prefix, ...checkerArgs(checker, tsconfig)],
+        cwd,
+      ).then((output) => ({ output, at: performance.now() }))
+    : Promise.resolve({ output: "", at: emitted });
+  const compiled: Diagnostic[] = [];
+  if (sources.has("svelte"))
+    for (const [i, rel] of files.entries()) {
+      const file = relative(cwd, join(workspace, rel));
+      for (const d of compilerDiagnostics(texts[i] ?? "", file, {
+        cwd,
+        svelte: svelteDir,
+      })) {
+        const level = options.compilerWarnings?.[d.code];
+        if (d.severity === "warning" && level === "ignore") continue;
+        const severity = level === "error" ? "error" : d.severity;
+        compiled.push({ file, ...d, severity, source: "svelte" });
+      }
+    }
+  const compiledAt = performance.now();
+  const { output: text, at: checked } = await checking;
 
   const raw = parseDiagnostics(text);
   const inOutput = (file: string) =>
@@ -284,7 +306,13 @@ export async function typecheck(
         continue;
       }
       const { line, column } = locator(gen.svelte, gen.source).position(source);
-      mapped = { ...d, file: relative(cwd, gen.svelte), line, column };
+      mapped = {
+        ...d,
+        file: relative(cwd, gen.svelte),
+        line,
+        column,
+        source: gen.isTs ? "ts" : "js",
+      };
     } else if (inOutput(d.file)) {
       dropped.push(d);
       continue;
@@ -293,6 +321,12 @@ export async function typecheck(
     if (seen.has(key)) continue;
     seen.add(key);
     diagnostics.push(mapped);
+  }
+  diagnostics.push(...compiled);
+  if (errorsOnly) {
+    const kept = diagnostics.filter((d) => d.severity === "error");
+    diagnostics.length = 0;
+    diagnostics.push(...kept);
   }
   diagnostics.sort(
     (a, b) =>
@@ -305,6 +339,10 @@ export async function typecheck(
     failed,
     checker,
     checkerVersion: command.version,
-    timings: { emit: emitted - started, check: checked - emitted },
+    timings: {
+      emit: emitted - started,
+      check: checked - emitted,
+      compile: compiledAt - emitted,
+    },
   };
 }

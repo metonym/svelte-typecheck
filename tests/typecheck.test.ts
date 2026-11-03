@@ -33,13 +33,71 @@ describe("typecheck", () => {
       });
       expect(result.checker).toBe(checker);
       expect(
-        result.diagnostics.map(
-          (d) =>
-            `${d.file.replace("tests/fixtures/", "")}:${d.line}:${d.column} ${d.code}`,
-        ),
+        result.diagnostics
+          .filter((d) => d.source !== "svelte")
+          .map(
+            (d) =>
+              `${d.file.replace("tests/fixtures/", "")}:${d.line}:${d.column} ${d.code}`,
+          ),
       ).toEqual(EXPECTED);
       expect(result.dropped).toEqual([]);
     },
     30_000,
   );
+
+  describe("compiler diagnostics", () => {
+    const check = (options: Parameters<typeof typecheck>[0] = {}) =>
+      typecheck({
+        cwd: root,
+        workspace: "tests/fixtures",
+        outDir: "node_modules/.cache/svelte-typecheck/test-compiler",
+        ...options,
+      });
+
+    it("reports the compiler's warnings, svelte-ignore applied", async () => {
+      const { diagnostics } = await check({ diagnosticSources: ["svelte"] });
+      expect(diagnostics).toEqual([
+        {
+          file: "tests/fixtures/Warnings.svelte",
+          line: 5,
+          column: 1,
+          severity: "warning",
+          source: "svelte",
+          code: "a11y_missing_attribute",
+          message:
+            "`<img>` element should have an alt attribute\nhttps://svelte.dev/e/a11y_missing_attribute",
+        },
+      ]);
+    });
+
+    it("ignores a warning, or makes it an error, by code", async () => {
+      const ignored = await check({
+        diagnosticSources: ["svelte"],
+        compilerWarnings: { a11y_missing_attribute: "ignore" },
+      });
+      expect(ignored.diagnostics).toEqual([]);
+      const raised = await check({
+        diagnosticSources: ["svelte"],
+        compilerWarnings: { a11y_missing_attribute: "error" },
+      });
+      expect(raised.diagnostics.map((d) => d.severity)).toEqual(["error"]);
+    });
+
+    it("reports errors only at the error threshold", async () => {
+      const { diagnostics } = await check({ threshold: "error" });
+      expect(diagnostics.every((d) => d.severity === "error")).toBe(true);
+      expect(diagnostics).toHaveLength(EXPECTED.length);
+    }, 30_000);
+
+    it.each([
+      ["svelte4", "a11y-missing-attribute"],
+      ["svelte3", "a11y-missing-attribute"],
+    ])("uses the project's own compiler (%s)", async (svelte, code) => {
+      const { diagnostics } = await check({
+        diagnosticSources: ["svelte"],
+        svelte: `node_modules/${svelte}`,
+      });
+      expect(diagnostics.map((d) => d.code)).toContain(code);
+    });
+  });
 });
