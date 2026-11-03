@@ -1,4 +1,5 @@
 export { typecheck } from "./check.ts";
+export { watch } from "./watch.ts";
 export { compilerDiagnostics } from "./compiler.ts";
 export type {
   Checker,

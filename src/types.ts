@@ -47,6 +47,11 @@ export interface TypecheckOptions {
   threshold?: "warning" | "error";
   /** Compiler warnings to drop (`ignore`) or report as errors, by code. */
   compilerWarnings?: Record<string, "ignore" | "error">;
+  /**
+   * Keep the generated code between runs: rewrite only what changed, and
+   * let `tsc`, tsgo and tsrs reuse their last run (`--incremental`).
+   */
+  incremental?: boolean;
 }
 
 /** A kind of check, as svelte-check's `--diagnostic-sources` names them. */

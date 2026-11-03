@@ -74,7 +74,7 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 - **Preprocessors** come from `svelte.config.{js,mjs,cjs}`, not a `vite.config`, which would need Vite.
 - **`COMPLETED <n> FILES`** counts components, not every file in TypeScript's program.
 - **`--diagnostic-sources svelte`** with a tsconfig reports no type errors, as svelte-check's docs say; svelte-check itself reports them.
-- **`--incremental`** and **`--tsgo-experimental-api`** are accepted and do nothing: every run is fast.
+- **`--tsgo-experimental-api`** is accepted, and does what `--tsgo` does.
 
 ### API
 
@@ -114,7 +114,7 @@ The helper types the generated code calls are adapted from svelte2tsx's (MIT), a
 ## Limits
 
 - **Svelte 5 runes** (`$props()`, `$state`, snippet types for `{@render}`) aren't typed yet; legacy syntax is, on Svelte 3, 4 and 5.
-- No SvelteKit auto-typing (`./$types`), preprocessors, CSS diagnostics or watch mode.
+- No SvelteKit auto-typing (`./$types`) or CSS diagnostics.
 - Your editor still runs the Svelte language server, so the two can disagree at the edges.
 
 ## License
