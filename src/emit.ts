@@ -1,5 +1,11 @@
 import { isReference, isRunesMode, parse, walk } from "sveast";
 import { analyzeScopes } from "sveast/scope";
+import {
+  isKitErrorFile,
+  isKitRouteFile,
+  kitPropType,
+  kitRuneProp,
+} from "./kit.ts";
 import { Output } from "./output.ts";
 
 /**
@@ -53,6 +59,8 @@ export interface EmitOptions {
   rewriteImport?: (specifier: string) => string | undefined;
   /** Svelte's major version: Svelte 3 types a component as a class. */
   svelte?: number;
+  /** The file's name, for SvelteKit's route components: `+page.svelte`. */
+  basename?: string;
 }
 
 /** `T extends A = B, U` as its parameters, top-level commas only. */
@@ -118,7 +126,7 @@ function propsDeclaratorOf(s: any) {
 
 export function emit(
   source: string,
-  { rewriteImport, svelte = 5 }: EmitOptions = {},
+  { rewriteImport, svelte = 5, basename = "" }: EmitOptions = {},
 ) {
   // eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
   type Node = any;
@@ -821,6 +829,9 @@ export function emit(
   /** In runes mode: the props `$bindable()` marks. */
   const bindings: string[] = [];
   /** `let {…} = $props()` as svelte2tsx types it, `gap` the text before it. */
+  const kitRoute = isKitRouteFile(basename);
+  const kitLayout = kitRoute && basename.includes("layout");
+  const kitError = isKitErrorFile(basename);
   const propsRune = (s: Node, d: Node, gapStart: number) => {
     const pattern = d.id;
     const locals: string[] = [];
@@ -844,19 +855,24 @@ export function emit(
       let init =
         p.value.type === "AssignmentPattern" ? p.value.right : undefined;
       const call = init?.type === "TSAsExpression" ? init.expression : init;
-      if (call?.type === "CallExpression" && call.callee.name === "$bindable") {
+      const bindable =
+        call?.type === "CallExpression" && call.callee.name === "$bindable";
+      if (bindable) {
         bindings.push(name);
         locals.push(value.name);
         init = call.arguments[0];
-        if (!init) {
-          inferred.push(`${name}?: any`);
-          continue;
-        }
       }
-      inferred.push(
-        init ? `${name}?: ${typeOfDefault(init, source)}` : `${name}: any`,
-      );
+      if (kitRoute || kitError) {
+        // svelte2tsx types only SvelteKit's props there, and drops the rest.
+        const type = kitRuneProp(basename, name);
+        if (type) inferred.push(`${name}: ${type}`);
+      } else if (bindable && !init) inferred.push(`${name}?: any`);
+      else
+        inferred.push(
+          init ? `${name}?: ${typeOfDefault(init, source)}` : `${name}: any`,
+        );
     }
+    if (kitLayout) inferred.push("children: import('svelte').Snippet");
     const propsStr =
       inferred.length > 0
         ? `{ ${inferred.join(", ")} }${withUnknown ? " & Record<string, any>" : ""}`
@@ -926,7 +942,33 @@ export function emit(
       if (s.type === "ExportNamedDeclaration") {
         const d = s.declaration;
         if (d) {
-          out.copy(d.start, d.end);
+          // A route's `data`, `form` and `snapshot` get SvelteKit's types.
+          let at = d.start;
+          if (d.type === "VariableDeclaration")
+            for (const decl of d.declarations) {
+              const type =
+                decl.id.type === "Identifier" &&
+                !decl.id.typeAnnotation &&
+                (d.kind === "let" || decl.id.name === "snapshot")
+                  ? kitPropType(basename, decl.id.name)
+                  : undefined;
+              const jsdoc =
+                !isTs &&
+                [
+                  ...source
+                    .slice(gapStart, decl.id.start)
+                    .matchAll(JSDOC_BLOCK),
+                ].some((m) => JSDOC_TYPE.test(m[0]));
+              if (!type || jsdoc) continue;
+              if (isTs) {
+                out.copy(at, decl.id.end).raw(`: ${type}`);
+                at = decl.id.end;
+              } else {
+                out.copy(at, decl.id.start).raw(`/** @type {${type}} */ `);
+                at = decl.id.start;
+              }
+            }
+          out.copy(at, d.end);
           if (d.type === "VariableDeclaration" && d.kind === "let")
             for (const decl of d.declarations)
               for (const name of idsOf(decl.id)) {

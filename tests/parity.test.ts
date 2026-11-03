@@ -84,6 +84,13 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check in a SvelteKit project", () => {
+    const cwd = join(root, "tests/fixtures-kit");
+    // SvelteKit writes `./$types` and the tsconfig the project extends.
+    spawnSync(join(root, "node_modules/.bin/svelte-kit"), ["sync"], { cwd });
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check's message rewrites and filters", () => {
     const cwd = join(root, "tests/fixtures-filters");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
