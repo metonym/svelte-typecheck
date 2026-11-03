@@ -19,13 +19,33 @@ export interface CheckerCommand {
   prefix: string[];
   /** The providing package's version, when it's known. */
   version?: string;
+  /** Run through the shell: a Windows `.cmd` or `.bat` shim needs it. */
+  shell?: boolean;
 }
 
-function onPath(name: string): string | undefined {
+const WINDOWS_SHIM = /\.(cmd|bat)$/i;
+
+/**
+ * A command on `PATH`. On Windows, a command is `name` plus one of
+ * `PATHEXT`'s extensions (`tsc.cmd`, `bun.exe`), as the shell finds it.
+ */
+export function onPath(
+  name: string,
+  platform: NodeJS.Platform = process.platform,
+): string | undefined {
+  const extensions =
+    platform === "win32"
+      ? (process.env.PATHEXT ?? ".COM;.EXE;.BAT;.CMD")
+          .split(";")
+          .filter(Boolean)
+          .flatMap((ext) => [ext.toLowerCase(), ext])
+      : [""];
   for (const dir of (process.env.PATH ?? "").split(delimiter)) {
     if (!dir) continue;
-    const candidate = join(dir, name);
-    if (existsSync(candidate)) return candidate;
+    for (const ext of extensions) {
+      const candidate = join(dir, name + ext);
+      if (existsSync(candidate)) return candidate;
+    }
   }
   return;
 }
@@ -73,7 +93,10 @@ export function checkerCommand(
     }
   }
   const found = onPath(bin);
-  return found ? { command: found, prefix: [] } : undefined;
+  if (!found) return;
+  return WINDOWS_SHIM.test(found)
+    ? { command: found, prefix: [], shell: true }
+    : { command: found, prefix: [] };
 }
 
 /** The arguments that check a project and print errors as `tsc` does. */

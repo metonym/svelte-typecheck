@@ -20,8 +20,15 @@ const dir = mkdtempSync(join(tmpdir(), "svelte-typecheck-package-"));
 const ALLOWED = /^(node:|\.\/|svelte\/compiler$)/;
 const MACHINE_ERROR = /^\d+ ERROR "(.+)" (\d+:\d+) /gm;
 
+const WINDOWS = process.platform === "win32";
+
 function run(command: string, args: string[], cwd: string) {
-  return spawnSync(command, args, { cwd, encoding: "utf-8" });
+  // npm is a `.cmd` shim on Windows, which runs only through the shell.
+  return spawnSync(command, args, {
+    cwd,
+    encoding: "utf-8",
+    shell: WINDOWS && command === "npm",
+  });
 }
 
 function ok(command: string, args: string[], cwd: string): string {
@@ -117,7 +124,10 @@ try {
     project,
   );
 
-  const bin = join(project, "node_modules/.bin/svelte-typecheck");
+  // Windows links a bin as `.cmd` and shell shims; the package's own runs anywhere.
+  const bin = WINDOWS
+    ? join(project, "node_modules/svelte-typecheck/cli.js")
+    : join(project, "node_modules/.bin/svelte-typecheck");
   for (const runtime of ["node", "bun"]) {
     const result = run(
       runtime,
@@ -136,7 +146,11 @@ try {
   const noBun = (process.env.PATH ?? "")
     .split(delimiter)
     .filter((entry) =>
-      ["bun", "tsrs", "tsgo"].every((name) => !existsSync(join(entry, name))),
+      ["bun", "tsrs", "tsgo"].every((name) =>
+        ["", ".exe", ".cmd"].every(
+          (ext) => !existsSync(join(entry, name + ext)),
+        ),
+      ),
     )
     .join(delimiter);
   const nodeOnly = spawnSync(

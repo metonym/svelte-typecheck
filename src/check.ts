@@ -20,6 +20,7 @@ import type { Diagnostic, TypecheckOptions, TypecheckResult } from "./types.ts";
 /** `path(line,col): error TSxxxx: message`, as tsc, tsgo, tsrs and `bun check` print. */
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 const CONTINUATION = /^\s+\S/;
+const LINE_BREAK = /\r?\n/;
 const JS_FILE = /\.[cm]?jsx?$/;
 /** Errors that stop a checker before it type-checks anything. */
 const SYNTAX_CODE = /^TS[18]\d{3}$/;
@@ -52,9 +53,21 @@ const DEFAULT_COMPILER_OPTIONS = {
 /** Thrown when generated code doesn't parse: an emitter bug, not a type error. */
 export class EmitError extends Error {}
 
-function run(command: string, args: string[], cwd: string): Promise<string> {
+/** A Windows shell argument, quoted when it has a space or a special character. */
+const SHELL_SPECIAL = /[\s"&|<>^()%!]/;
+const quote = (arg: string) =>
+  SHELL_SPECIAL.test(arg) ? `"${arg.replaceAll('"', '""')}"` : arg;
+
+function run(
+  command: string,
+  args: string[],
+  cwd: string,
+  shell = false,
+): Promise<string> {
   return new Promise((done, fail) => {
-    const child = spawn(command, args, { cwd });
+    const child = shell
+      ? spawn(quote(command), args.map(quote), { cwd, shell: true })
+      : spawn(command, args, { cwd });
     let output = "";
     child.stdout.on("data", (chunk) => {
       output += chunk;
@@ -79,7 +92,7 @@ interface RawDiagnostic {
 function parseDiagnostics(text: string): RawDiagnostic[] {
   const found: RawDiagnostic[] = [];
   let continues = false;
-  for (const line of text.split("\n")) {
+  for (const line of text.split(LINE_BREAK)) {
     const m = DIAGNOSTIC.exec(line);
     if (m)
       found.push({
@@ -521,6 +534,7 @@ export async function typecheck(
             : []),
         ],
         cwd,
+        command.shell,
       ).then((output) => ({ output, at: performance.now() }))
     : Promise.resolve({ output: "", at: emitted });
   const compiled: Diagnostic[] = [];
