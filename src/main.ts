@@ -9,7 +9,8 @@ Type-checks the Svelte components in a workspace.
 Options:
   --workspace <dir>     Folder whose components to check (default: .)
   --tsconfig <path>     tsconfig to extend (default: <workspace>/tsconfig.json)
-  --checker <name>      bun, tsrs, tsgo or tsc (default: the first installed)
+  --checker <name>      tsc, tsgo, tsrs or bun (default: the project's
+                        TypeScript, then the first installed)
   --components <glob>   Components to check, relative to the workspace;
                         repeatable (default: **/*.svelte)
   --out-dir <dir>       Where to write the generated code
@@ -60,7 +61,7 @@ export async function main(argv: string[]): Promise<0 | 1 | 2> {
     for (const f of result.failed)
       console.error(`${f.file}: failed to parse: ${f.message}`);
     console.error(
-      `${result.components} components, ${result.diagnostics.length} errors [emit ${Math.round(result.timings.emit)} ms, ${result.checker} ${Math.round(result.timings.check)} ms]`,
+      `${result.components} components, ${result.diagnostics.length} errors [emit ${Math.round(result.timings.emit)} ms, ${result.checker}${result.checkerVersion ? ` ${result.checkerVersion}` : ""} ${Math.round(result.timings.check)} ms]`,
     );
     if (result.failed.length > 0) return 2;
     return result.diagnostics.length > 0 ? 1 : 0;

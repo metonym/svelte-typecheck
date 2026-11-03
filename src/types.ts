@@ -8,7 +8,10 @@ export interface TypecheckOptions {
   workspace?: string;
   /** The tsconfig the generated one extends. Default: `<workspace>/tsconfig.json`. */
   tsconfig?: string;
-  /** Default: the first of `bun`, `tsrs`, `tsgo` and `tsc` that's installed. */
+  /**
+   * Default: the project's own TypeScript (`tsc`; native in TypeScript 7),
+   * then the first of `tsgo`, `tsrs` and `bun` that's installed.
+   */
   checker?: Checker;
   /** Globs of the components to check, relative to the workspace. Default: `["**\/*.svelte"]`. */
   components?: string[];
@@ -43,6 +46,8 @@ export interface TypecheckResult {
   /** Components that failed to parse. */
   failed: { file: string; message: string }[];
   checker: Checker;
+  /** The checker's version, when its package says. */
+  checkerVersion?: string;
   /** Milliseconds spent emitting and checking. */
   timings: { emit: number; check: number };
 }

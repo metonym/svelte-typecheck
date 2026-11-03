@@ -1,18 +1,14 @@
 import { spawn } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
-import { delimiter, dirname, join, relative, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
 import { emit } from "./emit.ts";
 import { glob, matcher } from "./glob.ts";
 import { createLocator, type Output } from "./output.ts";
-import type {
-  Checker,
-  Diagnostic,
-  TypecheckOptions,
-  TypecheckResult,
-} from "./types.ts";
+import type { Diagnostic, TypecheckOptions, TypecheckResult } from "./types.ts";
 
 /** `path(line,col): error TSxxxx: message`, as tsc, tsgo, tsrs and `bun check` print. */
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
@@ -26,7 +22,6 @@ const TRAILING_COMMA = /,(\s*[}\]])/g;
 const STRING = /"(?:[^"\\]|\\.)*"/g;
 
 const SHIMS = fileURLToPath(new URL("./shims/", import.meta.url));
-const CHECKERS: Checker[] = ["bun", "tsrs", "tsgo", "tsc"];
 
 /** Thrown when generated code doesn't parse: an emitter bug, not a type error. */
 export class EmitError extends Error {}
@@ -55,28 +50,6 @@ function excludeOf(path: string): { exclude: string[]; from: string } {
     ? resolve(dirname(path), config.extends)
     : createRequire(path).resolve(config.extends);
   return excludeOf(base);
-}
-
-function onPath(name: string): string | undefined {
-  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
-    const candidate = join(dir, name);
-    if (dir && existsSync(candidate)) return candidate;
-  }
-  return;
-}
-
-/** A checker's executable: the project's `node_modules/.bin`, then `PATH`. */
-function binaryOf(checker: Checker, cwd: string): string | undefined {
-  if (checker === "bun")
-    return process.versions.bun ? process.execPath : onPath("bun");
-  const local = join(cwd, "node_modules/.bin", checker);
-  return existsSync(local) ? local : onPath(checker);
-}
-
-function argsOf(checker: Checker, tsconfig: string): string[] {
-  return checker === "bun"
-    ? ["check", "-p", tsconfig, "--no-pretty", "--all"]
-    : ["-p", tsconfig, "--pretty", "false"];
 }
 
 function run(command: string, args: string[], cwd: string): Promise<string> {
@@ -156,11 +129,12 @@ export async function typecheck(
       : join(svelteDir, "svelte-html.d.ts");
 
   const checker =
-    options.checker ?? CHECKERS.find((c) => binaryOf(c, cwd) !== undefined);
-  const binary = checker && binaryOf(checker, cwd);
-  if (!(checker && binary))
+    options.checker ??
+    CHECKERS.find((c) => checkerCommand(c, cwd) !== undefined);
+  const command = checker && checkerCommand(checker, cwd);
+  if (!(checker && command))
     throw new Error(
-      `No type checker found: install one of ${CHECKERS.join(", ")}, or name one with \`checker\`.`,
+      `No type checker found: install \`typescript\` (or one of ${CHECKERS.slice(1).join(", ")}), or name one with \`checker\`.`,
     );
 
   const base = excludeOf(baseConfig);
@@ -263,7 +237,11 @@ export async function typecheck(
   await Promise.all(writes);
   const emitted = performance.now();
 
-  const text = await run(binary, argsOf(checker, tsconfig), cwd);
+  const text = await run(
+    command.command,
+    [...command.prefix, ...checkerArgs(checker, tsconfig)],
+    cwd,
+  );
   const checked = performance.now();
 
   const raw = parseDiagnostics(text);
@@ -326,6 +304,7 @@ export async function typecheck(
     dropped,
     failed,
     checker,
+    checkerVersion: command.version,
     timings: { emit: emitted - started, check: checked - emitted },
   };
 }

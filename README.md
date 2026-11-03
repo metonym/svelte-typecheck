@@ -9,7 +9,7 @@ bun add -d svelte-typecheck
 bunx svelte-typecheck
 ```
 
-Runs on Bun and on Node 22+ (`npx svelte-typecheck`). With Bun installed, `bun check` is the default checker: the fastest, and nothing more to install.
+Runs on Bun and on Node 22+ (`npx svelte-typecheck`). It checks with your project's own TypeScript, so the errors match your editor and build; TypeScript 7's `tsc` is native and fast. `--checker bun` or `--checker tsrs` is faster still.
 
 ```
 src/Errors.svelte:11:8 - error TS2322: Type '"tertiary"' is not assignable to type '"ghost" | "primary" | undefined'.
@@ -42,16 +42,16 @@ Measured on carbon-components-svelte, where it replaced svelte-check:
 svelte-typecheck [options]
 ```
 
-| Option                | Default                                            |                                                                                                 |
-| :-------------------- | :------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
-| `--workspace <dir>`   | `.`                                                | Folder whose components to check                                                                |
-| `--tsconfig <path>`   | `<workspace>/tsconfig.json`                        | The tsconfig the generated one extends                                                          |
-| `--checker <name>`    | first installed of `bun`, `tsrs`, `tsgo`, `tsc`    | Type checker to run                                                                             |
-| `--components <glob>` | `**/*.svelte`                                      | Components to check, relative to the workspace; repeatable                                      |
-| `--out-dir <dir>`     | `node_modules/.cache/svelte-typecheck/<workspace>` | Where the generated code goes                                                                   |
-| `--no-declarations`   |                                                    | Resolve component imports to their own `.svelte.d.ts`, as a library's generated declarations do |
-| `--svelte <dir>`      | `svelte`, resolved                                 | The Svelte install to check against, e.g. a Svelte 4 test harness's                             |
-| `--output <format>`   | `human`                                            | `machine` prints `ERROR "file" line:col "message" TSxxxx`                                       |
+| Option                | Default                                                              |                                                                                                 |
+| :-------------------- | :------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------- |
+| `--workspace <dir>`   | `.`                                                                  | Folder whose components to check                                                                |
+| `--tsconfig <path>`   | `<workspace>/tsconfig.json`                                          | The tsconfig the generated one extends                                                          |
+| `--checker <name>`    | your `typescript`, else the first installed of `tsgo`, `tsrs`, `bun` | Type checker to run                                                                             |
+| `--components <glob>` | `**/*.svelte`                                                        | Components to check, relative to the workspace; repeatable                                      |
+| `--out-dir <dir>`     | `node_modules/.cache/svelte-typecheck/<workspace>`                   | Where the generated code goes                                                                   |
+| `--no-declarations`   |                                                                      | Resolve component imports to their own `.svelte.d.ts`, as a library's generated declarations do |
+| `--svelte <dir>`      | `svelte`, resolved                                                   | The Svelte install to check against, e.g. a Svelte 4 test harness's                             |
+| `--output <format>`   | `human`                                                              | `machine` prints `ERROR "file" line:col "message" TSxxxx`                                       |
 
 It exits 1 on a type error and 2 on a usage error, or if the generated code doesn't parse (a svelte-typecheck bug, never a silent pass).
 
@@ -73,12 +73,12 @@ compilerDiagnostics(source, "Button.svelte");
 
 The generated code and its tsconfig are plain files on disk, so any checker that takes `-p tsconfig.json` and prints errors as `tsc` does works:
 
-| Checker                                     | Install                      | Notes                                                      |
-| :------------------------------------------ | :--------------------------- | :--------------------------------------------------------- |
-| `bun check`                                 | [Bun](https://bun.sh) 1.4    | Default when Bun is installed. Fastest and leanest         |
-| [tsrs](https://github.com/oxc-project/tsrs) | `tsrs`                       | oxc's Rust port of TypeScript 7                            |
-| tsgo                                        | `@typescript/native-preview` | TypeScript 7                                               |
-| `tsc`                                       | `typescript`                 | TypeScript 6. Reads JSDoc in JS files as svelte-check does |
+| Checker                                     | Install                      | Notes                                                                                                      |
+| :------------------------------------------ | :--------------------------- | :--------------------------------------------------------------------------------------------------------- |
+| `tsc`                                       | `typescript`                 | Default: your project's TypeScript. Native in TypeScript 7; with 6, reads JSDoc in JS as svelte-check does |
+| `bun check`                                 | [Bun](https://bun.sh) 1.4    | Fastest and leanest; Bun's own TypeScript version                                                          |
+| [tsrs](https://github.com/oxc-project/tsrs) | `tsrs`                       | oxc's Rust port of TypeScript 7                                                                            |
+| tsgo                                        | `@typescript/native-preview` | TypeScript 7                                                                                               |
 
 TypeScript 7 reads JSDoc in JS files more strictly than 6, so a JS codebase's error count can move a little between them.
 
