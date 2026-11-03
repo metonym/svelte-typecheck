@@ -12,9 +12,14 @@ bunx svelte-typecheck
 Runs on Bun and on Node 22+ (`npx svelte-typecheck`). It checks with your project's own TypeScript, so the errors match your editor and build; TypeScript 7's `tsc` is native and fast. `--checker bun` or `--checker tsrs` is faster still.
 
 ```
-src/Errors.svelte:11:8 - error TS2322: Type '"tertiary"' is not assignable to type '"ghost" | "primary" | undefined'.
-src/Errors.svelte:13:33 - error TS2339: Property 'nope' does not exist on type '{ text: "ghost" | "primary"; }'.
-3 components, 2 errors [emit 15 ms, bun 33 ms]
+/my-app/src/Errors.svelte:11:8
+Error: Type '"tertiary"' is not assignable to type '"primary" | "ghost" | undefined'. (ts)
+
+/my-app/src/Errors.svelte:13:33
+Error: Property 'nope' does not exist on type '{ text: "primary" | "ghost"; }'. (ts)
+
+====================================
+svelte-typecheck found 2 errors and 0 warnings in 1 file
 ```
 
 ## Why
@@ -25,6 +30,7 @@ src/Errors.svelte:13:33 - error TS2339: Property 'nope' does not exist on type '
 | TypeScript 7   | Needs `typescript@~6` beside it | Works: never imports `typescript`                                 |
 | Dependencies   | 6, plus `typescript` (24 MB)    | 1: [sveast](https://github.com/metonym/sveast), which has none    |
 | Svelte 3, 4, 5 | Yes                             | Yes, runes included                                               |
+| SvelteKit      | `./$types`, typed `load`, hooks | The same                                                          |
 
 Measured on carbon-components-svelte, where it replaced svelte-check:
 
@@ -75,6 +81,7 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 - **`COMPLETED <n> FILES`** counts components, not every file in TypeScript's program.
 - **`--diagnostic-sources svelte`** with a tsconfig reports no type errors, as svelte-check's docs say; svelte-check itself reports them.
 - **`--tsgo-experimental-api`** is accepted, and does what `--tsgo` does.
+- **tsconfig option errors** that only matter to an emitting build, such as a JS file that `tsc` would overwrite, aren't reported: the checker runs with `noEmit`.
 
 ### API
 
