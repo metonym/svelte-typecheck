@@ -39,7 +39,7 @@ async function bundle() {
     format: "esm",
     splitting: true,
     // sveast is bundled, so the package has no dependencies. Svelte's
-    // compiler is the project's own, a peer.
+    // compiler is the project's own, loaded from the project.
     external: ["svelte", "svelte/*"],
     // Names stay readable in a stack trace from a user's CI log.
     minify: { whitespace: true, syntax: true, identifiers: false },

@@ -32,9 +32,6 @@
     "fmt": "bun fmt",
     "lint": "bun fmt --check && bun lint --no-script --max-warnings 0"
   },
-  "peerDependencies": {
-    "svelte": "^3.59.0 || ^4.0.0 || ^5.0.0"
-  },
   "devDependencies": {
     "@sveltejs/kit": "^3.1.1",
     "@typescript/native-preview": "^7.0.0-dev.20260707.2",
