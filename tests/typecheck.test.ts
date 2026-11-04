@@ -1,4 +1,10 @@
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { join, relative } from "node:path";
 import { typecheck } from "../src/check.ts";
 import type { Checker } from "../src/types.ts";
@@ -42,6 +48,41 @@ describe("typecheck", () => {
           ),
       ).toEqual(EXPECTED);
       expect(result.dropped).toEqual([]);
+    },
+    30_000,
+  );
+
+  // A shell keeps `$PWD` as the path it was given, symlinks and all (macOS's
+  // `/tmp` is `/private/tmp`). Go's `os.Getwd` trusts it, so tsgo prints
+  // its paths relative to it, not to the folder's real path.
+  it.each<Checker>(["tsgo", "tsc"])(
+    "reads %s's paths when $PWD names the folder through a symlink",
+    async (checker) => {
+      const link = join(root, "tests/.tmp/pwd-link");
+      mkdirSync(join(root, "tests/.tmp"), { recursive: true });
+      rmSync(link, { force: true });
+      symlinkSync(root, link);
+      const pwd = process.env.PWD;
+      process.env.PWD = link;
+      try {
+        const result = await typecheck({
+          cwd: root,
+          workspace: "tests/fixtures",
+          checker,
+          incremental: false,
+          outDir: `node_modules/.cache/svelte-typecheck/test-pwd-${checker}`,
+        });
+        expect(
+          result.diagnostics
+            .filter((d) => d.source !== "svelte")
+            .map(
+              (d) =>
+                `${relative(join(root, "tests/fixtures"), d.file)}:${d.line}:${d.column} ${d.code}`,
+            ),
+        ).toEqual(EXPECTED);
+      } finally {
+        process.env.PWD = pwd;
+      }
     },
     30_000,
   );

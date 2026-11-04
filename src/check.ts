@@ -127,9 +127,12 @@ function run(
   shell = false,
 ): Promise<string> {
   return new Promise((done, fail) => {
+    // A shell's `$PWD` can name the folder through a symlink, and Go's
+    // `os.Getwd` (tsgo's) trusts it: its paths would be relative to that.
+    const env = { ...process.env, PWD: cwd };
     const child = shell
-      ? spawn(quote(command), args.map(quote), { cwd, shell: true })
-      : spawn(command, args, { cwd });
+      ? spawn(quote(command), args.map(quote), { cwd, env, shell: true })
+      : spawn(command, args, { cwd, env });
     let output = "";
     child.stdout.on("data", (chunk) => {
       output += chunk;
