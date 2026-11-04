@@ -61,6 +61,18 @@ const STORE_ERROR = /^TS(2769|2345)$/;
 const REACTIVE_NOISE = /^TS(7028|2695)$/;
 
 const SHIMS = fileURLToPath(new URL("./shims/", import.meta.url));
+/** The caches' shape, in each one's key: a new shape misses the old. */
+const CACHE_FORMAT = 1;
+/** The last run's result, and a key to what it read. */
+const RESULT_CACHE = "result.json";
+interface ResultCache {
+  key: string;
+  /** The files the run's program imported, as far as ordering read them. */
+  inputs: string[];
+  /** Their sizes and modification times, hashed. */
+  inputsKey: string;
+  result: TypecheckResult;
+}
 /** What generating each component did, for an incremental run. */
 const EMIT_CACHE = "emit-cache.json";
 interface EmitEffects {
@@ -395,6 +407,62 @@ export async function typecheck(
     : new Set<string>();
   if (!incremental) await rm(outDir, { recursive: true, force: true });
   const files = project.components;
+  const listedFiles = project.tsconfig
+    ? programFiles(project)
+    : [...files].sort(byFolder);
+  const configDir = options.config
+    ? dirname(resolve(workspace, options.config))
+    : workspace;
+  const configFile = options.config
+    ? resolve(workspace, options.config)
+    : undefined;
+
+  // Nothing the run reads has changed since the last one: its result. The
+  // files are known by their size and modification time, which a `stat`
+  // gives without reading them.
+  const resultPath = join(outDir, RESULT_CACHE);
+  const projectDir = project.tsconfig ? dirname(project.tsconfig) : workspace;
+  const last = incremental
+    ? await readFile(resultPath, "utf-8")
+        .then((text) => JSON.parse(text) as ResultCache)
+        .catch(() => undefined)
+    : undefined;
+  const runKey = incremental
+    ? hash(
+        JSON.stringify([
+          TOOL_VERSION,
+          CACHE_FORMAT,
+          version,
+          checker,
+          command.version,
+          cwd,
+          options,
+          configFingerprint(configDir, configFile),
+          statsOf([
+            ...files,
+            ...listedFiles,
+            ...project.configFiles,
+            // SvelteKit's `.svelte-kit/types`, outside `include`.
+            ...project.rootDirs.flatMap((dir) =>
+              `${projectDir}${sep}`.startsWith(`${dir}${sep}`) ||
+              outDir.startsWith(`${dir}${sep}`) ||
+              !existsSync(dir)
+                ? []
+                : glob(dir, ["**/*"]).map((rel) => join(dir, rel)),
+            ),
+            ...packageFilesOf(projectDir),
+          ]),
+        ]),
+      )
+    : "";
+  // And what the last run's program imported, outside `include` too: a
+  // sibling package's source.
+  if (
+    last?.key === runKey &&
+    Array.isArray(last.inputs) &&
+    hash(JSON.stringify(statsOf(last.inputs))) === last.inputsKey
+  )
+    return { ...last.result, timings: { emit: 0, check: 0, compile: 0 } };
   const texts = await Promise.all(files.map((path) => readFile(path, "utf-8")));
   // Generated code mirrors the sources under one root, so `rootDirs` maps
   // a relative import between them.
@@ -445,6 +513,7 @@ export async function typecheck(
   const emitFingerprint = hash(
     JSON.stringify([
       TOOL_VERSION,
+      CACHE_FORMAT,
       svelteMajor,
       project.checkJs,
       project.allowJs,
@@ -669,9 +738,6 @@ export async function typecheck(
     [...outputs].map(([genPath, gen]) => [gen.svelte, genPath]),
   );
   const replacedSet = new Set(replaced);
-  const listedFiles = project.tsconfig
-    ? programFiles(project)
-    : [...files].sort(byFolder);
   const rootFiles = [
     ...new Set([
       ...listedFiles
@@ -751,12 +817,6 @@ export async function typecheck(
       ).then((output) => ({ output, at: performance.now() }))
     : Promise.resolve({ output: "", at: emitted });
   const compiled: Diagnostic[] = [];
-  const configDir = options.config
-    ? dirname(resolve(workspace, options.config))
-    : workspace;
-  const configFile = options.config
-    ? resolve(workspace, options.config)
-    : undefined;
   // The compiler pass's results by component, for an incremental run: a
   // component whose text, Svelte, config and svelte-typecheck are the
   // same compiles the same. With every one cached, the config, which can
@@ -765,6 +825,7 @@ export async function typecheck(
   const fingerprint = hash(
     JSON.stringify([
       TOOL_VERSION,
+      CACHE_FORMAT,
       version,
       configFingerprint(configDir, configFile),
     ]),
@@ -1125,7 +1186,7 @@ export async function typecheck(
       sourceRank(a) - sourceRank(b),
   );
 
-  return {
+  const result: TypecheckResult = {
     diagnostics: reported,
     workspace,
     tsconfig: project.tsconfig,
@@ -1141,4 +1202,42 @@ export async function typecheck(
       compile: compiledAt - emitted,
     },
   };
+  const inputs = [...order.keys()].filter((path) => !under(path, outDir));
+  if (incremental)
+    await writeFile(
+      resultPath,
+      JSON.stringify({
+        key: runKey,
+        inputs,
+        inputsKey: hash(JSON.stringify(statsOf(inputs))),
+        result,
+      } satisfies ResultCache),
+    );
+  return result;
+}
+
+/** Each file's size and modification time, or that it's missing. */
+function statsOf(paths: string[]): string[] {
+  return paths.map((path) => {
+    const stat = statSync(path, { throwIfNoEntry: false });
+    return stat ? `${path}:${stat.size}:${stat.mtimeMs}` : `${path}:-`;
+  });
+}
+
+const PACKAGE_FILES = [
+  "package.json",
+  "bun.lock",
+  "bun.lockb",
+  "package-lock.json",
+  "pnpm-lock.yaml",
+  "yarn.lock",
+];
+
+/** The manifests and lockfiles from `dir` up, which a change of dependencies touches. */
+function packageFilesOf(dir: string): string[] {
+  const found: string[] = [];
+  for (let at = dir; ; at = dirname(at)) {
+    found.push(...PACKAGE_FILES.map((name) => join(at, name)));
+    if (dirname(at) === at) return found;
+  }
 }

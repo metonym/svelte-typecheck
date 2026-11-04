@@ -107,6 +107,37 @@ describe("watch", () => {
     }
   }, 30_000);
 });
+
+describe("incremental, with nothing changed", () => {
+  it("returns the last result, and checks again once a file changes", async () => {
+    const dir = await workspace("replay");
+    const outDir = join(
+      root,
+      "node_modules/.cache/svelte-typecheck/test-replay",
+    );
+    await rm(outDir, { recursive: true, force: true });
+    const run = () => typecheck({ cwd: root, workspace: dir, outDir });
+    expect((await run()).timings.check).toBeGreaterThan(0);
+    // Replayed: nothing generated or checked.
+    const replayed = await run();
+    expect(replayed.diagnostics).toEqual([]);
+    expect(replayed.timings.check).toBe(0);
+    // A new TS file the tsconfig includes is a change.
+    await writeFile(join(dir, "extra.ts"), 'export const n: number = "one";\n');
+    expect((await run()).diagnostics.map((d) => d.code)).toEqual(["TS2322"]);
+    // So is a file outside the tsconfig's `include` that a component imports.
+    const outside = join(root, "tests/.tmp/replay-outside.ts");
+    await writeFile(outside, "export const label = 1;\n");
+    await writeFile(
+      join(dir, "extra.ts"),
+      'import { label } from "../replay-outside.js";\nexport const n: number = label;\n',
+    );
+    expect((await run()).diagnostics).toEqual([]);
+    await writeFile(outside, 'export const label = "one";\n');
+    expect((await run()).diagnostics.map((d) => d.code)).toEqual(["TS2322"]);
+  }, 30_000);
+});
+
 describe("the project's own build info", () => {
   it("is never written over, incremental or not", async () => {
     const dir = await workspace("own-build-info");
