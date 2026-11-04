@@ -13,7 +13,7 @@
 // tsconfig.json).
 import { spawn, spawnSync } from "node:child_process";
 import { readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 const [a, b, project, scenario, runs = "5"] = process.argv.slice(2);
 if (!(a && b && project && scenario))
@@ -58,6 +58,11 @@ function run(dist: string, outDir: string): Promise<Sample> {
   return new Promise((done) => {
     const start = performance.now();
     const child = spawn("/usr/bin/time", args, {
+      // This repo's checkers too, for a project that has only some.
+      env: {
+        ...process.env,
+        PATH: `${join(import.meta.dirname, "../node_modules/.bin")}${delimiter}${process.env.PATH ?? ""}`,
+      },
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],
     });

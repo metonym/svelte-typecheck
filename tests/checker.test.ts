@@ -43,6 +43,30 @@ describe("onPath", () => {
 });
 
 describe("typecheck", () => {
+  it("finds the checker from the workspace up, not the current folder", async () => {
+    // A workspace with its own `typescript`, whose `tsc` reports nothing.
+    const dir = join(root, "tests/.tmp/own-typescript");
+    const pkg = join(dir, "node_modules/typescript");
+    mkdirSync(join(pkg, "bin"), { recursive: true });
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({
+        name: "typescript",
+        version: "9.9.9",
+        bin: { tsc: "./bin/tsc" },
+      }),
+    );
+    writeFileSync(join(pkg, "bin/tsc"), "#!/usr/bin/env node\n");
+    writeFileSync(join(dir, "tsconfig.json"), "{}");
+    const result = await typecheck({
+      cwd: root,
+      workspace: dir,
+      outDir: "node_modules/.cache/svelte-typecheck/test-own-typescript",
+      checker: "tsc",
+    });
+    expect(result.checkerVersion).toBe("9.9.9");
+  }, 30_000);
+
   it("defaults to the project's TypeScript", async () => {
     const result = await typecheck({
       cwd: root,

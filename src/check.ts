@@ -386,8 +386,10 @@ export async function typecheck(
 
   const checker =
     options.checker ??
-    CHECKERS.find((c) => checkerCommand(c, cwd) !== undefined);
-  const command = checker && checkerCommand(checker, cwd);
+    CHECKERS.find((c) => checkerCommand(c, workspace) !== undefined);
+  // From the workspace up: a monorepo package's own install, then a
+  // hoisted one, wherever the run starts.
+  const command = checker && checkerCommand(checker, workspace);
   if (!(checker && command))
     throw new Error(
       `No type checker found: install \`typescript\` (or one of ${CHECKERS.slice(1).join(", ")}), or name one with \`checker\`.`,
