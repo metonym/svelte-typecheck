@@ -686,11 +686,12 @@ export function emit(
     const id = `$$_el${uid++}`;
     const boundary = node.type === "SvelteBoundary";
     // An error about the whole attributes object points at the tag name's
-    // last letter, as svelte2tsx maps it, or `<svelte:element this>`'s value.
+    // last letter, as svelte2tsx maps it, or after `<svelte:element this>`'s
+    // value.
     const objectAt =
       node.type === "RegularElement"
         ? node.start + node.name.length
-        : (node.tag?.start ?? node.start + 1);
+        : (node.tag?.end ?? node.start + 1);
     // A key can't repeat in an object literal (several `on:click`s can), so
     // each repeat gets its own `createElement` call.
     const seen = new Set<string>();
@@ -908,7 +909,11 @@ export function emit(
       case "SvelteElement":
         return element(
           node,
-          () => expression(node.tag),
+          () => {
+            out.raw("__sveltets_2_elementTag(");
+            expression(node.tag);
+            out.raw(")");
+          },
           "__sveltets_2_any(0)",
           inComponent,
         );

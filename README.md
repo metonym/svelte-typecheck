@@ -132,6 +132,7 @@ What svelte-typecheck does that svelte-check doesn't:
 - **A syntax error in a TS or JS file** stops `tsc` and the other CLI checkers from type-checking at all, so only syntax errors are reported until it's fixed; svelte-check's language service reports the type errors in other files too. A component's syntax errors don't do this.
 - **Svelte 3 and 4 with `lang="ts"` and no preprocessors**: svelte-check strips the types with a fallback preprocessor and reports the compiler's warnings; here the compiler can't read the script, so there are none.
 - **`--out-dir` outside the project** can't find its packages from the generated code; the default is inside `node_modules`.
+- **`<svelte:element this={tag}>` whose tag may be any element**, such as a component's generic `Tag extends keyof HTMLElementTagNameMap`: svelte-check reports TypeScript's "union type too complex" and checks none of the element's attributes; here its attributes are checked as an element's. An attribute error on it names the attributes' type with the tag widened: `keyof HTMLElementTagNameMap extends Tag ? string : Tag`.
 
 ### API
 
