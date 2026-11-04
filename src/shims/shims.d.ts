@@ -282,6 +282,22 @@ declare function __sveltets_2_partial_with_any<
   exports?: Exports;
   bindings?: Bindings;
 };
+/** A TypeScript component that reads `$$props` or `$$restProps`: any prop. */
+declare function __sveltets_2_with_any<
+  Props = {},
+  Events = {},
+  Slots = {},
+  Exports = {},
+  Bindings = string,
+>(
+  render: SvelteRender<Props, Events, Slots, Exports, Bindings>,
+): {
+  props: Expand<Props & SvelteAllProps>;
+  events: Events;
+  slots: Slots;
+  exports?: Exports;
+  bindings?: Bindings;
+};
 /** Any event name, with a `CustomEvent`. */
 declare function __sveltets_2_with_any_event<
   Props = {},
