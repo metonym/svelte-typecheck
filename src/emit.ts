@@ -32,6 +32,7 @@ const CALL_PARENS = /\s*\(\s*\)$/;
 const JSDOC_LINE_START = /^\s*\/?\*+\s?/;
 const JSDOC_END = /\s*\*\/\s*$/;
 const USES_ALL_PROPS = /\$\$(restProps|props)\b/;
+const WHITESPACE = /\s/;
 
 /** Attributes svelte2tsx passes as numbers when their text is numeric. */
 const TYPING_INTERFACES = new Set(["$$Props", "$$Events", "$$Slots"]);
@@ -688,8 +689,28 @@ export function emit(
     );
   const lets = (node: Node) =>
     (node.attributes ?? []).filter((a: Node) => a.type === "LetDirective");
-  const destructureLets = (letDirectives: Node[], from: string) => {
-    if (letDirectives.length === 0) return;
+  /**
+   * `let:` props from a slot. A slot the component doesn't have is reported
+   * where svelte-check reports it: after the last `let:` (its last letter
+   * at the tag's end), or for a named slot (`slotted`, its element) at the
+   * `slot` attribute's end if that's sooner; a named one even without
+   * `let:`, at the element's `<`, or the attribute's end once a `bind:`
+   * comes before it in the output.
+   */
+  const destructureLets = (
+    letDirectives: Node[],
+    from: string,
+    slotted?: Node,
+  ) => {
+    const slotEnd = slotted ? slotOf(slotted).end - 1 : Infinity;
+    if (letDirectives.length === 0) {
+      if (!slotted) return;
+      const binds = (slotted.attributes ?? []).some(
+        (a: Node) => a.type === "BindDirective",
+      );
+      out.from(binds ? slotEnd : slotted.start, () => out.raw(from)).raw(";");
+      return;
+    }
     out.raw("const {");
     for (const d of letDirectives) {
       const at = nameAt(d);
@@ -698,7 +719,11 @@ export function emit(
       else out.copy(at, at + d.name.length);
       out.raw(",");
     }
-    out.raw(`} = ${from};`);
+    out.raw("} = ");
+    const last = letDirectives.at(-1).end;
+    const after = WHITESPACE.test(source[last] ?? "") ? last : last - 1;
+    out.from(Math.min(after, slotEnd), () => out.raw(from));
+    out.raw(";");
   };
 
   const component = (node: Node, ctor: () => void, inComponent = false) => {
@@ -784,6 +809,7 @@ export function emit(
       destructureLets(
         lets(c),
         `${id}.$$slot_def[${JSON.stringify(textOf(slotOf(c)))}]`,
+        c,
       );
       if (c.type === "SvelteFragment") fragment(c.fragment);
       else child(c, true);
