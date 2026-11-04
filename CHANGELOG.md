@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.2 — 2026-11-04
+
+**Performance**
+
+- `--diagnostic-sources svelte` (the compiler's diagnostics alone) no
+  longer writes generated code no checker reads: on
+  carbon-components-svelte's 398 components, the run drops from 988 to
+  746 ms.
+
 ## 0.1.1 — 2026-11-04
 
 **Fixes**
