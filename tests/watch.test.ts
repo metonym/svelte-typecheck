@@ -22,15 +22,17 @@ async function workspace(name: string): Promise<string> {
 }
 
 describe("incremental", () => {
-  it("rechecks a changed component and drops a removed one's code", async () => {
+  it("is the default: rechecks a changed component and drops a removed one's code", async () => {
     const dir = await workspace("incremental");
     const outDir = join(
       root,
       "node_modules/.cache/svelte-typecheck/test-incremental",
     );
-    const run = () =>
-      typecheck({ cwd: root, workspace: dir, outDir, incremental: true });
+    await rm(outDir, { recursive: true, force: true });
+    const run = () => typecheck({ cwd: root, workspace: dir, outDir });
     expect((await run()).diagnostics).toEqual([]);
+    // The checker's own cache, for the next run.
+    expect(existsSync(join(outDir, "tsbuildinfo"))).toBe(true);
     await writeFile(join(dir, "Broken.svelte"), BROKEN);
     expect((await run()).diagnostics.map((d) => d.code)).toEqual(["TS2322"]);
     await rm(join(dir, "Broken.svelte"));
@@ -74,5 +76,32 @@ describe("watch", () => {
     } finally {
       stop();
     }
+  }, 30_000);
+});
+describe("the project's own build info", () => {
+  it("is never written over, incremental or not", async () => {
+    const dir = await workspace("own-build-info");
+    await writeFile(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          module: "esnext",
+          moduleResolution: "bundler",
+          incremental: true,
+          tsBuildInfoFile: "./own.tsbuildinfo",
+        },
+        include: ["."],
+      }),
+    );
+    const outDir = join(
+      root,
+      "node_modules/.cache/svelte-typecheck/test-own-build-info",
+    );
+    await typecheck({ cwd: root, workspace: dir, outDir, incremental: false });
+    expect(existsSync(join(dir, "own.tsbuildinfo"))).toBe(false);
+    await typecheck({ cwd: root, workspace: dir, outDir });
+    expect(existsSync(join(dir, "own.tsbuildinfo"))).toBe(false);
+    expect(existsSync(join(outDir, "tsbuildinfo"))).toBe(true);
   }, 30_000);
 });

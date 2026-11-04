@@ -48,7 +48,8 @@ svelte-check's options:
   --watch                   Check again when a file changes
   --preserveWatchOutput     Don't clear the screen between watch runs
   --incremental             Keep generated code between runs, and let the
-                            checker reuse its last run
+                            checker reuse its last run (the default)
+  --no-incremental          Start from nothing each run
   --tsgo                    Check with tsgo (same as --checker tsgo)
   -h, --help                Show this help
   -v, --version             Show the version
@@ -111,7 +112,8 @@ export async function main(argv: string[]): Promise<0 | 1> {
       ?.split(",")
       .map((source) => source.trim()) as DiagnosticSource[] | undefined,
     compilerWarnings: parseCompilerWarnings(values["compiler-warnings"]),
-    incremental: values.incremental,
+    // On unless `--no-incremental`; `--incremental` is svelte-check's flag.
+    incremental: !values["no-incremental"],
   };
   if (values.changed || values.since) {
     try {
@@ -235,6 +237,7 @@ function parse(argv: string[]) {
       "no-color": { type: "boolean", default: false },
       tsgo: { type: "boolean", default: false },
       incremental: { type: "boolean", default: false },
+      "no-incremental": { type: "boolean", default: false },
       watch: { type: "boolean", default: false },
       preserveWatchOutput: { type: "boolean", default: false },
       // svelte-check's, accepted for a drop-in.
