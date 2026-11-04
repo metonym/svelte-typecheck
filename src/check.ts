@@ -35,6 +35,11 @@ const TS_SCRIPT = /<script\b[^>]*\blang=["']?(ts|typescript)\b/;
 /** `A.d.svelte`, `A.d.svelte.ts`, `++A.svelte.ts` and `A.svelte.js`: `A.svelte`'s code. */
 const GENERATED_NAME =
   /(?:\+\+)?([^/\\]+?)(?:\.d\.svelte(?:\.ts)?|\.svelte\.[jt]s)$/;
+const DRIVE_PATH = /\b[A-Z]:\//g;
+const toPosix = (path: string) => path.split(sep).join("/");
+/** A path as svelte-check's TypeScript prints it: `/`-separated, a Windows drive lowercase. */
+const asTypeScriptPath = (path: string) =>
+  toPosix(path).replace(/^[A-Z]:/, (drive) => drive.toLowerCase());
 const escapeRegExp = (text: string) =>
   text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -843,15 +848,24 @@ export async function typecheck(
   }
   // A message that names generated code names its source, as svelte-check's
   // name the `.svelte` file: `<out>/svelte/src/A.d.svelte` is `src/A.svelte`.
+  // TypeScript names a file `/`-separated, and on Windows svelte-check
+  // with a lowercase drive letter, as a file URI's path has it.
   const generatedPath = new RegExp(
-    `${escapeRegExp(`${genDir}${sep}`)}[^"'\\s]*`,
-    "g",
+    `${escapeRegExp(`${toPosix(genDir)}/`)}[^"'\\s]*`,
+    "gi",
   );
-  for (const d of diagnostics)
-    if (d.message.includes(genDir))
-      d.message = d.message.replace(generatedPath, (path) =>
-        join(root, relative(genDir, path)).replace(GENERATED_NAME, "$1.svelte"),
-      );
+  for (const d of diagnostics) {
+    d.message = d.message.replace(generatedPath, (path) =>
+      asTypeScriptPath(
+        join(root, relative(toPosix(genDir), path)).replace(
+          GENERATED_NAME,
+          "$1.svelte",
+        ),
+      ),
+    );
+    if (process.platform === "win32")
+      d.message = d.message.replace(DRIVE_PATH, (drive) => drive.toLowerCase());
+  }
   diagnostics.push(...compiled);
   if (sources.has("js")) diagnostics.push(...parseErrors);
   // Without `allowJs`, svelte-check still loads a JS component, so an
@@ -903,7 +917,7 @@ export async function typecheck(
             severity: "error",
             source: "ts",
             code: "TS7016",
-            message: `Could not find a declaration file for module '${specifier}'. '${target}' implicitly has an 'any' type.`,
+            message: `Could not find a declaration file for module '${specifier}'. '${asTypeScriptPath(target)}' implicitly has an 'any' type.`,
           });
         }
     }
@@ -919,7 +933,7 @@ export async function typecheck(
       severity: "warning",
       source: "svelte",
       code: "100001",
-      message: `No svelte input files were found in config file '${project.tsconfig}'. Did you forget to add svelte files to the 'include' in your ${basename(project.tsconfig)}? Specified 'include' paths were '${JSON.stringify(project.raw.include)}' and 'exclude' paths were '${JSON.stringify(project.raw.exclude)}'`,
+      message: `No svelte input files were found in config file '${asTypeScriptPath(project.tsconfig)}'. Did you forget to add svelte files to the 'include' in your ${basename(project.tsconfig)}? Specified 'include' paths were '${JSON.stringify(project.raw.include)}' and 'exclude' paths were '${JSON.stringify(project.raw.exclude)}'`,
     });
   const reported = errorsOnly
     ? diagnostics.filter((d) => d.severity === "error")

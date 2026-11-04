@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { typecheck } from "../src/check.ts";
 import { changedFiles } from "../src/git.ts";
 
@@ -14,9 +14,7 @@ describe("only", () => {
       outDir: "node_modules/.cache/svelte-typecheck/test-only",
       only: ["tests/fixtures/Child.svelte"],
     });
-    const files = new Set(
-      result.diagnostics.map((d) => d.file.slice(d.file.lastIndexOf("/") + 1)),
-    );
+    const files = new Set(result.diagnostics.map((d) => basename(d.file)));
     // Errors.svelte and render.ts import Child.svelte; Warnings.svelte doesn't.
     expect([...files].sort()).toEqual(["Errors.svelte", "render.ts"]);
     expect(result.skipped).toBe(1);
@@ -42,8 +40,7 @@ describe("changedFiles", () => {
     git("commit", "-qam", "topic");
     writeFileSync(join(dir, "a.ts"), "2");
     writeFileSync(join(dir, "c.ts"), "1");
-    const names = (paths: string[]) =>
-      paths.map((p) => p.slice(p.lastIndexOf("/") + 1)).sort();
+    const names = (paths: string[]) => paths.map((p) => basename(p)).sort();
     expect(names(changedFiles(dir))).toEqual(["a.ts", "c.ts"]);
     expect(names(changedFiles(dir, "main"))).toEqual(["a.ts", "b.ts", "c.ts"]);
   });

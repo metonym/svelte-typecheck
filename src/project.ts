@@ -17,7 +17,8 @@ const TRAILING_COMMA = /,(\s*[}\]])/g;
 const STRING = /"(?:[^"\\]|\\.)*"/g;
 const PLACEHOLDER = /"\0(\d+)"/g;
 const WILDCARD = /[*?{]/;
-const HAS_EXTENSION = /\.[^/]+$/;
+/** A dot in the last segment, whichever separator: `D:\\a\\.tmp\\b` has none. */
+const HAS_EXTENSION = /\.[^/\\]+$/;
 const NODE_MODULES_JS = /\/node_modules\/.+\.[cm]?js$/;
 const DEFAULT_EXCLUDE = ["node_modules", "bower_components", "jspm_packages"];
 
