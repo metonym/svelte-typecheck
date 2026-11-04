@@ -151,6 +151,8 @@ function programOrder(
   roots: string[],
   read: (path: string) => string,
   resolveImport: (from: string, specifier: string) => string | undefined,
+  /** Each file's imports, filled in as it's read. */
+  imports: Map<string, Set<string>> = new Map(),
 ): Map<string, number> {
   const order = new Map<string, number>();
   let next = 0;
@@ -163,7 +165,9 @@ function programOrder(
       ...text.matchAll(DYNAMIC_IMPORT),
     ]) {
       const target = resolveImport(path, m[1] ?? "");
-      if (target) visit(target);
+      if (!target) continue;
+      imports.set(path, (imports.get(path) ?? new Set()).add(target));
+      visit(target);
     }
     order.set(path, next++);
   };
@@ -930,6 +934,7 @@ export async function typecheck(
   // import order. A reported file outside them comes last.
   const listed = listedFiles;
   const listedSet = new Set(listed);
+  const imports = new Map<string, Set<string>>();
   const order = programOrder(
     [
       ...listed,
@@ -940,7 +945,22 @@ export async function typecheck(
     // Generated code, whose imports include SvelteKit's `./$types`.
     (file) => generatedOf.get(file) ?? readFileSync(file, "utf-8"),
     importResolver([root, ...project.rootDirs], project.paths),
+    imports,
   );
+  // Only some files' diagnostics: those, and the files that import them,
+  // whose errors a change to them can cause.
+  let skipped = 0;
+  if (options.only) {
+    const shown = new Set(options.only.map((path) => resolve(cwd, path)));
+    for (const [file, targets] of imports)
+      for (const target of targets)
+        if (options.only.some((path) => resolve(cwd, path) === target))
+          shown.add(file);
+    const kept = reported.filter((d) => shown.has(d.file));
+    skipped = reported.length - kept.length;
+    reported.length = 0;
+    reported.push(...kept);
+  }
   const sourceRank = (d: Diagnostic) => (d.source === "svelte" ? 0 : 1);
   // Stable: in a file, the checker's order (generated code's, so a hoisted
   // snippet's errors come first), as svelte-check keeps it.
@@ -955,6 +975,7 @@ export async function typecheck(
     workspace,
     tsconfig: project.tsconfig,
     components: files.length,
+    skipped,
     dropped,
     failed,
     checker,

@@ -7,6 +7,7 @@ import {
   summarize,
   writer,
 } from "./format.ts";
+import { changedFiles } from "./git.ts";
 import type {
   Checker,
   DiagnosticSource,
@@ -58,6 +59,9 @@ svelte-typecheck's own:
   --no-declarations         Resolve component imports to their own
                             .svelte.d.ts
   --svelte <dir>            Svelte package to check against
+  --changed                 Report only files changed from HEAD (and
+                            untracked), and the files that import them
+  --since <ref>             As --changed, from where the branch left <ref>
 
 Exits 1 on an error, or a warning with --fail-on-warnings.`;
 
@@ -103,6 +107,14 @@ export async function main(argv: string[]): Promise<0 | 1> {
     compilerWarnings: parseCompilerWarnings(values["compiler-warnings"]),
     incremental: values.incremental,
   };
+  if (values.changed || values.since) {
+    try {
+      options.only = changedFiles(process.cwd(), values.since);
+    } catch (error) {
+      out.failure(error as Error);
+      return 1;
+    }
+  }
   const errorsOnly = values.threshold === "error";
   const failOnWarnings = values["fail-on-warnings"];
 
@@ -126,6 +138,10 @@ export async function main(argv: string[]): Promise<0 | 1> {
     for (const f of result.failed)
       out.failure(new Error(`${f.file}: failed to parse: ${f.message}`));
     const summary = summarize(result.diagnostics, result.components);
+    if (result.skipped > 0)
+      out.note(
+        `${result.skipped} more in files the changes don't reach, not shown`,
+      );
     out.completion(summary, watching);
     return summary.errors > 0 ||
       result.failed.length > 0 ||
@@ -179,6 +195,8 @@ function parse(argv: string[]) {
       "out-dir": { type: "string" },
       "no-declarations": { type: "boolean", default: false },
       svelte: { type: "string" },
+      changed: { type: "boolean", default: false },
+      since: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
