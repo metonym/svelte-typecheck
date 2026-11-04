@@ -55,7 +55,7 @@ try {
   ok("bun", ["run", "build"], root);
 
   // The bundle imports Node builtins, its own chunks and Svelte's compiler
-  // (a peer): no dependencies, and nothing Bun-only.
+  // (the project's): no dependencies, and nothing Bun-only.
   for (const file of await readdir(dist)) {
     if (!file.endsWith(".js")) continue;
     const code = readFileSync(join(dist, file), "utf-8");

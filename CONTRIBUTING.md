@@ -38,7 +38,7 @@ The SvelteKit fixture needs SvelteKit's generated files; its parity test runs `s
 - **Never pass silently.** Generated code that doesn't parse fails the run as our bug, and a checker error that names no file is reported on the tsconfig. A run that checked nothing must not look like a clean one.
 - **Never write the project's files.** Everything goes to the output folder; the generated tsconfig sets its own `incremental`, `composite` and `tsBuildInfoFile` so the project's never come into play.
 - **Bump `CACHE_FORMAT`** (`src/check.ts`) when a cache's shape changes, so a new run misses an old file instead of reading the wrong shape.
-- **Zero runtime dependencies.** sveast is bundled and Svelte is a peer; `src/` imports `node:` builtins otherwise and runs on Node ≥ 22 and Bun. `test:package` checks the bundle's imports.
+- **Zero runtime dependencies.** sveast is bundled, and Svelte is loaded from the project, so the package doesn't declare it, even as a peer; `src/` imports `node:` builtins otherwise and runs on Node ≥ 22 and Bun. `test:package` checks the bundle's imports.
 - **Keep the public API small.** `src/index.ts` is the public API, and `src/types.ts`, which imports nothing, holds its types: the build emits them as one `index.d.ts`.
 - **Paths through `node:path`.** Never split a path on `/`: on Windows a `.tmp` folder read as an extension once dropped every component. Messages print paths `/`-separated, with a lowercase drive letter on Windows, as svelte-check's TypeScript does.
 - **Comments say why.** JSDoc is for the public API; elsewhere a comment states a reason or a constraint the code can't. sveast's AST is untyped, so `any` stays on its nodes in `emit.ts` and `kit.ts`, with a disable comment, and nowhere else.

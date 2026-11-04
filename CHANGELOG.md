@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Svelte is no longer a peer dependency. svelte-typecheck always loads
+  the project's own, so the range only got in the way: npm refuses to
+  install alongside a Svelte outside it (a future Svelte 6), and installs
+  one into a project that has none.
+
 ## 0.1.0 — 2026-11-04
 
 The first release of svelte-typecheck, the Svelte type checker extracted
