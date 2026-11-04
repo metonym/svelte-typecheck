@@ -34,6 +34,7 @@ const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 const CONTINUATION = /^\s+\S/;
 const GLOBAL_DIAGNOSTIC = /^error (TS\d+): (.*)$/;
 const TS_MODULE = /\.[cm]?tsx?$/;
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 const DECLARATION_FILE = /\.d\.[cm]?ts$/;
 /** A comment that hides the next line's error from TypeScript. */
 const TS_DIRECTIVE = /^\s*\/\/\s*@ts-(ignore|expect-error)\b/;
@@ -528,6 +529,43 @@ export async function typecheck(
   const parseErrors: Diagnostic[] = [];
   const under = (path: string, dir: string) => path.startsWith(`${dir}${sep}`);
   const tsconfig = join(outDir, "tsconfig.json");
+  // What's read from each project file to order and report diagnostics,
+  // kept by its size and modification time for the next run.
+  const fileFacts = await factsCache(join(outDir, FACTS_CACHE), incremental);
+  /**
+   * Without `allowJs`, a JS component is an untyped JS module to its
+   * importers, as svelte-check has it: each import of one from TypeScript.
+   */
+  const untypedImports = (() => {
+    if (!(sources.has("js") && project.tsconfig && !project.allowJs)) return [];
+    const untyped = new Set(
+      files.filter(
+        (path, i) =>
+          !TS_SCRIPT.test(texts[i] ?? "") && !existsSync(`${path}.d.ts`),
+      ),
+    );
+    const resolvePath = importResolver(
+      [root, ...project.rootDirs],
+      project.paths,
+    );
+    // An import of the package's own name, which `paths` didn't find.
+    const resolveSelf = importResolver([], project.selfExports);
+    const tsSources = [
+      ...files.filter((_, i) => TS_SCRIPT.test(texts[i] ?? "")),
+      ...listedFiles.filter((path) => TS_MODULE.test(path)),
+    ];
+    return tsSources.flatMap((path) =>
+      fileFacts
+        .of(path, "svelteImports", (content) =>
+          svelteImportsOf(content, path.endsWith(".svelte")),
+        )
+        .flatMap((i) => {
+          const target =
+            resolvePath(path, i.specifier) ?? resolveSelf(path, i.specifier);
+          return target && untyped.has(target) ? [{ ...i, path, target }] : [];
+        }),
+    );
+  })();
   // The compiler's diagnostics alone need no generated code, and leave
   // the last run's in place.
   if (sources.has("js")) {
@@ -673,11 +711,8 @@ export async function typecheck(
       }
       parseErrors.push(...effects.diagnostics);
       // Without `allowJs`, a JS component is an untyped JS module to its
-      // importers, as svelte-check has it: `X.svelte.js`, outside the program.
-      if (result.lang === "js" && !project.allowJs) {
-        if (typed) put(join(genFrom, `${name}.svelte.js`), result.out.code);
-        continue;
-      }
+      // importers, as svelte-check has it: outside the program, and `any`.
+      if (result.lang === "js" && !project.allowJs) continue;
       const genPath = join(
         genFrom,
         `++${name}.svelte.${result.isTs ? "ts" : "js"}`,
@@ -699,6 +734,26 @@ export async function typecheck(
         );
     }
     if (incremental) write(emitCachePath, JSON.stringify(nextEmitCache));
+
+    // An untyped JS component, as TypeScript has an untyped JS module:
+    // `any`, and so is each name imported from it. A declaration, since
+    // an untyped JS file in `node_modules`, where this goes, would get
+    // Svelte's `*.svelte` module type instead.
+    const untypedNames = new Map<string, Set<string>>();
+    for (const i of untypedImports) {
+      const names = untypedNames.get(i.target) ?? new Set<string>();
+      for (const name of i.names) names.add(name);
+      untypedNames.set(i.target, names);
+    }
+    const untypedDeclarationOf = (target: string) =>
+      join(
+        genDir,
+        relative(root, dirname(target)),
+        `${basename(target, ".svelte")}.d.svelte.ts`,
+      );
+    if (declarations)
+      for (const [target, names] of untypedNames)
+        write(untypedDeclarationOf(target), untypedDeclaration(names));
 
     // SvelteKit: its files get the types svelte-check gives them, in copies
     // that replace them, and the `./$types` they import, mirrored next to the
@@ -750,6 +805,12 @@ export async function typecheck(
         targets.flatMap((t) => (under(t, root) ? [mirror(t), t] : [t])),
       ]),
     );
+    // `rootDirs` maps only a relative import: one through the package's own
+    // name finds an untyped component's declaration by name.
+    if (declarations)
+      for (const i of untypedImports)
+        if (!i.specifier.startsWith("."))
+          paths[i.specifier] = [untypedDeclarationOf(i.target)];
 
     // A copy beside the generated code, so its `import("svelte")` is the
     // project's Svelte, not whichever this package was installed with.
@@ -955,9 +1016,6 @@ export async function typecheck(
     return { endLine: end.line, endColumn: end.column };
   };
   const diagnostics: Diagnostic[] = [];
-  // What's read from each project file to order and report diagnostics,
-  // kept by its size and modification time for the next run.
-  const fileFacts = await factsCache(join(outDir, FACTS_CACHE), incremental);
   const dropped: Diagnostic[] = [];
   const storeErrors: Diagnostic[] = [];
   const seen = new Set<string>();
@@ -1112,75 +1170,31 @@ export async function typecheck(
   // Without `allowJs`, svelte-check still loads a JS component, so an
   // import of it from TypeScript is untyped (TS7016). It isn't in this
   // program, so the import is found here.
-  if (sources.has("js") && project.tsconfig && !project.allowJs) {
-    const untyped = new Set(
-      files.filter(
-        (path, i) =>
-          !TS_SCRIPT.test(texts[i] ?? "") && !existsSync(`${path}.d.ts`),
-      ),
-    );
-    const resolvePath = importResolver(
-      [root, ...project.rootDirs],
-      project.paths,
-    );
-    // An import of the package's own name, which `paths` didn't find.
-    const resolveSelf = importResolver([], project.selfExports);
-    const resolveImport = (from: string, specifier: string) =>
-      resolvePath(from, specifier) ?? resolveSelf(from, specifier);
-    /** A TS source's `.svelte` imports, by line and column. */
-    const svelteImportsOf = (content: string, component: boolean) => {
-      if (!content.includes(".svelte")) return [];
-      const lexed = component ? lexComponent(content) : undefined;
-      const ranges = lexed
-        ? [lexed.module, lexed.instance].flatMap((script) =>
-            script ? [[script.content.start, script.content.end] as const] : [],
-          )
-        : [[0, content.length] as const];
-      const locate = createLocator(content);
-      const lines = content.split("\n");
-      return ranges.flatMap(([start, end]) =>
-        lexImportsExports(content.slice(start, end)).flatMap((statement) => {
-          const specifier = statement.source?.value;
-          if (!specifier?.endsWith(".svelte")) return [];
-          const at = locate.position(start + (statement.source?.start ?? 0));
-          // A `@ts-ignore` or `@ts-expect-error` on the line before.
-          const directive = (TS_DIRECTIVE.exec(lines[at.line - 2] ?? "")?.[1] ??
-            null) as "ignore" | "expect-error" | null;
-          return [[specifier, at.line, at.column, directive] as const];
-        }),
-      );
-    };
-    const tsSources = [
-      ...files.filter((_, i) => TS_SCRIPT.test(texts[i] ?? "")),
-      ...listedFiles.filter((path) => TS_MODULE.test(path)),
-    ];
-    /** `@ts-expect-error`s that would have hidden TS7016, by file and line. */
+  if (untypedImports.length > 0) {
+    /** `@ts-expect-error`s that TS7016 would have used, by file and line. */
     const expected = new Set<string>();
-    for (const path of tsSources) {
+    const untypedErrors: Diagnostic[] = [];
+    for (const i of untypedImports) {
       // With `skipLibCheck`, a declaration file's errors aren't reported.
-      if (project.skipLibCheck && DECLARATION_FILE.test(path)) continue;
-      for (const [specifier, line, column, directive] of fileFacts.of(
-        path,
-        "svelteImports",
-        (content) => svelteImportsOf(content, path.endsWith(".svelte")),
-      )) {
-        const target = resolveImport(path, specifier);
-        if (!target || !untyped.has(target)) continue;
-        if (directive) {
-          if (directive === "expect-error") expected.add(`${path}:${line - 1}`);
-          continue;
-        }
-        diagnostics.push({
-          file: path,
-          line,
-          column,
-          severity: "error",
-          source: "ts",
-          code: "TS7016",
-          message: `Could not find a declaration file for module '${specifier}'. '${asTypeScriptPath(target)}' implicitly has an 'any' type.`,
-        });
+      if (project.skipLibCheck && DECLARATION_FILE.test(i.path)) continue;
+      if (i.directive) {
+        if (i.directive === "expect-error")
+          expected.add(`${i.path}:${i.line - 1}`);
+        continue;
       }
+      untypedErrors.push({
+        file: i.path,
+        line: i.line,
+        column: i.column,
+        severity: "error",
+        source: "ts",
+        code: "TS7016",
+        message: `Could not find a declaration file for module '${i.specifier}'. '${asTypeScriptPath(i.target)}' implicitly has an 'any' type.`,
+      });
     }
+    // First in its file, as TypeScript reports an import's error before
+    // those of the code after it.
+    diagnostics.unshift(...untypedErrors);
     // An `@ts-expect-error` that TS7016 would have used isn't unused, as
     // TypeScript reports it here, where nothing reads the import.
     if (expected.size > 0) {
@@ -1309,17 +1323,77 @@ interface Facts {
   stat: string;
   /** Its imports' specifiers, in TypeScript's order. */
   specifiers?: string[];
-  /**
-   * Its `.svelte` imports, by line and column, and the `@ts-ignore` or
-   * `@ts-expect-error` on the line before, if any.
-   */
-  svelteImports?: (readonly [
-    string,
-    number,
-    number,
-    "ignore" | "expect-error" | null,
-  ])[];
+  /** Its `.svelte` imports. */
+  svelteImports?: SvelteImport[];
 }
+
+/** An import of a `.svelte` file, from a TS file or component. */
+interface SvelteImport {
+  specifier: string;
+  /** The specifier's. */
+  line: number;
+  column: number;
+  /** A `@ts-ignore` or `@ts-expect-error` on the line before. */
+  directive: "ignore" | "expect-error" | null;
+  /** The names it imports, or re-exports. */
+  names: string[];
+}
+
+/** A TS source's `.svelte` imports: a module's, or a component's scripts'. */
+function svelteImportsOf(content: string, component: boolean): SvelteImport[] {
+  if (!content.includes(".svelte")) return [];
+  const lexed = component ? lexComponent(content) : undefined;
+  const ranges = lexed
+    ? [lexed.module, lexed.instance].flatMap((script) =>
+        script ? [[script.content.start, script.content.end] as const] : [],
+      )
+    : [[0, content.length] as const];
+  const locate = createLocator(content);
+  const lines = content.split("\n");
+  return ranges.flatMap(([start, end]) =>
+    lexImportsExports(content.slice(start, end)).flatMap((statement) => {
+      const specifier = statement.source?.value;
+      if (!specifier?.endsWith(".svelte")) return [];
+      const at = locate.position(start + (statement.source?.start ?? 0));
+      const directive = TS_DIRECTIVE.exec(lines[at.line - 2] ?? "")?.[1];
+      return [
+        {
+          specifier,
+          line: at.line,
+          column: at.column,
+          directive:
+            directive === "ignore" || directive === "expect-error"
+              ? directive
+              : null,
+          names: statement.specifiers.flatMap((spec) => {
+            // An import's name in the module, or a re-export's.
+            const name = "imported" in spec ? spec.imported : spec.local;
+            return name === "*" ? [] : [name];
+          }),
+        },
+      ];
+    }),
+  );
+}
+
+/**
+ * An untyped module, as TypeScript has one: its default export is `any`,
+ * and so is each name it's imported by, each as a value and as a type that
+ * takes type arguments, unused but for the type to read them.
+ */
+function untypedDeclaration(names: Set<string>): string {
+  const declare = (name: string) =>
+    `declare const ${name}: any;\ntype ${name}<${UNTYPED_PARAMS}> = any & [${UNTYPED_ARGS}];\n`;
+  const named = [...names].filter(
+    (name) => name !== "default" && IDENTIFIER.test(name),
+  );
+  return `${[UNTYPED, ...named].map(declare).join("")}export default ${UNTYPED};\n${named.length > 0 ? `export { ${named.join(", ")} };\n` : ""}`;
+}
+const UNTYPED = "$$untyped";
+const UNTYPED_ARGS = "A, B, C, D, E, F, G, H";
+const UNTYPED_PARAMS = UNTYPED_ARGS.split(", ")
+  .map((p) => `${p} = any`)
+  .join(", ");
 
 /** Facts about files, read once per change of a file's size or time. */
 async function factsCache(path: string, enabled: boolean) {
