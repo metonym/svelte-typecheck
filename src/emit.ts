@@ -871,11 +871,15 @@ export function emit(
           node.attributes ?? [],
         );
         // With `$$Slots`, the slot's props are checked against it.
-        out.raw(
-          typed.has("$$Slots")
-            ? `__sveltets_createSlot(${JSON.stringify(nameAttr ? textOf(nameAttr) : "default")}, {`
-            : "({",
-        );
+        if (typed.has("$$Slots")) {
+          // A slot `$$Slots` doesn't declare: an error at its name.
+          const name = JSON.stringify(nameAttr ? textOf(nameAttr) : "default");
+          out.raw("__sveltets_createSlot(");
+          if (nameAttr?.value?.[0])
+            out.from(nameAttr.value[0].start, () => out.raw(name));
+          else out.raw(name);
+          out.raw(", {");
+        } else out.raw("({");
         for (const a of node.attributes ?? [])
           if (a.type === "Attribute" && a.name !== "name") {
             key(a, a.name);
