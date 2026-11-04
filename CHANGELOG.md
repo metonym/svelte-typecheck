@@ -15,3 +15,6 @@ from carbon-components-svelte's `scripts/typecheck`.
   handlers, hooks and param matchers, and `paths` or `#imports` aliases.
 - Any checker: the project's `tsc` (default), tsgo, tsrs or `bun check`.
 - `--watch` and `--incremental`; Node 22+, Bun, macOS, Linux and Windows.
+- Beyond svelte-check: `--baseline` and `--update-baseline` to fail only
+  on new errors, and `--changed` and `--since <ref>` to report only the
+  files a change reaches.
