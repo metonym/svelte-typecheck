@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
 import { typecheck } from "../src/check.ts";
 import type { Checker } from "../src/types.ts";
@@ -117,6 +117,46 @@ describe("typecheck", () => {
       expect(diagnostics.map((d) => d.code)).toContain(code);
     });
   });
+
+  it("reports the project's TS and JS errors with declarations off", async () => {
+    // A library's components, typed by their own `.svelte.d.ts`.
+    const dir = join(root, "tests/.tmp/no-declarations");
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { strict: true, allowJs: true, checkJs: true },
+        include: ["*.svelte", "*.ts", "*.js"],
+      }),
+    );
+    writeFileSync(
+      join(dir, "Box.svelte"),
+      "<script>\n  export let n = 1;\n</script>\n",
+    );
+    writeFileSync(
+      join(dir, "Box.svelte.d.ts"),
+      'import { SvelteComponent } from "svelte";\nexport default class Box extends SvelteComponent<{ n?: number }> {}\n',
+    );
+    writeFileSync(
+      join(dir, "util.js"),
+      '/** @type {number} */\nexport const n = "one";\n',
+    );
+    writeFileSync(
+      join(dir, "props.ts"),
+      'import type Box from "./Box.svelte";\nexport const n: number = "one";\nexport type B = Box;\n',
+    );
+    const { diagnostics } = await typecheck({
+      cwd: dir,
+      declarations: false,
+      diagnosticSources: ["js"],
+      checker: "bun",
+      incremental: false,
+    });
+    expect(
+      diagnostics.map((d) => `${relative(dir, d.file)}:${d.line} ${d.code}`),
+    ).toEqual(["props.ts:2 TS2322", "util.js:2 TS2322"]);
+  }, 30_000);
 
   it("runs svelte.config's preprocessors first, positions mapped back", async () => {
     const { diagnostics } = await typecheck({
