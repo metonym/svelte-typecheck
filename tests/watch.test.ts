@@ -135,6 +135,18 @@ describe("incremental, with nothing changed", () => {
     expect((await run()).diagnostics).toEqual([]);
     await writeFile(outside, 'export const label = "one";\n');
     expect((await run()).diagnostics.map((d) => d.code)).toEqual(["TS2322"]);
+    // And the declarations TypeScript reads for an import of a JS file.
+    const js = join(root, "tests/.tmp/replay-outside-js.js");
+    const dts = join(root, "tests/.tmp/replay-outside-js.d.ts");
+    await writeFile(js, "export const count = 1;\n");
+    await writeFile(dts, "export const count: number;\n");
+    await writeFile(
+      join(dir, "extra.ts"),
+      'import { count } from "../replay-outside-js.js";\nexport const n: number = count;\n',
+    );
+    expect((await run()).diagnostics).toEqual([]);
+    await writeFile(dts, "export const count: string;\n");
+    expect((await run()).diagnostics.map((d) => d.code)).toEqual(["TS2322"]);
   }, 30_000);
 });
 
