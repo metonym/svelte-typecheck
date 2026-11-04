@@ -1,3 +1,4 @@
+import { existsSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { typecheck } from "../src/check.ts";
 import type { Checker } from "../src/types.ts";
@@ -70,6 +71,20 @@ describe("typecheck", () => {
             "`<img>` element should have an alt attribute\nhttps://svelte.dev/e/a11y_missing_attribute",
         },
       ]);
+    });
+
+    it("generates no code for the compiler's diagnostics alone", async () => {
+      const outDir = "node_modules/.cache/svelte-typecheck/test-compiler-only";
+      rmSync(join(root, outDir), { recursive: true, force: true });
+      const { diagnostics } = await check({
+        diagnosticSources: ["svelte"],
+        outDir,
+      });
+      expect(diagnostics.map((d) => d.code)).toEqual([
+        "a11y_missing_attribute",
+      ]);
+      expect(existsSync(join(root, outDir, "svelte"))).toBe(false);
+      expect(existsSync(join(root, outDir, "tsconfig.json"))).toBe(false);
     });
 
     it("ignores a warning, or makes it an error, by code", async () => {

@@ -501,306 +501,314 @@ export async function typecheck(
 
   const failed: TypecheckResult["failed"] = [];
   const parseErrors: Diagnostic[] = [];
-  // Each component's generated code, by a hash of what it's made from:
-  // an incremental run regenerates only what changed. One that didn't is
-  // generated again, in memory, only to map an error the checker reports
-  // in it.
-  const emitCachePath = join(outDir, EMIT_CACHE);
-  const emitFingerprint = hash(
-    JSON.stringify([
-      TOOL_VERSION,
-      CACHE_FORMAT,
-      svelteMajor,
-      project.checkJs,
-      project.allowJs,
-      declarations,
-      root,
-      genDir,
-    ]),
-  );
-  const emitCache: EmitCache = (incremental
-    ? await readFile(emitCachePath, "utf-8")
-        .then((text) => JSON.parse(text) as EmitCache)
-        .then((c) => (c.fingerprint === emitFingerprint ? c : undefined))
-        .catch(() => undefined)
-    : undefined) ?? { fingerprint: emitFingerprint, entries: {} };
-  const nextEmitCache: EmitCache = {
-    fingerprint: emitFingerprint,
-    entries: {},
-  };
+  const under = (path: string, dir: string) => path.startsWith(`${dir}${sep}`);
+  const tsconfig = join(outDir, "tsconfig.json");
+  // The compiler's diagnostics alone need no generated code, and leave
+  // the last run's in place.
+  if (sources.has("js")) {
+    // Each component's generated code, by a hash of what it's made from:
+    // an incremental run regenerates only what changed. One that didn't is
+    // generated again, in memory, only to map an error the checker reports
+    // in it.
+    const emitCachePath = join(outDir, EMIT_CACHE);
+    const emitFingerprint = hash(
+      JSON.stringify([
+        TOOL_VERSION,
+        CACHE_FORMAT,
+        svelteMajor,
+        project.checkJs,
+        project.allowJs,
+        declarations,
+        root,
+        genDir,
+      ]),
+    );
+    const emitCache: EmitCache = (incremental
+      ? await readFile(emitCachePath, "utf-8")
+          .then((text) => JSON.parse(text) as EmitCache)
+          .then((c) => (c.fingerprint === emitFingerprint ? c : undefined))
+          .catch(() => undefined)
+      : undefined) ?? { fingerprint: emitFingerprint, entries: {} };
+    const nextEmitCache: EmitCache = {
+      fingerprint: emitFingerprint,
+      entries: {},
+    };
 
-  const emitFor = (i: number) => {
-    const path = files[i] ?? "";
-    const genFrom = join(genDir, relative(root, dirname(path)));
-    return emit(texts[i] ?? "", {
-      svelte: svelteMajor,
-      basename: basename(path),
-      checkJs: project.checkJs,
-      // A relative import that leaves the root is relative to the
-      // generated file's folder instead.
-      rewriteImport(specifier) {
-        if (!specifier.startsWith(".")) return;
-        const target = resolve(dirname(path), specifier);
-        if (target.startsWith(`${root}${sep}`)) return;
-        return relativeTo(genFrom, target);
-      },
-    });
-  };
-  /** An entry whose generated code is generated only when it's needed. */
-  const lazyOutput = (i: number, lang: "ts" | "js") => {
-    let result: ReturnType<typeof emit> | undefined;
-    const get = () => {
-      result ??= emitFor(i);
-      return result;
+    const emitFor = (i: number) => {
+      const path = files[i] ?? "";
+      const genFrom = join(genDir, relative(root, dirname(path)));
+      return emit(texts[i] ?? "", {
+        svelte: svelteMajor,
+        basename: basename(path),
+        checkJs: project.checkJs,
+        // A relative import that leaves the root is relative to the
+        // generated file's folder instead.
+        rewriteImport(specifier) {
+          if (!specifier.startsWith(".")) return;
+          const target = resolve(dirname(path), specifier);
+          if (target.startsWith(`${root}${sep}`)) return;
+          return relativeTo(genFrom, target);
+        },
+      });
     };
-    return {
-      source: texts[i] ?? "",
-      svelte: files[i] ?? "",
-      isTs: lang === "ts",
-      get output() {
-        return get().out;
-      },
-      get emitted() {
-        return get();
-      },
+    /** An entry whose generated code is generated only when it's needed. */
+    const lazyOutput = (i: number, lang: "ts" | "js") => {
+      let result: ReturnType<typeof emit> | undefined;
+      const get = () => {
+        result ??= emitFor(i);
+        return result;
+      };
+      return {
+        source: texts[i] ?? "",
+        svelte: files[i] ?? "",
+        isTs: lang === "ts",
+        get output() {
+          return get().out;
+        },
+        get emitted() {
+          return get();
+        },
+      };
     };
-  };
 
-  for (const [i, path] of files.entries()) {
-    const genFrom = join(genDir, relative(root, dirname(path)));
-    const name = path.slice(path.lastIndexOf(sep) + 1, -".svelte".length);
-    // A component's own `X.svelte.d.ts` is what an import of it finds, as
-    // TypeScript resolves it for svelte-check; the generated code types the rest.
-    const typed = declarations && !existsSync(`${path}.d.ts`);
-    const key = hash(`${path}\0${typed}\0${texts[i] ?? ""}`);
-    const cached = emitCache.entries[key];
-    if (cached && (!cached.genPath || existsSync(cached.genPath))) {
-      for (const file of cached.files) written.add(file);
-      parseErrors.push(...cached.diagnostics);
-      if (cached.genPath && cached.lang)
-        outputs.set(cached.genPath, lazyOutput(i, cached.lang));
-      nextEmitCache.entries[key] = cached;
-      continue;
-    }
-    const effects: EmitEffects = { files: [], diagnostics: [] };
-    nextEmitCache.entries[key] = effects;
-    const put = (file: string, content: string) => {
-      effects.files.push(file);
-      write(file, content);
-    };
-    let result: ReturnType<typeof emit>;
-    try {
-      result = emitFor(i);
-    } catch (error) {
-      const e = error as Error & { start?: { line: number; column: number } };
-      if (!e.start) {
-        failed.push({ file: path, message: e.message });
-        delete nextEmitCache.entries[key];
+    for (const [i, path] of files.entries()) {
+      const genFrom = join(genDir, relative(root, dirname(path)));
+      const name = path.slice(path.lastIndexOf(sep) + 1, -".svelte".length);
+      // A component's own `X.svelte.d.ts` is what an import of it finds, as
+      // TypeScript resolves it for svelte-check; the generated code types the rest.
+      const typed = declarations && !existsSync(`${path}.d.ts`);
+      const key = hash(`${path}\0${typed}\0${texts[i] ?? ""}`);
+      const cached = emitCache.entries[key];
+      if (cached && (!cached.genPath || existsSync(cached.genPath))) {
+        for (const file of cached.files) written.add(file);
+        parseErrors.push(...cached.diagnostics);
+        if (cached.genPath && cached.lang)
+          outputs.set(cached.genPath, lazyOutput(i, cached.lang));
+        nextEmitCache.entries[key] = cached;
         continue;
       }
-      // A component that doesn't parse: svelte-check reports the parse error
-      // from its checker too, and an import of it finds no default export.
-      const isTs = TS_SCRIPT.test(texts[i] ?? "");
-      effects.diagnostics.push({
-        file: path,
-        line: e.start.line,
-        column: e.start.column + 1,
-        endLine: e.start.line,
-        endColumn: e.start.column + 1,
-        severity: "error",
-        source: isTs ? "ts" : "js",
-        code: "-1",
-        message: e.message,
-      });
-      // As svelte2tsx's output then, a module only if a script imports or
-      // exports something.
-      const lexed = lexComponent(texts[i] ?? "");
-      const isModule = [lexed.instance, lexed.module].some(
-        (script) =>
-          script &&
-          lexImportsExports(
-            (texts[i] ?? "").slice(script.content.start, script.content.end),
-          ).length > 0,
-      );
-      const stub = isModule ? "export {};\n" : "";
-      put(join(genFrom, `++${name}.svelte.${isTs ? "ts" : "js"}`), stub);
-      if (declarations) put(join(genFrom, `${name}.d.svelte.ts`), stub);
+      const effects: EmitEffects = { files: [], diagnostics: [] };
+      nextEmitCache.entries[key] = effects;
+      const put = (file: string, content: string) => {
+        effects.files.push(file);
+        write(file, content);
+      };
+      let result: ReturnType<typeof emit>;
+      try {
+        result = emitFor(i);
+      } catch (error) {
+        const e = error as Error & { start?: { line: number; column: number } };
+        if (!e.start) {
+          failed.push({ file: path, message: e.message });
+          delete nextEmitCache.entries[key];
+          continue;
+        }
+        // A component that doesn't parse: svelte-check reports the parse error
+        // from its checker too, and an import of it finds no default export.
+        const isTs = TS_SCRIPT.test(texts[i] ?? "");
+        effects.diagnostics.push({
+          file: path,
+          line: e.start.line,
+          column: e.start.column + 1,
+          endLine: e.start.line,
+          endColumn: e.start.column + 1,
+          severity: "error",
+          source: isTs ? "ts" : "js",
+          code: "-1",
+          message: e.message,
+        });
+        // As svelte2tsx's output then, a module only if a script imports or
+        // exports something.
+        const lexed = lexComponent(texts[i] ?? "");
+        const isModule = [lexed.instance, lexed.module].some(
+          (script) =>
+            script &&
+            lexImportsExports(
+              (texts[i] ?? "").slice(script.content.start, script.content.end),
+            ).length > 0,
+        );
+        const stub = isModule ? "export {};\n" : "";
+        put(join(genFrom, `++${name}.svelte.${isTs ? "ts" : "js"}`), stub);
+        if (declarations) put(join(genFrom, `${name}.d.svelte.ts`), stub);
+        parseErrors.push(...effects.diagnostics);
+        continue;
+      }
+      const locate = createLocator(texts[i] ?? "");
+      for (const t of result.tsInJs) {
+        const at = locate.position(t.at);
+        effects.diagnostics.push({
+          file: path,
+          line: at.line,
+          column: at.column,
+          severity: "error",
+          source: "js",
+          code: t.code,
+          message: t.message,
+        });
+      }
       parseErrors.push(...effects.diagnostics);
-      continue;
-    }
-    const locate = createLocator(texts[i] ?? "");
-    for (const t of result.tsInJs) {
-      const at = locate.position(t.at);
-      effects.diagnostics.push({
-        file: path,
-        line: at.line,
-        column: at.column,
-        severity: "error",
-        source: "js",
-        code: t.code,
-        message: t.message,
-      });
-    }
-    parseErrors.push(...effects.diagnostics);
-    // Without `allowJs`, a JS component is an untyped JS module to its
-    // importers, as svelte-check has it: `X.svelte.js`, outside the program.
-    if (result.lang === "js" && !project.allowJs) {
-      if (typed) put(join(genFrom, `${name}.svelte.js`), result.out.code);
-      continue;
-    }
-    const genPath = join(
-      genFrom,
-      `++${name}.svelte.${result.isTs ? "ts" : "js"}`,
-    );
-    effects.genPath = genPath;
-    effects.lang = result.lang === "ts" ? "ts" : "js";
-    outputs.set(genPath, {
-      output: result.out,
-      source: texts[i] ?? "",
-      svelte: path,
-      isTs: result.lang === "ts",
-      emitted: result,
-    });
-    put(genPath, result.out.code);
-    if (typed)
-      put(
-        join(genFrom, `${name}.d.svelte.ts`),
-        `export { default } from "./++${name}.svelte.js";\nexport * from "./++${name}.svelte.js";\n`,
+      // Without `allowJs`, a JS component is an untyped JS module to its
+      // importers, as svelte-check has it: `X.svelte.js`, outside the program.
+      if (result.lang === "js" && !project.allowJs) {
+        if (typed) put(join(genFrom, `${name}.svelte.js`), result.out.code);
+        continue;
+      }
+      const genPath = join(
+        genFrom,
+        `++${name}.svelte.${result.isTs ? "ts" : "js"}`,
       );
-  }
-  if (incremental) write(emitCachePath, JSON.stringify(nextEmitCache));
-
-  // SvelteKit: its files get the types svelte-check gives them, in copies
-  // that replace them, and the `./$types` they import, mirrored next to the
-  // generated code, import those copies.
-  const mirror = (path: string) => join(genDir, relative(root, path));
-  const under = (path: string, dir: string) => path.startsWith(`${dir}${sep}`);
-  const kitProject =
-    project.tsconfig !== undefined &&
-    (project.rootDirs.some((dir) => dir.includes(".svelte-kit")) ||
-      files.some((path) => isKitRouteFile(basename(path))));
-  const replaced: string[] = [];
-  if (kitProject) {
-    const hooksModule =
-      kitMajor(root) >= 3 ? "@sveltejs/kit/hooks" : "@sveltejs/kit";
-    for (const path of scriptsOf(project, isKitFile)) {
-      if (!under(path, root)) continue;
-      const source = readFileSync(path, "utf-8");
-      const output = kitFile(path, source, hooksModule);
-      if (!output) continue;
-      replaced.push(path);
-      outputs.set(mirror(path), {
-        output,
-        source,
+      effects.genPath = genPath;
+      effects.lang = result.lang === "ts" ? "ts" : "js";
+      outputs.set(genPath, {
+        output: result.out,
+        source: texts[i] ?? "",
         svelte: path,
-        isTs: !JS_FILE.test(path),
-        emitted: NOTHING_EMITTED,
-        kit: true,
+        isTs: result.lang === "ts",
+        emitted: result,
       });
-      write(mirror(path), output.code);
+      put(genPath, result.out.code);
+      if (typed)
+        put(
+          join(genFrom, `${name}.d.svelte.ts`),
+          `export { default } from "./++${name}.svelte.js";\nexport * from "./++${name}.svelte.js";\n`,
+        );
     }
-  }
-  const rootDirs: string[] = [];
-  for (const dir of project.rootDirs) {
-    if (dir === root || under(dir, outDir)) continue;
-    if (!(kitProject && under(dir, root) && existsSync(dir))) {
-      rootDirs.push(dir);
-      continue;
+    if (incremental) write(emitCachePath, JSON.stringify(nextEmitCache));
+
+    // SvelteKit: its files get the types svelte-check gives them, in copies
+    // that replace them, and the `./$types` they import, mirrored next to the
+    // generated code, import those copies.
+    const mirror = (path: string) => join(genDir, relative(root, path));
+    const kitProject =
+      project.tsconfig !== undefined &&
+      (project.rootDirs.some((dir) => dir.includes(".svelte-kit")) ||
+        files.some((path) => isKitRouteFile(basename(path))));
+    const replaced: string[] = [];
+    if (kitProject) {
+      const hooksModule =
+        kitMajor(root) >= 3 ? "@sveltejs/kit/hooks" : "@sveltejs/kit";
+      for (const path of scriptsOf(project, isKitFile)) {
+        if (!under(path, root)) continue;
+        const source = readFileSync(path, "utf-8");
+        const output = kitFile(path, source, hooksModule);
+        if (!output) continue;
+        replaced.push(path);
+        outputs.set(mirror(path), {
+          output,
+          source,
+          svelte: path,
+          isTs: !JS_FILE.test(path),
+          emitted: NOTHING_EMITTED,
+          kit: true,
+        });
+        write(mirror(path), output.code);
+      }
     }
-    // A rootDir in the project, such as SvelteKit's `.svelte-kit/types`.
-    replaced.push(dir);
-    rootDirs.push(mirror(dir));
-    // Its `$types.d.ts`, and SvelteKit 2's `proxy+page.server.ts` copies.
-    for (const file of glob(dir, ["**/*.{ts,js}"]))
-      write(mirror(join(dir, file)), readFileSync(join(dir, file), "utf-8"));
-  }
-  // An alias (`$lib/*`) finds a component's generated code before its source.
-  const paths = Object.fromEntries(
-    Object.entries(project.paths).map(([key, targets]) => [
-      key,
-      targets.flatMap((t) => (under(t, root) ? [mirror(t), t] : [t])),
-    ]),
-  );
+    const rootDirs: string[] = [];
+    for (const dir of project.rootDirs) {
+      if (dir === root || under(dir, outDir)) continue;
+      if (!(kitProject && under(dir, root) && existsSync(dir))) {
+        rootDirs.push(dir);
+        continue;
+      }
+      // A rootDir in the project, such as SvelteKit's `.svelte-kit/types`.
+      replaced.push(dir);
+      rootDirs.push(mirror(dir));
+      // Its `$types.d.ts`, and SvelteKit 2's `proxy+page.server.ts` copies.
+      for (const file of glob(dir, ["**/*.{ts,js}"]))
+        write(mirror(join(dir, file)), readFileSync(join(dir, file), "utf-8"));
+    }
+    // An alias (`$lib/*`) finds a component's generated code before its source.
+    const paths = Object.fromEntries(
+      Object.entries(project.paths).map(([key, targets]) => [
+        key,
+        targets.flatMap((t) => (under(t, root) ? [mirror(t), t] : [t])),
+      ]),
+    );
 
-  // A copy beside the generated code, so its `import("svelte")` is the
-  // project's Svelte, not whichever this package was installed with.
-  const shims = join(outDir, "shims.d.ts");
-  write(shims, readFileSync(join(SHIMS, "shims.d.ts"), "utf-8"));
+    // A copy beside the generated code, so its `import("svelte")` is the
+    // project's Svelte, not whichever this package was installed with.
+    const shims = join(outDir, "shims.d.ts");
+    write(shims, readFileSync(join(SHIMS, "shims.d.ts"), "utf-8"));
 
-  const tsconfig = join(outDir, "tsconfig.json");
-  const rel = (path: string) => relativeTo(outDir, path);
-  /** The program's root files: generated code in place of what it replaces. */
-  const generatedFor = new Map(
-    [...outputs].map(([genPath, gen]) => [gen.svelte, genPath]),
-  );
-  const replacedSet = new Set(replaced);
-  const rootFiles = [
-    ...new Set([
-      ...listedFiles
-        .filter((path) => path.endsWith(".svelte"))
-        .map((path) => generatedFor.get(path))
-        .filter((path): path is string => path !== undefined),
-      ...[...outputs].filter(([, gen]) => !gen.kit).map(([genPath]) => genPath),
-      // The project's own TypeScript, which can import components.
-      ...(declarations ? listedFiles : [])
-        .filter((path) => !path.endsWith(".svelte"))
-        .map((path) => {
-          if (replacedSet.has(path)) return generatedFor.get(path);
-          const dir = replaced.find((d) => under(path, d));
-          return dir ? mirror(path) : path;
-        })
-        .filter((path): path is string => path !== undefined),
-    ]),
-  ];
-  write(
-    tsconfig,
-    JSON.stringify(
-      {
-        ...(project.tsconfig ? { extends: rel(project.tsconfig) } : {}),
-        compilerOptions: {
-          ...(project.tsconfig ? {} : DEFAULT_COMPILER_OPTIONS),
-          rootDirs: [rel(root), "svelte", ...rootDirs.map(rel)],
-          ...(Object.keys(paths).length > 0
-            ? {
-                paths: Object.fromEntries(
-                  Object.entries(paths).map(([key, targets]) => [
-                    key,
-                    targets.map(rel),
-                  ]),
-                ),
-              }
-            : {}),
-          allowArbitraryExtensions: true,
-          noEmit: true,
-          // Ours, never the project's: a tsconfig's own `incremental` and
-          // `tsBuildInfoFile` would have the checker write this program's
-          // build info over the project's.
-          composite: false,
-          incremental,
-          ...(incremental ? { tsBuildInfoFile: "./tsbuildinfo" } : {}),
+    const rel = (path: string) => relativeTo(outDir, path);
+    /** The program's root files: generated code in place of what it replaces. */
+    const generatedFor = new Map(
+      [...outputs].map(([genPath, gen]) => [gen.svelte, genPath]),
+    );
+    const replacedSet = new Set(replaced);
+    const rootFiles = [
+      ...new Set([
+        ...listedFiles
+          .filter((path) => path.endsWith(".svelte"))
+          .map((path) => generatedFor.get(path))
+          .filter((path): path is string => path !== undefined),
+        ...[...outputs]
+          .filter(([, gen]) => !gen.kit)
+          .map(([genPath]) => genPath),
+        // The project's own TypeScript, which can import components.
+        ...(declarations ? listedFiles : [])
+          .filter((path) => !path.endsWith(".svelte"))
+          .map((path) => {
+            if (replacedSet.has(path)) return generatedFor.get(path);
+            const dir = replaced.find((d) => under(path, d));
+            return dir ? mirror(path) : path;
+          })
+          .filter((path): path is string => path !== undefined),
+      ]),
+    ];
+    write(
+      tsconfig,
+      JSON.stringify(
+        {
+          ...(project.tsconfig ? { extends: rel(project.tsconfig) } : {}),
+          compilerOptions: {
+            ...(project.tsconfig ? {} : DEFAULT_COMPILER_OPTIONS),
+            rootDirs: [rel(root), "svelte", ...rootDirs.map(rel)],
+            ...(Object.keys(paths).length > 0
+              ? {
+                  paths: Object.fromEntries(
+                    Object.entries(paths).map(([key, targets]) => [
+                      key,
+                      targets.map(rel),
+                    ]),
+                  ),
+                }
+              : {}),
+            allowArbitraryExtensions: true,
+            noEmit: true,
+            // Ours, never the project's: a tsconfig's own `incremental` and
+            // `tsBuildInfoFile` would have the checker write this program's
+            // build info over the project's.
+            composite: false,
+            incremental,
+            ...(incremental ? { tsBuildInfoFile: "./tsbuildinfo" } : {}),
+          },
+          // Listed rather than globbed: `include` skips dot folders and
+          // `node_modules`, where the generated code lives by default. In
+          // svelte-check's order, which decides how TypeScript prints a
+          // union: components, the project's TS and JS, then the shims.
+          files: [
+            ...rootFiles,
+            shims,
+            svelteHtml,
+            // Svelte 5's runes, as globals, as svelte2tsx references them.
+            ...(svelteMajor >= 5 ? [join(svelteDir, "types/index.d.ts")] : []),
+          ].map(rel),
+          include: [],
         },
-        // Listed rather than globbed: `include` skips dot folders and
-        // `node_modules`, where the generated code lives by default. In
-        // svelte-check's order, which decides how TypeScript prints a
-        // union: components, the project's TS and JS, then the shims.
-        files: [
-          ...rootFiles,
-          shims,
-          svelteHtml,
-          // Svelte 5's runes, as globals, as svelte2tsx references them.
-          ...(svelteMajor >= 5 ? [join(svelteDir, "types/index.d.ts")] : []),
-        ].map(rel),
-        include: [],
-      },
-      null,
-      2,
-    ),
-  );
-  write(join(outDir, MANIFEST), JSON.stringify([...written].sort()));
-  // Code for a component that's gone, which an import could still find.
-  for (const path of previous)
-    if (!written.has(path)) writes.push(rm(path, { force: true }));
+        null,
+        2,
+      ),
+    );
+    write(join(outDir, MANIFEST), JSON.stringify([...written].sort()));
+    // Code for a component that's gone, which an import could still find.
+    for (const path of previous)
+      if (!written.has(path)) writes.push(rm(path, { force: true }));
+  }
   await Promise.all(writes);
+  // The caches go here, generated code or not.
+  if (incremental) await mkdir(outDir, { recursive: true });
   const emitted = performance.now();
 
   // The compiler pass runs while the checker's process works.
