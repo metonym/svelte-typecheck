@@ -61,6 +61,23 @@ const STORE_ERROR = /^TS(2769|2345)$/;
 const REACTIVE_NOISE = /^TS(7028|2695)$/;
 
 const SHIMS = fileURLToPath(new URL("./shims/", import.meta.url));
+/** What generating each component did, for an incremental run. */
+const EMIT_CACHE = "emit-cache.json";
+interface EmitEffects {
+  /** The files it wrote. */
+  files: string[];
+  /** The generated code the checker reads, and the component's language. */
+  genPath?: string;
+  lang?: "ts" | "js";
+  /** Its parse error, or TypeScript in its JS script. */
+  diagnostics: Diagnostic[];
+}
+interface EmitCache {
+  /** svelte-typecheck's version, Svelte's, and the options generating reads. */
+  fingerprint: string;
+  /** By a hash of a component's path and text. */
+  entries: Record<string, EmitEffects>;
+}
 /** The compiler pass's last results, by component. */
 const COMPILE_CACHE = "compile-cache.json";
 interface CompileCache {
@@ -420,34 +437,106 @@ export async function typecheck(
 
   const failed: TypecheckResult["failed"] = [];
   const parseErrors: Diagnostic[] = [];
+  // Each component's generated code, by a hash of what it's made from:
+  // an incremental run regenerates only what changed. One that didn't is
+  // generated again, in memory, only to map an error the checker reports
+  // in it.
+  const emitCachePath = join(outDir, EMIT_CACHE);
+  const emitFingerprint = hash(
+    JSON.stringify([
+      TOOL_VERSION,
+      svelteMajor,
+      project.checkJs,
+      project.allowJs,
+      declarations,
+      root,
+      genDir,
+    ]),
+  );
+  const emitCache: EmitCache = (incremental
+    ? await readFile(emitCachePath, "utf-8")
+        .then((text) => JSON.parse(text) as EmitCache)
+        .then((c) => (c.fingerprint === emitFingerprint ? c : undefined))
+        .catch(() => undefined)
+    : undefined) ?? { fingerprint: emitFingerprint, entries: {} };
+  const nextEmitCache: EmitCache = {
+    fingerprint: emitFingerprint,
+    entries: {},
+  };
+
+  const emitFor = (i: number) => {
+    const path = files[i] ?? "";
+    const genFrom = join(genDir, relative(root, dirname(path)));
+    return emit(texts[i] ?? "", {
+      svelte: svelteMajor,
+      basename: basename(path),
+      checkJs: project.checkJs,
+      // A relative import that leaves the root is relative to the
+      // generated file's folder instead.
+      rewriteImport(specifier) {
+        if (!specifier.startsWith(".")) return;
+        const target = resolve(dirname(path), specifier);
+        if (target.startsWith(`${root}${sep}`)) return;
+        return relativeTo(genFrom, target);
+      },
+    });
+  };
+  /** An entry whose generated code is generated only when it's needed. */
+  const lazyOutput = (i: number, lang: "ts" | "js") => {
+    let result: ReturnType<typeof emit> | undefined;
+    const get = () => {
+      result ??= emitFor(i);
+      return result;
+    };
+    return {
+      source: texts[i] ?? "",
+      svelte: files[i] ?? "",
+      isTs: lang === "ts",
+      get output() {
+        return get().out;
+      },
+      get emitted() {
+        return get();
+      },
+    };
+  };
+
   for (const [i, path] of files.entries()) {
     const genFrom = join(genDir, relative(root, dirname(path)));
+    const name = path.slice(path.lastIndexOf(sep) + 1, -".svelte".length);
+    // A component's own `X.svelte.d.ts` is what an import of it finds, as
+    // TypeScript resolves it for svelte-check; the generated code types the rest.
+    const typed = declarations && !existsSync(`${path}.d.ts`);
+    const key = hash(`${path}\0${typed}\0${texts[i] ?? ""}`);
+    const cached = emitCache.entries[key];
+    if (cached && (!cached.genPath || existsSync(cached.genPath))) {
+      for (const file of cached.files) written.add(file);
+      parseErrors.push(...cached.diagnostics);
+      if (cached.genPath && cached.lang)
+        outputs.set(cached.genPath, lazyOutput(i, cached.lang));
+      nextEmitCache.entries[key] = cached;
+      continue;
+    }
+    const effects: EmitEffects = { files: [], diagnostics: [] };
+    nextEmitCache.entries[key] = effects;
+    const put = (file: string, content: string) => {
+      effects.files.push(file);
+      write(file, content);
+    };
     let result: ReturnType<typeof emit>;
     try {
-      result = emit(texts[i] ?? "", {
-        svelte: svelteMajor,
-        basename: basename(path),
-        checkJs: project.checkJs,
-        // A relative import that leaves the root is relative to the
-        // generated file's folder instead.
-        rewriteImport(specifier) {
-          if (!specifier.startsWith(".")) return;
-          const target = resolve(dirname(path), specifier);
-          if (target.startsWith(`${root}${sep}`)) return;
-          return relativeTo(genFrom, target);
-        },
-      });
+      result = emitFor(i);
     } catch (error) {
       const e = error as Error & { start?: { line: number; column: number } };
-      const name = path.slice(path.lastIndexOf(sep) + 1, -".svelte".length);
       if (!e.start) {
         failed.push({ file: path, message: e.message });
+        delete nextEmitCache.entries[key];
         continue;
       }
       // A component that doesn't parse: svelte-check reports the parse error
       // from its checker too, and an import of it finds no default export.
       const isTs = TS_SCRIPT.test(texts[i] ?? "");
-      parseErrors.push({
+      effects.diagnostics.push({
         file: path,
         line: e.start.line,
         column: e.start.column + 1,
@@ -469,15 +558,15 @@ export async function typecheck(
           ).length > 0,
       );
       const stub = isModule ? "export {};\n" : "";
-      write(join(genFrom, `++${name}.svelte.${isTs ? "ts" : "js"}`), stub);
-      if (declarations) write(join(genFrom, `${name}.d.svelte.ts`), stub);
+      put(join(genFrom, `++${name}.svelte.${isTs ? "ts" : "js"}`), stub);
+      if (declarations) put(join(genFrom, `${name}.d.svelte.ts`), stub);
+      parseErrors.push(...effects.diagnostics);
       continue;
     }
-    const name = path.slice(path.lastIndexOf(sep) + 1, -".svelte".length);
     const locate = createLocator(texts[i] ?? "");
     for (const t of result.tsInJs) {
       const at = locate.position(t.at);
-      parseErrors.push({
+      effects.diagnostics.push({
         file: path,
         line: at.line,
         column: at.column,
@@ -487,19 +576,19 @@ export async function typecheck(
         message: t.message,
       });
     }
+    parseErrors.push(...effects.diagnostics);
     // Without `allowJs`, a JS component is an untyped JS module to its
     // importers, as svelte-check has it: `X.svelte.js`, outside the program.
-    // A component's own `X.svelte.d.ts` is what an import of it finds, as
-    // TypeScript resolves it for svelte-check; the generated code types the rest.
-    const typed = declarations && !existsSync(`${path}.d.ts`);
     if (result.lang === "js" && !project.allowJs) {
-      if (typed) write(join(genFrom, `${name}.svelte.js`), result.out.code);
+      if (typed) put(join(genFrom, `${name}.svelte.js`), result.out.code);
       continue;
     }
     const genPath = join(
       genFrom,
       `++${name}.svelte.${result.isTs ? "ts" : "js"}`,
     );
+    effects.genPath = genPath;
+    effects.lang = result.lang === "ts" ? "ts" : "js";
     outputs.set(genPath, {
       output: result.out,
       source: texts[i] ?? "",
@@ -507,13 +596,14 @@ export async function typecheck(
       isTs: result.lang === "ts",
       emitted: result,
     });
-    write(genPath, result.out.code);
+    put(genPath, result.out.code);
     if (typed)
-      write(
+      put(
         join(genFrom, `${name}.d.svelte.ts`),
         `export { default } from "./++${name}.svelte.js";\nexport * from "./++${name}.svelte.js";\n`,
       );
   }
+  if (incremental) write(emitCachePath, JSON.stringify(nextEmitCache));
 
   // SvelteKit: its files get the types svelte-check gives them, in copies
   // that replace them, and the `./$types` they import, mirrored next to the
@@ -990,8 +1080,9 @@ export async function typecheck(
     : diagnostics;
   // In TypeScript's program order, as svelte-check lists them: a file's
   // imports before it; in a file, the compiler's before the checker's.
+  // The generated code, read back from disk rather than generated again.
   const generatedOf = new Map(
-    [...outputs.values()].map((gen) => [gen.svelte, gen.output.code]),
+    [...outputs].map(([genPath, gen]) => [gen.svelte, genPath]),
   );
   // Every file TypeScript lists, in its order, not only those with errors:
   // an error-free `index.ts` that imports components puts them in its
@@ -1007,7 +1098,7 @@ export async function typecheck(
         .sort(byFolder),
     ],
     // Generated code, whose imports include SvelteKit's `./$types`.
-    (file) => generatedOf.get(file) ?? readFileSync(file, "utf-8"),
+    (file) => readFileSync(generatedOf.get(file) ?? file, "utf-8"),
     importResolver([root, ...project.rootDirs], project.paths),
     imports,
   );
