@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.1.3 — 2026-11-04
+
+**Features**
+
+- `--strict-baseline` fails a run while the baseline has diagnostics the
+  run no longer reports, until `--update-baseline` drops them, so a
+  baseline only goes down.
+
+**Fixes**
+
+- `--no-declarations` no longer drops the tsconfig's own TS and JS files
+  from the program: their errors are reported again.
+
 ## 0.1.2 — 2026-11-04
 
 **Performance**
