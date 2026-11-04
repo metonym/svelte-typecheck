@@ -47,7 +47,8 @@
     "svelte3": "npm:svelte@^3.59.2",
     "svelte4": "npm:svelte@^4.2.20",
     "tsrs": "0.20.1-ts7.1.0-beta",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vite": "^8.3.5"
   },
   "repository": {
     "type": "git",

@@ -5,11 +5,8 @@ import { createRequire } from "node:module";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
-import {
-  preprocessedDiagnostics,
-  svelteConfigOf,
-  svelteDirOf,
-} from "./compiler.ts";
+import { preprocessedDiagnostics, svelteDirOf } from "./compiler.ts";
+import { svelteConfigOf } from "./config.ts";
 import { emit } from "./emit.ts";
 import { glob } from "./glob.ts";
 import { isKitFile, isKitRouteFile, kitFile } from "./kit.ts";

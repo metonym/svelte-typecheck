@@ -22,6 +22,7 @@
     "svelte-check",
     "svelte3",
     "svelte4",
-    "tsrs"
+    "tsrs",
+    "vite"
   ]
 }
