@@ -487,6 +487,24 @@ export function emit(
   const expression = (node: Node) =>
     out.raw("(").copy(node.start, node.end).raw(")");
 
+  /**
+   * `name(element, …extra, value)`: an action's, transition's or
+   * animation's call. An error about the element points at the `=`, or
+   * with no value at the name's last letter, as svelte-check reports it.
+   */
+  const directiveCall = (a: Node, tag: string, extra = "") => {
+    const at = nameAt(a);
+    out.copy(at, at + a.name.length);
+    const equals = a.expression
+      ? source.lastIndexOf("=", a.expression.start)
+      : at + a.name.length - 1;
+    out.from(equals, () =>
+      out.raw(`(svelteHTML.mapElementTag(${tag})${extra}`),
+    );
+    if (a.expression) out.raw(",").copy(a.expression.start, a.expression.end);
+    out.raw(")");
+  };
+
   /** Writes an element's directives that aren't attributes, after it. */
   const directives = (node: Node, elementId: string, tag: string) => {
     for (const a of node.attributes ?? []) {
@@ -503,22 +521,14 @@ export function emit(
           out.copy(at, at + a.name.length).raw(";");
         } else attrValue(a.value).raw(";");
       } else if (a.type === "AnimateDirective") {
-        const at = nameAt(a);
-        out.raw("__sveltets_2_ensureAnimation(").copy(at, at + a.name.length);
-        out.raw(
-          `(svelteHTML.mapElementTag(${tag}),__sveltets_2_AnimationMove,`,
-        );
-        if (a.expression) out.copy(a.expression.start, a.expression.end);
-        else out.raw("{}");
-        out.raw("));");
+        out.raw("__sveltets_2_ensureAnimation(");
+        directiveCall(a, tag, ",__sveltets_2_AnimationMove");
+        out.raw(");");
       } else if (a.type === "TransitionDirective") {
         transitions.push([a.start, a.end]);
-        const at = nameAt(a);
-        out.raw("__sveltets_2_ensureTransition(").copy(at, at + a.name.length);
-        out.raw(`(svelteHTML.mapElementTag(${tag}),`);
-        if (a.expression) out.copy(a.expression.start, a.expression.end);
-        else out.raw("{}");
-        out.raw("));");
+        out.raw("__sveltets_2_ensureTransition(");
+        directiveCall(a, tag);
+        out.raw(");");
       }
     }
   };
@@ -637,13 +647,9 @@ export function emit(
       if (a.type !== "UseDirective") continue;
       const action = `$$_action${uid++}`;
       actions.push(action);
-      const at = nameAt(a);
-      out
-        .raw(`const ${action} = __sveltets_2_ensureAction(`)
-        .copy(at, at + a.name.length);
-      out.raw(`(svelteHTML.mapElementTag(${tagText})`);
-      if (a.expression) out.raw(",").copy(a.expression.start, a.expression.end);
-      out.raw("));");
+      out.raw(`const ${action} = __sveltets_2_ensureAction(`);
+      directiveCall(a, tagText);
+      out.raw(");");
     }
     out.raw(`const ${id} = `);
     out.from(node.start + 1, () => {
