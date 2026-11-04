@@ -1267,10 +1267,10 @@ export function emit(
         const declares =
           e?.type === "AssignmentExpression" &&
           e.operator === "=" &&
-          idsOf(e.left).some((n) => {
-            const b = scopes.instance.get(n);
-            return b?.kind === "reactive" && b.declaration?.start === s.start;
-          });
+          // Each one, as svelte-check declares them: a second is redeclared.
+          idsOf(e.left).some(
+            (n) => scopes.instance.get(n)?.kind === "reactive",
+          );
         if (declares) {
           out.raw("let ").copy(e.left.start, e.left.end);
           out
