@@ -69,6 +69,8 @@ svelte-typecheck's own:
   --since <ref>             As --changed, from where the branch left <ref>
   --baseline <file>         Report only diagnostics the baseline doesn't have
   --update-baseline         Write the run's diagnostics to the baseline
+  --strict-baseline         Exit 1 when the baseline has fixed diagnostics,
+                            so it only goes down
 
 Exits 1 on an error, or a warning with --fail-on-warnings.`;
 
@@ -128,13 +130,18 @@ export async function main(argv: string[]): Promise<0 | 1> {
     out.failure(new Error("--update-baseline needs --baseline <file>"));
     return 1;
   }
-  // A baseline of some files' diagnostics would drop the rest's.
-  if (values["update-baseline"] && (values.changed || values.since)) {
-    out.failure(
-      new Error("--update-baseline takes every file's: drop --changed"),
-    );
+  const strict = values["strict-baseline"];
+  if (strict && !baselinePath) {
+    out.failure(new Error("--strict-baseline needs --baseline <file>"));
     return 1;
   }
+  // A baseline of some files' diagnostics would drop the rest's, and the
+  // rest would look fixed.
+  for (const flag of ["update-baseline", "strict-baseline"] as const)
+    if (values[flag] && (values.changed || values.since)) {
+      out.failure(new Error(`--${flag} takes every file's: drop --changed`));
+      return 1;
+    }
   let baseline: Baseline | undefined;
   if (baselinePath && !values["update-baseline"]) {
     try {
@@ -196,7 +203,8 @@ export async function main(argv: string[]): Promise<0 | 1> {
     out.completion(summary, watching);
     return summary.errors > 0 ||
       result.failed.length > 0 ||
-      (failOnWarnings && summary.warnings > 0)
+      (failOnWarnings && summary.warnings > 0) ||
+      (strict && (known?.fixed ?? 0) > 0)
       ? 1
       : 0;
   };
@@ -250,6 +258,7 @@ function parse(argv: string[]) {
       changed: { type: "boolean", default: false },
       baseline: { type: "string" },
       "update-baseline": { type: "boolean", default: false },
+      "strict-baseline": { type: "boolean", default: false },
       since: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
