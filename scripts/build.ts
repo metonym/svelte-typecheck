@@ -78,7 +78,7 @@ await bundle();
 await writeDeclarations();
 await writeManifest();
 await Promise.all(
-  ["README.md", "LICENSE", "CHANGELOG.md"].map((file) =>
+  ["README.md", "LICENSE"].map((file) =>
     cp(join(root, file), join(dist, file)),
   ),
 );
