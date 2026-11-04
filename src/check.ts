@@ -747,7 +747,7 @@ export async function typecheck(
           .filter(([, gen]) => !gen.kit)
           .map(([genPath]) => genPath),
         // The project's own TypeScript, which can import components.
-        ...(declarations ? listedFiles : [])
+        ...listedFiles
           .filter((path) => !path.endsWith(".svelte"))
           .map((path) => {
             if (replacedSet.has(path)) return generatedFor.get(path);
