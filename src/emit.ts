@@ -1,4 +1,11 @@
-import { isReference, isRunesMode, parse, SKIP, walk } from "sveast";
+import {
+  isReference,
+  isRunesMode,
+  parse,
+  parseModule,
+  SKIP,
+  walk,
+} from "sveast";
 import { analyzeScopes } from "sveast/scope";
 import {
   isKitErrorFile,
@@ -61,6 +68,8 @@ export interface EmitOptions {
   svelte?: number;
   /** The file's name, for SvelteKit's route components: `+page.svelte`. */
   basename?: string;
+  /** Whether a JS component's types are checked (`checkJs`). Default `true`. */
+  checkJs?: boolean;
 }
 
 /** `T extends A = B, U` as its parameters, top-level commas only. */
@@ -91,6 +100,7 @@ function jsdocTemplates(generics: string) {
 }
 
 const JSDOC_TYPE = /@type\b/;
+const TS_WRAPPER = /^TS(As|Satisfies|NonNull)Expression$/;
 const FUNCTION =
   /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|MethodDefinition|PropertyDefinition)$/;
 
@@ -126,22 +136,158 @@ function propsDeclaratorOf(s: any) {
   );
 }
 
+// eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+type AnyNode = any;
+
+/** TypeScript-only syntax in a JS script, as TypeScript reports it. */
+export interface TsInJs {
+  /** The source offset TypeScript reports it at. */
+  at: number;
+  code: string;
+  message: string;
+}
+
+/**
+ * Parses a component as svelte2tsx does: when a script doesn't parse,
+ * the markup is parsed with the scripts left out, and the scripts with
+ * TypeScript's grammar, so a JS script with TypeScript in it is still
+ * typed. A script that isn't TypeScript either, or markup that doesn't
+ * parse, throws the parser's error.
+ */
+function parseComponent(source: string): { ast: AnyNode; tsInJs: TsInJs[] } {
+  try {
+    return { ast: parse(source, { css: false }), tsInJs: [] };
+  } catch (error) {
+    if (!(error as { start?: unknown }).start) throw error;
+    const ast: AnyNode = parse(source, { css: false, script: false });
+    const tsInJs: TsInJs[] = [];
+    for (const script of [ast.instance, ast.module]) {
+      if (!script) continue;
+      const { start, end } = script.content;
+      let program: AnyNode;
+      try {
+        // Spaces keep the offsets the component's.
+        program = parseModule(" ".repeat(start) + source.slice(start, end), {
+          typescript: true,
+        });
+      } catch {
+        throw error;
+      }
+      program.start = start;
+      program.end = end;
+      script.content = program;
+      tsInJs.push(...typescriptOnly(program));
+    }
+    return { ast, tsInJs };
+  }
+}
+
+const TS_ONLY: Record<string, [code: string, message: string]> = {
+  TSTypeAnnotation: [
+    "TS8010",
+    "Type annotations can only be used in TypeScript files.",
+  ],
+  TSAsExpression: [
+    "TS8016",
+    "Type assertion expressions can only be used in TypeScript files.",
+  ],
+  TSSatisfiesExpression: [
+    "TS8037",
+    "Type satisfaction expressions can only be used in TypeScript files.",
+  ],
+  TSNonNullExpression: [
+    "TS8013",
+    "Non-null assertions can only be used in TypeScript files.",
+  ],
+  TSInterfaceDeclaration: [
+    "TS8006",
+    "'interface' declarations can only be used in TypeScript files.",
+  ],
+  TSEnumDeclaration: [
+    "TS8006",
+    "'enum' declarations can only be used in TypeScript files.",
+  ],
+  TSTypeAliasDeclaration: [
+    "TS8008",
+    "Type aliases can only be used in TypeScript files.",
+  ],
+  TSTypeParameterDeclaration: [
+    "TS8004",
+    "Type parameter declarations can only be used in TypeScript files.",
+  ],
+  TSTypeParameterInstantiation: [
+    "TS8011",
+    "Type arguments can only be used in TypeScript files.",
+  ],
+};
+
+/** Where TypeScript reports a JS file's TypeScript syntax: the type, the name, or the node. */
+function typescriptOnly(program: AnyNode): TsInJs[] {
+  const found: TsInJs[] = [];
+  walk(program, {
+    enter(node: AnyNode) {
+      if (
+        (node.type === "ImportDeclaration" ||
+          node.type === "ExportNamedDeclaration") &&
+        (node.importKind === "type" || node.exportKind === "type")
+      ) {
+        const keyword = node.type === "ImportDeclaration" ? "import" : "export";
+        found.push({
+          at: node.start,
+          code: "TS8006",
+          message: `'${keyword} type' declarations can only be used in TypeScript files.`,
+        });
+        return SKIP;
+      }
+      const ts = TS_ONLY[node.type];
+      if (!ts) return;
+      const at =
+        node.id?.start ??
+        node.typeAnnotation?.start ??
+        node.params?.[0]?.start ??
+        node.start;
+      found.push({ at, code: ts[0], message: ts[1] });
+      // An assertion's expression can hold more; a type can't.
+      return node.type === "TSNonNullExpression" ||
+        node.type === "TSAsExpression" ||
+        node.type === "TSSatisfiesExpression"
+        ? undefined
+        : SKIP;
+    },
+  });
+  return found;
+}
+
 export function emit(
   source: string,
-  { rewriteImport, svelte = 5, basename = "" }: EmitOptions = {},
+  {
+    rewriteImport,
+    svelte = 5,
+    basename = "",
+    checkJs = true,
+  }: EmitOptions = {},
 ) {
   // eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
   type Node = any;
-  const ast: Node = parse(source, { css: false });
+  const { ast, tsInJs } = parseComponent(source);
   const scopes: Node = analyzeScopes(ast);
   const out = new Output(source);
   const instance = ast.instance;
   const module = ast.module;
-  const isTs = [instance, module].some((script) =>
+  /** The component's language, as its scripts say. */
+  const lang = [instance, module].some((script) =>
     script?.attributes?.some(
       (a: Node) => a.name === "lang" && TS_LANG.test(textOf(a)),
     ),
-  );
+  )
+    ? "ts"
+    : "js";
+  // TypeScript in a JS component: TypeScript reports it, which a checker
+  // treats as a syntax error that stops it, so it's typed as TS and the
+  // errors come from `tsInJs`.
+  const isTs = lang === "ts" || tsInJs.length > 0;
+  // Typed as TS, it's checked as TS; a JS component is only with `checkJs`.
+  if (tsInJs.length > 0 && !checkJs) out.raw("// @ts-nocheck\n");
   let uid = 0;
   /** `$:` statements and transition directives, as source ranges. */
   const reactive: [number, number][] = [];
@@ -349,11 +495,7 @@ export function emit(
           out
             .copy(a.expression.start, a.expression.end)
             .raw(` = ${elementId};`);
-        else if (!isGetSet(a.expression))
-          out
-            .raw("() => ")
-            .copy(a.expression.start, a.expression.end)
-            .raw(" = __sveltets_2_any(null);");
+        else if (!isGetSet(a.expression)) widen(a.expression);
       } else if (a.type === "ClassDirective") expression(a.expression).raw(";");
       else if (a.type === "StyleDirective") {
         if (a.value === true) {
@@ -381,9 +523,23 @@ export function emit(
     }
   };
 
+  /** `{name}`'s name, which svelte2tsx writes as a shorthand property. */
+  const shorthandOf = (a: Node): Node => {
+    const value = Array.isArray(a.value) ? a.value[0] : a.value;
+    return source[a.start] === "{" &&
+      value?.type === "ExpressionTag" &&
+      value.expression.type === "Identifier"
+      ? value.expression
+      : undefined;
+  };
   const elementAttribute = (a: Node, inComponent: boolean) => {
     if (a.type === "Attribute") {
       if (inComponent && a.name === "slot") return;
+      const shorthand = shorthandOf(a);
+      if (shorthand) {
+        out.copy(shorthand.start, shorthand.end).raw(",");
+        return;
+      }
       if (a.name.startsWith("data-")) {
         out.raw("...__sveltets_2_empty({");
         key(a, a.name);
@@ -420,6 +576,19 @@ export function emit(
       key(a, `bind:${a.name}`);
       bound(a.expression).raw(",");
     } else if (a.type === "AttachTag") attach(a);
+  };
+  /**
+   * `() => x = any`: a `bind:` target can be written, so its type isn't
+   * narrowed to its first value. An `as`, `satisfies` or `!` comes off, as
+   * an assignment target can't have one.
+   */
+  const widen = (e: Node) => {
+    let target = e;
+    while (TS_WRAPPER.test(target.type)) target = target.expression;
+    out
+      .raw("() => ")
+      .copy(target.start, target.end)
+      .raw(" = __sveltets_2_any(null);");
   };
   /** `bind:x={get, set}` as svelte2tsx checks it: `set` takes what `get` returns. */
   const isGetSet = (e: Node) =>
@@ -558,8 +727,12 @@ export function emit(
       for (const a of node.attributes ?? []) {
         if (a.type === "Attribute") {
           if (inComponent && a.name === "slot") continue;
-          key(a, a.name);
-          attrValue(a.value).raw(",");
+          const shorthand = shorthandOf(a);
+          if (shorthand) out.copy(shorthand.start, shorthand.end).raw(",");
+          else {
+            key(a, a.name);
+            attrValue(a.value).raw(",");
+          }
         } else if (a.type === "SpreadAttribute")
           out.raw("...").copy(a.expression.start, a.expression.end).raw(",");
         else if (a.type === "BindDirective" && a.name !== "this") {
@@ -577,11 +750,7 @@ export function emit(
         if (a.name === "this")
           out.copy(a.expression.start, a.expression.end).raw(` = ${id};`);
         else {
-          if (!isGetSet(a.expression))
-            out
-              .raw("() => ")
-              .copy(a.expression.start, a.expression.end)
-              .raw(" = __sveltets_2_any(null);");
+          if (!isGetSet(a.expression)) widen(a.expression);
           // Svelte 5 checks that the component's prop is bindable.
           if (svelte >= 5) {
             const start = out.code.length;
@@ -1040,7 +1209,21 @@ export function emit(
             }
           out.copy(at, d.end);
           if (d.type === "VariableDeclaration" && d.kind === "let")
-            for (const decl of d.declarations)
+            for (const decl of d.declarations) {
+              // svelte2tsx widens a prop to `any` where a parent could pass
+              // what its default doesn't allow: with no default, a type, or
+              // a `true`/`false` default, which TypeScript narrows.
+              const widens =
+                decl.id.type === "Identifier" &&
+                (!decl.init ||
+                  decl.id.typeAnnotation ||
+                  [
+                    ...source
+                      .slice(gapStart, decl.id.start)
+                      .matchAll(JSDOC_BLOCK),
+                  ].some((m) => JSDOC_TYPE.test(m[0])) ||
+                  (decl.init.type === "Literal" &&
+                    typeof decl.init.value === "boolean"));
               for (const name of idsOf(decl.id)) {
                 props.push({
                   name,
@@ -1055,11 +1238,12 @@ export function emit(
                         )
                       : undefined,
                 });
-                // Stops narrowing to the default; a parent can pass anything.
-                out.raw(
-                  `;${name} = __sveltets_2_any(${decl.init ? name : 0});`,
-                );
+                if (widens)
+                  out.raw(
+                    `;${name} = __sveltets_2_any(${decl.init ? name : 0});`,
+                  );
               }
+            }
           else
             for (const name of d.declarations
               ? d.declarations.flatMap((x: Node) => idsOf(x.id))
@@ -1170,6 +1354,8 @@ export function emit(
     return {
       out,
       isTs,
+      lang,
+      tsInJs,
       reactive,
       transitions,
       storeDeclarations,
@@ -1265,7 +1451,16 @@ export function emit(
   }
   out.raw("export default $$Component;\n");
 
-  return { out, isTs, reactive, transitions, storeDeclarations, bindingChecks };
+  return {
+    out,
+    isTs,
+    lang,
+    tsInJs,
+    reactive,
+    transitions,
+    storeDeclarations,
+    bindingChecks,
+  };
 
   /** A runes component: a function typed by `$props()`, as svelte2tsx types it. */
   function runesExport() {

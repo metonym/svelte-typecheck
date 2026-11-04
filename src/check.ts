@@ -4,6 +4,7 @@ import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { lexComponent, lexImportsExports } from "sveast";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
 import { preprocessedDiagnostics, svelteDirOf } from "./compiler.ts";
 import { svelteConfigOf } from "./config.ts";
@@ -11,19 +12,34 @@ import { emit } from "./emit.ts";
 import { glob } from "./glob.ts";
 import { isKitFile, isKitRouteFile, kitFile } from "./kit.ts";
 import { createLocator, type Output } from "./output.ts";
-import { projectOf, relativeTo, scriptsOf } from "./project.ts";
+import {
+  byFolder,
+  programFiles,
+  projectOf,
+  relativeTo,
+  scriptsOf,
+} from "./project.ts";
 import type { Diagnostic, TypecheckOptions, TypecheckResult } from "./types.ts";
 
 /** `path(line,col): error TSxxxx: message`, as tsc, tsgo, tsrs and `bun check` print. */
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 const CONTINUATION = /^\s+\S/;
+const GLOBAL_DIAGNOSTIC = /^error (TS\d+): (.*)$/;
+const TS_MODULE = /\.[cm]?tsx?$/;
 const LINE_BREAK = /\r?\n/;
 const JS_FILE = /\.[cm]?jsx?$/;
 /** Errors that stop a checker before it type-checks anything. */
 const SYNTAX_CODE = /^TS[18]\d{3}$/;
 const STOPPED = /Stopped before type checking/;
-/** Where `await` may go: the checker reports these, then type-checks on. */
-const AWAIT_PLACEMENT = /^TS(1375|1378)$/;
+const TS_SCRIPT = /<script\b[^>]*\blang=["']?(ts|typescript)\b/;
+/** `A.d.svelte`, `A.d.svelte.ts`, `++A.svelte.ts` and `A.svelte.js`: `A.svelte`'s code. */
+const GENERATED_NAME =
+  /(?:\+\+)?([^/\\]+?)(?:\.d\.svelte(?:\.ts)?|\.svelte\.[jt]s)$/;
+const escapeRegExp = (text: string) =>
+  text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+
+/** A type error, which a checker reports only once the program parses. */
+const TYPE_CODE = /^TS[2-7]\d{3}$/;
 /** What an error's range covers past its start: an identifier, number or string. */
 const TOKEN = /^(?:[\w$]+|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`]*`)/;
 
@@ -93,6 +109,8 @@ function parseDiagnostics(text: string): RawDiagnostic[] {
   let continues = false;
   for (const line of text.split(LINE_BREAK)) {
     const m = DIAGNOSTIC.exec(line);
+    // An error with no file: an option's, or a root file's.
+    const global = m ? null : GLOBAL_DIAGNOSTIC.exec(line);
     if (m)
       found.push({
         file: m[1] ?? "",
@@ -101,12 +119,21 @@ function parseDiagnostics(text: string): RawDiagnostic[] {
         code: m[4] ?? "",
         message: m[5] ?? "",
       });
+    else if (global)
+      found.push({
+        file: "",
+        line: 1,
+        column: 1,
+        code: global[1] ?? "",
+        message: global[2] ?? "",
+      });
     else if (continues && CONTINUATION.test(line)) {
       const last = found.at(-1);
       if (last) last.message += `\n${line}`;
     }
     // A blank line ends the errors: `bun check` follows them with a summary.
-    continues = m !== null || (continues && line.trim() !== "");
+    continues =
+      m !== null || global !== null || (continues && line.trim() !== "");
   }
   return found;
 }
@@ -121,22 +148,10 @@ const JS_EXTENSION = /\.([cm]?)js(x?)$/;
  * imports, then its `import()`s and import types, as TypeScript collects them.
  */
 function programOrder(
-  paths: string[],
+  roots: string[],
   read: (path: string) => string,
   resolveImport: (from: string, specifier: string) => string | undefined,
 ): Map<string, number> {
-  const roots = [...paths].sort((a, b) => {
-    const pa = a.split(sep);
-    const pb = b.split(sep);
-    for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
-      if (pa[i] === pb[i]) continue;
-      const aFile = i === pa.length - 1;
-      const bFile = i === pb.length - 1;
-      if (aFile !== bFile) return aFile ? -1 : 1;
-      return (pa[i] ?? "") < (pb[i] ?? "") ? -1 : 1;
-    }
-    return pa.length - pb.length;
-  });
   const order = new Map<string, number>();
   let next = 0;
   const visit = (path: string) => {
@@ -379,6 +394,7 @@ export async function typecheck(
   };
 
   const failed: TypecheckResult["failed"] = [];
+  const parseErrors: Diagnostic[] = [];
   for (const [i, path] of files.entries()) {
     const genFrom = join(genDir, relative(root, dirname(path)));
     let result: ReturnType<typeof emit>;
@@ -386,6 +402,7 @@ export async function typecheck(
       result = emit(texts[i] ?? "", {
         svelte: svelteMajor,
         basename: basename(path),
+        checkJs: project.checkJs,
         // A relative import that leaves the root is relative to the
         // generated file's folder instead.
         rewriteImport(specifier) {
@@ -396,10 +413,64 @@ export async function typecheck(
         },
       });
     } catch (error) {
-      failed.push({ file: path, message: (error as Error).message });
+      const e = error as Error & { start?: { line: number; column: number } };
+      const name = path.slice(path.lastIndexOf(sep) + 1, -".svelte".length);
+      if (!e.start) {
+        failed.push({ file: path, message: e.message });
+        continue;
+      }
+      // A component that doesn't parse: svelte-check reports the parse error
+      // from its checker too, and an import of it finds no default export.
+      const isTs = TS_SCRIPT.test(texts[i] ?? "");
+      parseErrors.push({
+        file: path,
+        line: e.start.line,
+        column: e.start.column + 1,
+        endLine: e.start.line,
+        endColumn: e.start.column + 1,
+        severity: "error",
+        source: isTs ? "ts" : "js",
+        code: "-1",
+        message: e.message,
+      });
+      // As svelte2tsx's output then, a module only if a script imports or
+      // exports something.
+      const lexed = lexComponent(texts[i] ?? "");
+      const isModule = [lexed.instance, lexed.module].some(
+        (script) =>
+          script &&
+          lexImportsExports(
+            (texts[i] ?? "").slice(script.content.start, script.content.end),
+          ).length > 0,
+      );
+      const stub = isModule ? "export {};\n" : "";
+      write(join(genFrom, `++${name}.svelte.${isTs ? "ts" : "js"}`), stub);
+      if (declarations) write(join(genFrom, `${name}.d.svelte.ts`), stub);
       continue;
     }
     const name = path.slice(path.lastIndexOf(sep) + 1, -".svelte".length);
+    const locate = createLocator(texts[i] ?? "");
+    for (const t of result.tsInJs) {
+      const at = locate.position(t.at);
+      parseErrors.push({
+        file: path,
+        line: at.line,
+        column: at.column,
+        severity: "error",
+        source: "js",
+        code: t.code,
+        message: t.message,
+      });
+    }
+    // Without `allowJs`, a JS component is an untyped JS module to its
+    // importers, as svelte-check has it: `X.svelte.js`, outside the program.
+    // A component's own `X.svelte.d.ts` is what an import of it finds, as
+    // TypeScript resolves it for svelte-check; the generated code types the rest.
+    const typed = declarations && !existsSync(`${path}.d.ts`);
+    if (result.lang === "js" && !project.allowJs) {
+      if (typed) write(join(genFrom, `${name}.svelte.js`), result.out.code);
+      continue;
+    }
     const genPath = join(
       genFrom,
       `++${name}.svelte.${result.isTs ? "ts" : "js"}`,
@@ -408,11 +479,11 @@ export async function typecheck(
       output: result.out,
       source: texts[i] ?? "",
       svelte: path,
-      isTs: result.isTs,
+      isTs: result.lang === "ts",
       emitted: result,
     });
     write(genPath, result.out.code);
-    if (declarations)
+    if (typed)
       write(
         join(genFrom, `${name}.d.svelte.ts`),
         `export { default } from "./++${name}.svelte.js";\nexport * from "./++${name}.svelte.js";\n`,
@@ -459,7 +530,8 @@ export async function typecheck(
     // A rootDir in the project, such as SvelteKit's `.svelte-kit/types`.
     replaced.push(dir);
     rootDirs.push(mirror(dir));
-    for (const file of glob(dir, ["**/*.d.ts"]))
+    // Its `$types.d.ts`, and SvelteKit 2's `proxy+page.server.ts` copies.
+    for (const file of glob(dir, ["**/*.{ts,js}"]))
       write(mirror(join(dir, file)), readFileSync(join(dir, file), "utf-8"));
   }
   // An alias (`$lib/*`) finds a component's generated code before its source.
@@ -470,8 +542,39 @@ export async function typecheck(
     ]),
   );
 
+  // A copy beside the generated code, so its `import("svelte")` is the
+  // project's Svelte, not whichever this package was installed with.
+  const shims = join(outDir, "shims.d.ts");
+  write(shims, readFileSync(join(SHIMS, "shims.d.ts"), "utf-8"));
+
   const tsconfig = join(outDir, "tsconfig.json");
   const rel = (path: string) => relativeTo(outDir, path);
+  /** The program's root files: generated code in place of what it replaces. */
+  const generatedFor = new Map(
+    [...outputs].map(([genPath, gen]) => [gen.svelte, genPath]),
+  );
+  const replacedSet = new Set(replaced);
+  const listedFiles = project.tsconfig
+    ? programFiles(project)
+    : [...files].sort(byFolder);
+  const rootFiles = [
+    ...new Set([
+      ...listedFiles
+        .filter((path) => path.endsWith(".svelte"))
+        .map((path) => generatedFor.get(path))
+        .filter((path): path is string => path !== undefined),
+      ...[...outputs].filter(([, gen]) => !gen.kit).map(([genPath]) => genPath),
+      // The project's own TypeScript, which can import components.
+      ...(declarations ? listedFiles : [])
+        .filter((path) => !path.endsWith(".svelte"))
+        .map((path) => {
+          if (replacedSet.has(path)) return generatedFor.get(path);
+          const dir = replaced.find((d) => under(path, d));
+          return dir ? mirror(path) : path;
+        })
+        .filter((path): path is string => path !== undefined),
+    ]),
+  ];
   write(
     tsconfig,
     JSON.stringify(
@@ -494,17 +597,17 @@ export async function typecheck(
           noEmit: true,
         },
         // Listed rather than globbed: `include` skips dot folders and
-        // `node_modules`, where the generated code lives by default.
+        // `node_modules`, where the generated code lives by default. In
+        // svelte-check's order, which decides how TypeScript prints a
+        // union: components, the project's TS and JS, then the shims.
         files: [
-          join(SHIMS, "shims.d.ts"),
+          ...rootFiles,
+          shims,
           svelteHtml,
           // Svelte 5's runes, as globals, as svelte2tsx references them.
           ...(svelteMajor >= 5 ? [join(svelteDir, "types/index.d.ts")] : []),
-          ...outputs.keys(),
         ].map(rel),
-        // The project's own TypeScript, which can import components.
-        include: declarations ? project.include.map(rel) : [],
-        exclude: [...project.exclude, ...replaced].map(rel),
+        include: [],
       },
       null,
       2,
@@ -575,14 +678,18 @@ export async function typecheck(
   const inOutput = (file: string) =>
     resolve(cwd, file).startsWith(`${outDir}${sep}`);
   // A syntax error in generated code stops the checker before it
-  // type-checks anything, so it must fail the run, not pass it.
-  const syntax = raw.filter(
-    (d) =>
-      inOutput(d.file) &&
-      SYNTAX_CODE.test(d.code) &&
-      !AWAIT_PLACEMENT.test(d.code) &&
-      !outputs.get(resolve(cwd, d.file))?.kit,
-  );
+  // type-checks anything, so it must fail the run, not pass it. A type
+  // error anywhere means it type-checked, and a TS1xxx error was one of
+  // the semantic ones (no default export, misplaced `await`).
+  const typeChecked = raw.some((d) => TYPE_CODE.test(d.code));
+  const syntax = typeChecked
+    ? []
+    : raw.filter(
+        (d) =>
+          inOutput(d.file) &&
+          SYNTAX_CODE.test(d.code) &&
+          !outputs.get(resolve(cwd, d.file))?.kit,
+      );
   if (syntax.length > 0 || STOPPED.test(text))
     throw new EmitError(
       `Generated code has syntax errors:\n${syntax
@@ -610,6 +717,19 @@ export async function typecheck(
   const dropped: Diagnostic[] = [];
   const seen = new Set<string>();
   for (const d of raw) {
+    if (d.file === "") {
+      // About the generated code (a root file it can't read): our bug.
+      if (d.message.includes(outDir))
+        throw new EmitError(`${d.code}: ${d.message}`);
+      // An option's, as svelte-check reports one: on the tsconfig.
+      diagnostics.push({
+        ...d,
+        file: project.tsconfig ?? workspace,
+        severity: "error",
+        source: "ts",
+      });
+      continue;
+    }
     const abs = resolve(cwd, d.file);
     const gen = outputs.get(abs);
     let mapped: Diagnostic;
@@ -717,7 +837,73 @@ export async function typecheck(
     seen.add(key);
     diagnostics.push(mapped);
   }
+  // A message that names generated code names its source, as svelte-check's
+  // name the `.svelte` file: `<out>/svelte/src/A.d.svelte` is `src/A.svelte`.
+  const generatedPath = new RegExp(
+    `${escapeRegExp(`${genDir}${sep}`)}[^"'\\s]*`,
+    "g",
+  );
+  for (const d of diagnostics)
+    if (d.message.includes(genDir))
+      d.message = d.message.replace(generatedPath, (path) =>
+        join(root, relative(genDir, path)).replace(GENERATED_NAME, "$1.svelte"),
+      );
   diagnostics.push(...compiled);
+  if (sources.has("js")) diagnostics.push(...parseErrors);
+  // Without `allowJs`, svelte-check still loads a JS component, so an
+  // import of it from TypeScript is untyped (TS7016). It isn't in this
+  // program, so the import is found here.
+  if (sources.has("js") && project.tsconfig && !project.allowJs) {
+    const untyped = new Set(
+      files.filter(
+        (path, i) =>
+          !TS_SCRIPT.test(texts[i] ?? "") && !existsSync(`${path}.d.ts`),
+      ),
+    );
+    const resolveImport = importResolver(
+      [root, ...project.rootDirs],
+      project.paths,
+    );
+    /** Each TS source's text, and where its imports can be. */
+    const tsSources: [string, string, [number, number][]][] = [];
+    for (const [i, path] of files.entries()) {
+      const component = texts[i] ?? "";
+      if (!TS_SCRIPT.test(component)) continue;
+      const lexed = lexComponent(component);
+      tsSources.push([
+        path,
+        component,
+        [lexed.module, lexed.instance].flatMap((script) =>
+          script ? [[script.content.start, script.content.end]] : [],
+        ),
+      ]);
+    }
+    for (const path of listedFiles)
+      if (TS_MODULE.test(path)) {
+        const script = readFileSync(path, "utf-8");
+        tsSources.push([path, script, [[0, script.length]]]);
+      }
+    for (const [path, content, ranges] of tsSources) {
+      const locate = createLocator(content);
+      for (const [start, end] of ranges)
+        for (const statement of lexImportsExports(content.slice(start, end))) {
+          const specifier = statement.source?.value;
+          if (!specifier?.endsWith(".svelte")) continue;
+          const target = resolveImport(path, specifier);
+          if (!target || !untyped.has(target)) continue;
+          const at = locate.position(start + (statement.source?.start ?? 0));
+          diagnostics.push({
+            file: path,
+            line: at.line,
+            column: at.column,
+            severity: "error",
+            source: "ts",
+            code: "TS7016",
+            message: `Could not find a declaration file for module '${specifier}'. '${target}' implicitly has an 'any' type.`,
+          });
+        }
+    }
+  }
   // svelte-check warns when a tsconfig includes no components.
   if (project.tsconfig && !options.components && files.length === 0)
     diagnostics.push({
@@ -739,8 +925,18 @@ export async function typecheck(
   const generatedOf = new Map(
     [...outputs.values()].map((gen) => [gen.svelte, gen.output.code]),
   );
+  // Every file TypeScript lists, in its order, not only those with errors:
+  // an error-free `index.ts` that imports components puts them in its
+  // import order. A reported file outside them comes last.
+  const listed = listedFiles;
+  const listedSet = new Set(listed);
   const order = programOrder(
-    [...new Set(reported.map((d) => d.file))],
+    [
+      ...listed,
+      ...[...new Set(reported.map((d) => d.file))]
+        .filter((file) => !listedSet.has(file))
+        .sort(byFolder),
+    ],
     // Generated code, whose imports include SvelteKit's `./$types`.
     (file) => generatedOf.get(file) ?? readFileSync(file, "utf-8"),
     importResolver([root, ...project.rootDirs], project.paths),
@@ -758,7 +954,7 @@ export async function typecheck(
     diagnostics: reported,
     workspace,
     tsconfig: project.tsconfig,
-    components: outputs.size,
+    components: files.length,
     dropped,
     failed,
     checker,

@@ -83,7 +83,7 @@ function codeOf(d: Diagnostic): string | number {
   if (d.code.startsWith("TS")) return Number(d.code.slice(2));
   return NUMERIC.test(d.code) ? Number(d.code) : d.code;
 }
-const NUMERIC = /^\d+$/;
+const NUMERIC = /^-?\d+$/;
 
 /** svelte-check names a diagnostic's source except for a TS or JS file's type error. */
 function sourceOf(d: Diagnostic): string | undefined {

@@ -1,6 +1,14 @@
 import { existsSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { glob, matcher } from "./glob.ts";
 
 const LINE_COMMENT = /\/\/[^\n]*/g;
@@ -34,6 +42,8 @@ interface RawConfig {
     rootDirs?: string[];
     baseUrl?: string;
     paths?: Record<string, string[]>;
+    checkJs?: boolean;
+    allowJs?: boolean;
   };
 }
 
@@ -46,6 +56,8 @@ interface Inputs {
   baseUrl?: string;
   /** Relative to `baseUrl`, or the folder of the tsconfig that sets them. */
   paths?: Record<string, string[]>;
+  checkJs?: boolean;
+  allowJs?: boolean;
 }
 
 function readInputs(path: string): Inputs {
@@ -72,6 +84,8 @@ function readInputs(path: string): Inputs {
       exclude: absolute(config.exclude),
       files: absolute(config.files),
       rootDirs: absolute(options?.rootDirs),
+      checkJs: options?.checkJs,
+      allowJs: options?.allowJs,
       baseUrl,
       paths:
         options?.paths &&
@@ -143,13 +157,18 @@ export interface Project {
   tsconfig?: string;
   /** The components to check, as absolute paths. */
   components: string[];
-  /** The tsconfig's `include` and `exclude`, as absolute patterns. */
+  /** The tsconfig's `files`, `include` and `exclude`, as absolute paths and patterns. */
+  files: string[];
   include: string[];
   exclude: string[];
   /** The tsconfig's `rootDirs`, as absolute paths. */
   rootDirs: string[];
   /** The tsconfig's `paths`, with absolute targets. */
   paths: Record<string, string[]>;
+  /** Whether a JS component's types are checked. */
+  checkJs: boolean;
+  /** Whether a JS component is in the program at all, or untyped. */
+  allowJs: boolean;
   /** The tsconfig's own `include` and `exclude`, as written. */
   raw: { include?: string[]; exclude?: string[] };
   /** Whether a TS or JS file's errors are reported. */
@@ -185,10 +204,14 @@ export function projectOf(options: ProjectOptions): Project {
       .map((rel) => join(workspace, rel));
     return {
       components,
+      files: [],
       include: [],
       exclude: [],
       rootDirs: [],
       paths: {},
+      // svelte-check's options with no tsconfig.
+      checkJs: true,
+      allowJs: true,
       raw: {},
       reports: () => false,
     };
@@ -229,11 +252,15 @@ export function projectOf(options: ProjectOptions): Project {
   return {
     tsconfig,
     components,
+    files: inputs.files ?? [],
     include,
     exclude,
     rootDirs: inputs.rootDirs ?? [],
     // A package's subpath imports (`#lib/*`) work as `paths` do, after them.
     paths: { ...importsOf(dirname(tsconfig)), ...inputs.paths },
+    checkJs: inputs.checkJs ?? false,
+    // A jsconfig.json allows JS by default.
+    allowJs: inputs.allowJs ?? basename(tsconfig) === "jsconfig.json",
     raw: parseJsonc(readFileSync(tsconfig, "utf-8")) as RawConfig,
     // As svelte-check: every file in the program, but JS in node_modules.
     reports: (path) => !NODE_MODULES_JS.test(toPosix(path)),
@@ -270,6 +297,64 @@ function importTarget(value: unknown): string | undefined {
   for (const condition of ["types", "import", "default"])
     if (condition in conditions) return importTarget(conditions[condition]);
   return importTarget(Object.values(conditions)[0]);
+}
+
+const PROGRAM_FILE = /\.(svelte|[cm]?[jt]sx?)$/;
+const JS_FILE = /\.[cm]?jsx?$/;
+
+/**
+ * Paths as TypeScript lists a folder: a folder's files before its
+ * subfolders, each by name.
+ */
+export function byFolder(a: string, b: string): number {
+  const pa = a.split(sep);
+  const pb = b.split(sep);
+  for (let i = 0; i < Math.min(pa.length, pb.length); i++) {
+    if (pa[i] === pb[i]) continue;
+    const aFile = i === pa.length - 1;
+    const bFile = i === pb.length - 1;
+    if (aFile !== bFile) return aFile ? -1 : 1;
+    return (pa[i] ?? "") < (pb[i] ?? "") ? -1 : 1;
+  }
+  return pa.length - pb.length;
+}
+
+/**
+ * A project's files in TypeScript's order of its root files: `files`,
+ * then each `include` pattern's matches in turn, as svelte-check, which
+ * adds `.svelte` to the extensions, has them.
+ */
+export function programFiles(project: Project): string[] {
+  const isExcluded = absoluteMatcher(project.exclude);
+  const found = new Set<string>(project.files);
+  for (const pattern of project.include) {
+    const fileGlob =
+      WILDCARD.test(pattern) || HAS_EXTENSION.test(pattern)
+        ? pattern
+        : `${pattern}/**/*`;
+    const [base, rest] = splitGlob(fileGlob);
+    if (!rest) {
+      if (
+        existsSync(base) &&
+        PROGRAM_FILE.test(base) &&
+        (project.allowJs || !JS_FILE.test(base))
+      )
+        found.add(base);
+      continue;
+    }
+    if (!existsSync(base)) continue;
+    const matched = glob(base, [rest])
+      .map((rel) => join(base, rel))
+      .filter(
+        (path) =>
+          PROGRAM_FILE.test(path) &&
+          (project.allowJs || !JS_FILE.test(path)) &&
+          !isExcluded(path),
+      )
+      .sort(byFolder);
+    for (const path of matched) found.add(path);
+  }
+  return [...found];
 }
 
 /** The TS and JS files a project's `include` names that pass `test`. */
