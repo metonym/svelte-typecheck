@@ -298,6 +298,24 @@ function importResolver(rootDirs: string[], paths: Record<string, string[]>) {
 const NON_BINDABLE =
   "Cannot use 'bind:' with this property. It is declared as non-bindable inside the component.\n";
 
+/** The hints svelte-check adds to a component's errors. */
+function withHint(d: Diagnostic, svelteMajor: number): Diagnostic {
+  if (
+    d.code === "TS2345" &&
+    d.message.includes("ConstructorOfATypedSvelteComponent")
+  )
+    return {
+      ...d,
+      message: `${d.message}\n\nPossible causes:\n- You use the instance type of a component where you should use the constructor type\n- Type definitions are missing for this Svelte Component. ${svelteMajor >= 5 ? "" : 'If you are using Svelte 3.31+, use SvelteComponentTyped to add a definition:\n  import type { SvelteComponentTyped } from "svelte";\n  class ComponentName extends SvelteComponentTyped<{propertyName: string;}> {}'}`,
+    };
+  if (d.code === "TS1184")
+    return {
+      ...d,
+      message: `${d.message}\nIf this is a declare statement, move it into <script context="module">..</script>`,
+    };
+  return d;
+}
+
 /** svelte-check's message for a `bind:` of a prop that isn't `$bindable()`. */
 function nonBindableMessage(message: string): string {
   if (
@@ -1025,15 +1043,18 @@ export async function typecheck(
       )
         continue;
       const start = locator(gen.svelte, () => gen.source).position(source);
-      mapped = {
-        ...d,
-        file: gen.svelte,
-        line: start.line,
-        column: start.column,
-        ...endOf(gen.source, source, gen.svelte),
-        severity: "error",
-        source: gen.isTs ? "ts" : "js",
-      };
+      mapped = withHint(
+        {
+          ...d,
+          file: gen.svelte,
+          line: start.line,
+          column: start.column,
+          ...endOf(gen.source, source, gen.svelte),
+          severity: "error",
+          source: gen.isTs ? "ts" : "js",
+        },
+        svelteMajor,
+      );
     } else if (inOutput(d.file) || !project.reports(abs)) {
       if (inOutput(d.file))
         dropped.push({ ...d, file: abs, severity: "error", source: "ts" });
