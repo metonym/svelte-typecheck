@@ -16,6 +16,14 @@
     "resolveJsonModule": true,
     "types": ["bun-types", "bun-types/test-globals"]
   },
-  "include": ["bench", "eval", "scripts", "src", "tests", "ostia.config.ts"],
+  "include": [
+    "bench",
+    "eval",
+    "scripts",
+    "src",
+    "tests",
+    "ostia.config.ts",
+    "bivium.config.ts"
+  ],
   "exclude": ["tests/fixtures*", "src/shims", "bench/corpus"]
 }

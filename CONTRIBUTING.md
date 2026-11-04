@@ -9,6 +9,7 @@ This guide covers how svelte-typecheck is built, the rules every change must kee
 ```sh
 bun ci
 bun run test           # unit and parity tests
+bun run test:changed   # only the tests your changes can reach (bivium)
 bun run typecheck      # bun check
 bun run lint           # bun fmt --check and bun lint; `bun run fmt` formats
 bun run knip           # unused files, exports and dependencies
@@ -60,6 +61,8 @@ The SvelteKit fixture needs SvelteKit's generated files; its parity test runs `s
 | `scripts/test-package.ts`                      | `bun run test:package`: the packed tarball installs, imports only builtins and Svelte's compiler, checks the fixtures from Node and Bun, and its `index.d.ts` type-checks |
 
 Each `tests/fixtures-*` folder is a small project for one area: `fixtures` (the basics), `-typed` (`$$Props`, `$$Events`, `$$Slots`), `-generic`, `-filters` (svelte-check's rewrites), `-preprocess`, `-runes`, `-kit` (SvelteKit 3) and `-edge` (markup that doesn't parse, TypeScript in JS, no `allowJs`). A behavior fix needs a test that fails before the fix and passes after; for a parity fix, that's usually a line in a fixture.
+
+A pull request runs only the tests its changes can reach, which [bivium](https://github.com/metonym/bivium) finds from `bivium.config.ts`. A new test that reads a fixture or runs the CLI says so there; `bunx bivium check` lists a fixture no test reads, and a test that reads the disk without saying what.
 
 To test config loading, run the CLI in a process of its own: within one process, Node caches an imported config, so a second load proves nothing.
 
