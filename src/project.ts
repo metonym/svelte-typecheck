@@ -61,7 +61,8 @@ interface Inputs {
   allowJs?: boolean;
 }
 
-function readInputs(path: string): Inputs {
+function readInputs(path: string, read: string[] = []): Inputs {
+  read.push(path);
   const config = parseJsonc(readFileSync(path, "utf-8")) as RawConfig;
   const dir = dirname(path);
   const absolute = (list: string[] | undefined) =>
@@ -73,7 +74,7 @@ function readInputs(path: string): Inputs {
     const basePath = base.startsWith(".")
       ? resolve(dir, base)
       : createRequire(path).resolve(base);
-    inputs = { ...inputs, ...defined(readInputs(basePath)) };
+    inputs = { ...inputs, ...defined(readInputs(basePath, read)) };
   }
   const options = config.compilerOptions;
   const baseUrl = options?.baseUrl ? resolve(dir, options.baseUrl) : undefined;
@@ -164,6 +165,8 @@ export interface Project {
   exclude: string[];
   /** The tsconfig's `rootDirs`, as absolute paths. */
   rootDirs: string[];
+  /** The tsconfig and those it extends. */
+  configFiles: string[];
   /** The tsconfig's `paths`, with absolute targets. */
   paths: Record<string, string[]>;
   /** Whether a JS component's types are checked. */
@@ -209,6 +212,7 @@ export function projectOf(options: ProjectOptions): Project {
       include: [],
       exclude: [],
       rootDirs: [],
+      configFiles: [],
       paths: {},
       // svelte-check's options with no tsconfig.
       checkJs: true,
@@ -218,7 +222,8 @@ export function projectOf(options: ProjectOptions): Project {
     };
   }
 
-  const inputs = readInputs(tsconfig);
+  const configFiles: string[] = [];
+  const inputs = readInputs(tsconfig, configFiles);
   const include =
     inputs.include ?? (inputs.files ? [] : [join(dirname(tsconfig), "**/*")]);
   const exclude =
@@ -257,6 +262,7 @@ export function projectOf(options: ProjectOptions): Project {
     include,
     exclude,
     rootDirs: inputs.rootDirs ?? [],
+    configFiles,
     // A package's subpath imports (`#lib/*`) work as `paths` do, after them.
     paths: { ...importsOf(dirname(tsconfig)), ...inputs.paths },
     checkJs: inputs.checkJs ?? false,
