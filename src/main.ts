@@ -1,4 +1,7 @@
+import { readFileSync, writeFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+import { applyBaseline, createBaseline } from "./baseline.ts";
 import { EmitError, typecheck } from "./check.ts";
 import {
   colors,
@@ -9,6 +12,7 @@ import {
 } from "./format.ts";
 import { changedFiles } from "./git.ts";
 import type {
+  Baseline,
   Checker,
   DiagnosticSource,
   TypecheckOptions,
@@ -62,6 +66,8 @@ svelte-typecheck's own:
   --changed                 Report only files changed from HEAD (and
                             untracked), and the files that import them
   --since <ref>             As --changed, from where the branch left <ref>
+  --baseline <file>         Report only diagnostics the baseline doesn't have
+  --update-baseline         Write the run's diagnostics to the baseline
 
 Exits 1 on an error, or a warning with --fail-on-warnings.`;
 
@@ -115,6 +121,31 @@ export async function main(argv: string[]): Promise<0 | 1> {
       return 1;
     }
   }
+  const baselinePath = values.baseline && resolve(values.baseline);
+  if (values["update-baseline"] && !baselinePath) {
+    out.failure(new Error("--update-baseline needs --baseline <file>"));
+    return 1;
+  }
+  // A baseline of some files' diagnostics would drop the rest's.
+  if (values["update-baseline"] && (values.changed || values.since)) {
+    out.failure(
+      new Error("--update-baseline takes every file's: drop --changed"),
+    );
+    return 1;
+  }
+  let baseline: Baseline | undefined;
+  if (baselinePath && !values["update-baseline"]) {
+    try {
+      baseline = JSON.parse(readFileSync(baselinePath, "utf-8")) as Baseline;
+    } catch {
+      out.failure(
+        new Error(
+          `No baseline at ${baselinePath}: write one with --update-baseline`,
+        ),
+      );
+      return 1;
+    }
+  }
   const errorsOnly = values.threshold === "error";
   const failOnWarnings = values["fail-on-warnings"];
 
@@ -130,14 +161,32 @@ export async function main(argv: string[]): Promise<0 | 1> {
       );
       return 1;
     }
+    if (baselinePath && values["update-baseline"]) {
+      const written = createBaseline(result.diagnostics, result.workspace);
+      writeFileSync(baselinePath, `${JSON.stringify(written, null, 2)}\n`);
+      out.note(
+        `Wrote ${result.diagnostics.length} diagnostics to ${baselinePath}`,
+      );
+      return 0;
+    }
+    const known = baseline
+      ? applyBaseline(result.diagnostics, baseline, result.workspace)
+      : undefined;
+    const shown = known ? known.diagnostics : result.diagnostics;
     out.start(result.workspace, watching && !values.preserveWatchOutput);
     // The threshold hides warnings, which still count, as in svelte-check.
-    for (const d of result.diagnostics)
+    for (const d of shown)
       if (!errorsOnly || d.severity === "error")
         out.diagnostic(d, result.workspace);
     for (const f of result.failed)
       out.failure(new Error(`${f.file}: failed to parse: ${f.message}`));
-    const summary = summarize(result.diagnostics, result.components);
+    const summary = summarize(shown, result.components);
+    if (known?.known)
+      out.note(`${known.known} more in the baseline, not shown`);
+    if (known?.fixed)
+      out.note(
+        `${known.fixed} in the baseline are fixed: --update-baseline drops them`,
+      );
     if (result.skipped > 0)
       out.note(
         `${result.skipped} more in files the changes don't reach, not shown`,
@@ -196,6 +245,8 @@ function parse(argv: string[]) {
       "no-declarations": { type: "boolean", default: false },
       svelte: { type: "string" },
       changed: { type: "boolean", default: false },
+      baseline: { type: "string" },
+      "update-baseline": { type: "boolean", default: false },
       since: { type: "string" },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
