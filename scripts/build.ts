@@ -1,14 +1,13 @@
 import { chmod, cp, mkdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join, resolve } from "node:path";
+import { join, resolve } from "node:path";
 import type { BunPlugin } from "bun";
-import ts from "typescript";
 
 const root = resolve(import.meta.dir, "..");
 const src = join(root, "src");
 const dist = join(root, "dist");
 const ENTRIES = ["index", "cli"];
 const DIST_PREFIX = /"(\.\/)?dist\//;
-const TS_SUFFIX = /\.ts$/;
+const IMPORT = /^\s*import\b/m;
 const PACKAGE_JSON = /[\\/]package\.json$/;
 const STRIP_FIELDS = ["devDependencies", "scripts"];
 
@@ -51,82 +50,12 @@ async function bundle() {
   await chmod(join(dist, "cli.js"), 0o755);
 }
 
-function emitDeclarations(): Map<string, string> {
-  const options: ts.CompilerOptions = {
-    target: ts.ScriptTarget.ESNext,
-    module: ts.ModuleKind.ESNext,
-    moduleResolution: ts.ModuleResolutionKind.Bundler,
-    strict: true,
-    skipLibCheck: true,
-    resolveJsonModule: true,
-    allowImportingTsExtensions: true,
-    declaration: true,
-    emitDeclarationOnly: true,
-    types: ["bun-types"],
-  };
-  const emitted = new Map<string, string>();
-  const host = ts.createCompilerHost(options);
-  host.writeFile = (file, text) => {
-    emitted.set(resolve(file), text);
-  };
-  const program = ts.createProgram([join(src, "index.ts")], options, host);
-  const result = program.emit(undefined, undefined, undefined, true);
-  const errors = [...ts.getPreEmitDiagnostics(program), ...result.diagnostics]
-    .filter((d) => d.category === ts.DiagnosticCategory.Error)
-    .map((d) => ts.flattenDiagnosticMessageText(d.messageText, "\n"));
-  if (errors.length > 0 || result.emitSkipped) {
-    fail(`declaration emit failed:\n${errors.join("\n")}`);
-  }
-  return emitted;
-}
-
-function parse(file: string, text: string) {
-  return ts.createSourceFile(file, text, ts.ScriptTarget.ESNext, true);
-}
-
-// The public types live in src/types.ts, which imports nothing, and the
-// public functions are declared over them. So index.d.ts is that module's
-// declarations plus each function's, with no import to follow: a consumer
-// sees only the public API.
-function bundleDeclarations(emitted: Map<string, string>): string {
-  const declarationOf = (module: string) => {
-    const file = join(src, module.replace(TS_SUFFIX, ".d.ts"));
-    const text = emitted.get(file);
-    if (text === undefined) fail(`no declarations for ${module}`);
-    return parse(file, text);
-  };
-  const types = declarationOf("./types.ts");
-  if (types.statements.some(ts.isImportDeclaration)) {
-    fail("src/types.ts must import nothing");
-  }
-  const parts = [types.getFullText().replace("export {};\n", "").trim()];
-  const entry = parse("index.ts", ts.sys.readFile(join(src, "index.ts")) ?? "");
-  for (const statement of entry.statements) {
-    if (
-      !ts.isExportDeclaration(statement) ||
-      statement.isTypeOnly ||
-      !statement.moduleSpecifier ||
-      !ts.isStringLiteral(statement.moduleSpecifier) ||
-      !statement.exportClause ||
-      !ts.isNamedExports(statement.exportClause)
-    ) {
-      continue;
-    }
-    const module = declarationOf(statement.moduleSpecifier.text);
-    for (const name of statement.exportClause.elements) {
-      const found = module.statements.filter(
-        (node) =>
-          ts.isFunctionDeclaration(node) && node.name?.text === name.name.text,
-      );
-      if (found.length === 0) fail(`${name.name.text} isn't a function`);
-      parts.push(...found.map((node) => node.getFullText().trim()));
-    }
-  }
-  const text = `${parts.join("\n\n")}\n`;
-  if (parse("index.d.ts", text).statements.some(ts.isImportDeclaration)) {
-    fail("index.d.ts imports another module");
-  }
-  return text;
+// src/types.ts is the public API's declarations, written by hand, and
+// imports nothing, so it's index.d.ts as is: a consumer sees only the API.
+async function writeDeclarations() {
+  const text = await Bun.file(join(src, "types.ts")).text();
+  if (IMPORT.test(text)) fail("src/types.ts must import nothing");
+  await writeFile(join(dist, "index.d.ts"), text);
 }
 
 async function writeManifest() {
@@ -146,9 +75,7 @@ async function writeManifest() {
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 await bundle();
-const declarations = bundleDeclarations(emitDeclarations());
-await mkdir(dirname(join(dist, "index.d.ts")), { recursive: true });
-await writeFile(join(dist, "index.d.ts"), declarations);
+await writeDeclarations();
 await writeManifest();
 await Promise.all(
   ["README.md", "LICENSE", "CHANGELOG.md"].map((file) =>

@@ -1,3 +1,8 @@
+// The package's public API, as consumers see it: the build copies this file
+// as dist/index.d.ts, so it imports nothing and holds only declarations.
+// tests/api.test.ts fails when an implementation's signature drifts from
+// its declaration here.
+
 /** A type checker that reads a tsconfig and prints errors as `tsc` does. */
 export type Checker = "bun" | "tsrs" | "tsgo" | "tsc";
 
@@ -142,3 +147,50 @@ export interface BaselineResult {
   /** How many it has that the run no longer reports. */
   fixed: number;
 }
+
+/**
+ * Type-checks Svelte components, as svelte-check does: with a tsconfig
+ * (given, or the nearest from the workspace up), the components it
+ * includes, and its TS and JS files' errors too; with none, every component
+ * under the workspace. Each component becomes TypeScript under `outDir`,
+ * next to a tsconfig that extends the project's, a checker runs on it, and
+ * each error maps back to its `.svelte` line. Errors in generated code are
+ * dropped. Svelte's compiler reports its warnings in the same pass.
+ */
+export declare function typecheck(
+  options?: TypecheckOptions,
+): Promise<TypecheckResult>;
+
+/**
+ * Checks, then checks again whenever a component, TS or JS file, or a
+ * config under the workspace changes, as svelte-check `--watch` does. Runs
+ * are incremental. Returns a function that stops watching.
+ */
+export declare function watch(
+  options: TypecheckOptions,
+  onResult: (result: TypecheckResult | Error) => void,
+): () => void;
+
+/**
+ * What `svelte/compiler` reports for a component (a11y, unused CSS, invalid
+ * markup), without generating code. `<!-- svelte-ignore -->` applies, as in
+ * a build. A compile error comes back as one `error`.
+ */
+export declare function compilerDiagnostics(
+  source: string,
+  filename: string,
+  options?: { cwd?: string; svelte?: string },
+): CompilerDiagnostic[];
+
+/** A baseline of a run's diagnostics, sorted so it diffs well. */
+export declare function createBaseline(
+  diagnostics: Diagnostic[],
+  workspace: string,
+): Baseline;
+
+/** A run's diagnostics less the baseline's: what's new since it. */
+export declare function applyBaseline(
+  diagnostics: Diagnostic[],
+  baseline: Baseline,
+  workspace: string,
+): BaselineResult;

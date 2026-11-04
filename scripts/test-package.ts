@@ -182,7 +182,49 @@ assert.equal(warning.code, "a11y_missing_attribute");
 `,
   });
   ok("node", ["smoke.js"], project);
-  console.log("✓ The packed package type-checks the fixtures on Node and Bun");
+
+  // index.d.ts is written by hand: it must resolve through `exports` and
+  // check on its own, library checks included.
+  write(project, {
+    "consumer.ts": `import {
+  applyBaseline,
+  compilerDiagnostics,
+  createBaseline,
+  typecheck,
+  watch,
+  type Checker,
+  type TypecheckResult,
+} from "svelte-typecheck";
+
+const checker: Checker = "tsc";
+const result: TypecheckResult = await typecheck({ checker });
+const baseline = createBaseline(result.diagnostics, result.workspace);
+const { known }: { known: number } = applyBaseline(result.diagnostics, baseline, result.workspace);
+const [first] = compilerDiagnostics("<img>", "Img.svelte", { cwd: "." });
+const stop: () => void = watch({}, () => {});
+export { first, known, stop };
+`,
+  });
+  ok(
+    "node",
+    [
+      "node_modules/typescript/bin/tsc",
+      "--ignoreConfig",
+      "--noEmit",
+      "--strict",
+      "--skipLibCheck",
+      "false",
+      "--target",
+      "esnext",
+      "--module",
+      "nodenext",
+      "consumer.ts",
+    ],
+    project,
+  );
+  console.log(
+    "✓ The packed package type-checks the fixtures on Node and Bun, and its types check",
+  );
 } finally {
   rmSync(dir, { recursive: true, force: true });
 }

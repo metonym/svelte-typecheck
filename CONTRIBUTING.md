@@ -39,24 +39,25 @@ The SvelteKit fixture needs SvelteKit's generated files; its parity test runs `s
 - **Never write the project's files.** Everything goes to the output folder; the generated tsconfig sets its own `incremental`, `composite` and `tsBuildInfoFile` so the project's never come into play.
 - **Bump `CACHE_FORMAT`** (`src/check.ts`) when a cache's shape changes, so a new run misses an old file instead of reading the wrong shape.
 - **Zero runtime dependencies.** sveast is bundled, and Svelte is loaded from the project, so the package doesn't declare it, even as a peer; `src/` imports `node:` builtins otherwise and runs on Node ≥ 22 and Bun. `test:package` checks the bundle's imports.
-- **Keep the public API small.** `src/index.ts` is the public API, and `src/types.ts`, which imports nothing, holds its types: the build emits them as one `index.d.ts`.
+- **Keep the public API small.** `src/index.ts` is the public API, and `src/types.ts` declares it by hand: its types and each function's signature, with their JSDoc. It imports nothing, and the build copies it as `index.d.ts`. Change a function's signature in both; `tests/api.test.ts` fails to type-check until they match.
 - **Paths through `node:path`.** Never split a path on `/`: on Windows a `.tmp` folder read as an extension once dropped every component. Messages print paths `/`-separated, with a lowercase drive letter on Windows, as svelte-check's TypeScript does.
 - **Comments say why.** JSDoc is for the public API; elsewhere a comment states a reason or a constraint the code can't. sveast's AST is untyped, so `any` stays on its nodes in `emit.ts` and `kit.ts`, with a disable comment, and nowhere else.
 
 ## Tests
 
-| File                                           | Covers                                                                                                                                      |
-| :--------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------ |
-| `tests/parity.test.ts`                         | Our machine output against svelte-check's, line for line, on each fixture, and the human and verbose formats                                |
-| `tests/typecheck.test.ts`                      | The pinned errors with each checker, the compiler pass, preprocessors                                                                       |
-| `tests/emit.test.ts`                           | Generating code: mapping, widened props, repeated handlers, JSDoc generics, Svelte 3 classes                                                |
-| `tests/watch.test.ts`                          | Incremental runs (a changed import, replay, the project's own build info) and `--watch`                                                     |
-| `tests/compile-cache.test.ts`                  | The compiler pass's cache, and the config left unloaded, across processes                                                                   |
-| `tests/baseline.test.ts`                       | `--baseline` through edits that move lines, new and fixed diagnostics                                                                       |
-| `tests/changed.test.ts`                        | `only` and its importers, and git's changed files                                                                                           |
-| `tests/checker.test.ts`                        | Finding a checker, `PATHEXT` on Windows, the default                                                                                        |
-| `tests/compiler.test.ts`, `tests/glob.test.ts` | `compilerDiagnostics`, the glob walker                                                                                                      |
-| `scripts/test-package.ts`                      | `bun run test:package`: the packed tarball installs, imports only builtins and Svelte's compiler, and checks the fixtures from Node and Bun |
+| File                                           | Covers                                                                                                                                                                    |
+| :--------------------------------------------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `tests/parity.test.ts`                         | Our machine output against svelte-check's, line for line, on each fixture, and the human and verbose formats                                                              |
+| `tests/typecheck.test.ts`                      | The pinned errors with each checker, the compiler pass, preprocessors                                                                                                     |
+| `tests/emit.test.ts`                           | Generating code: mapping, widened props, repeated handlers, JSDoc generics, Svelte 3 classes                                                                              |
+| `tests/watch.test.ts`                          | Incremental runs (a changed import, replay, the project's own build info) and `--watch`                                                                                   |
+| `tests/compile-cache.test.ts`                  | The compiler pass's cache, and the config left unloaded, across processes                                                                                                 |
+| `tests/baseline.test.ts`                       | `--baseline` through edits that move lines, new and fixed diagnostics                                                                                                     |
+| `tests/changed.test.ts`                        | `only` and its importers, and git's changed files                                                                                                                         |
+| `tests/checker.test.ts`                        | Finding a checker, `PATHEXT` on Windows, the default                                                                                                                      |
+| `tests/compiler.test.ts`, `tests/glob.test.ts` | `compilerDiagnostics`, the glob walker                                                                                                                                    |
+| `tests/api.test.ts`                            | The exports, and their signatures against `src/types.ts`                                                                                                                  |
+| `scripts/test-package.ts`                      | `bun run test:package`: the packed tarball installs, imports only builtins and Svelte's compiler, checks the fixtures from Node and Bun, and its `index.d.ts` type-checks |
 
 Each `tests/fixtures-*` folder is a small project for one area: `fixtures` (the basics), `-typed` (`$$Props`, `$$Events`, `$$Slots`), `-generic`, `-filters` (svelte-check's rewrites), `-preprocess`, `-runes`, `-kit` (SvelteKit 3) and `-edge` (markup that doesn't parse, TypeScript in JS, no `allowJs`). A behavior fix needs a test that fails before the fix and passes after; for a parity fix, that's usually a line in a fixture.
 
