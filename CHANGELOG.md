@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.1.4 — 2026-11-04
+
+**Fixes**
+
+- An incremental run checks again when the declarations beside an
+  imported JS file change, outside the tsconfig's `include` too (#16).
+- A JSDoc cast in a template expression is read, as svelte-check reads
+  it (#17).
+- An error on `<svelte:element>` is placed on its `<`, as svelte-check
+  places it (#18).
+- More of svelte-check's diagnostics, matching its output: a second
+  `$: x = …` of the same name; an action, transition or animation on an
+  element it doesn't take, and their return types; a `<slot name>`
+  `$$Slots` doesn't declare, and slot content for a slot the component
+  doesn't have; svelte-check's hints on a component's errors; a `$x`
+  that isn't a store, after the component's other errors; and a
+  TypeScript component's props.
+
 ## 0.1.3 — 2026-11-04
 
 **Features**
