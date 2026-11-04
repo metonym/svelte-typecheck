@@ -6,7 +6,8 @@
     "bench/*.bench.ts",
     "bench/check.ts",
     "eval/*.ts",
-    "ostia.config.ts"
+    "ostia.config.ts",
+    "bivium.config.ts"
   ],
   "project": [
     "src/**/*.ts",
