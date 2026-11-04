@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.5 — 2026-11-04
+
+**Fixes**
+
+- A `<svelte:element>` whose tag may be any element, such as a
+  component's generic `Tag extends keyof HTMLElementTagNameMap`, is
+  checked: its attributes are checked as an element's, where
+  svelte-check reports TypeScript's "union type too complex" and checks
+  none of them. A tag from a few elements keeps its own attributes.
+- An error on a `<svelte:element>`'s whole attributes object is placed
+  after its tag, where svelte-check places it.
+
 ## 0.1.4 — 2026-11-04
 
 **Fixes**
