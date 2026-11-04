@@ -106,11 +106,12 @@ type __sveltets_2_SvelteTransitionConfig = {
   css?: (t: number, u: number) => string;
   tick?: (t: number, u: number) => void;
 };
+type __sveltets_2_SvelteTransitionReturnType =
+  | __sveltets_2_SvelteTransitionConfig
+  | (() => __sveltets_2_SvelteTransitionConfig);
 /** `transition:`, `in:` and `out:`. */
 declare function __sveltets_2_ensureTransition(
-  transitionCall:
-    | __sveltets_2_SvelteTransitionConfig
-    | (() => __sveltets_2_SvelteTransitionConfig),
+  transitionCall: __sveltets_2_SvelteTransitionReturnType,
 ): {};
 
 // --- `$$Props`, `$$Events`, `$$Slots`.
@@ -137,13 +138,16 @@ declare function __sveltets_2_createCreateSlot<
 // --- `animate:`.
 
 declare var __sveltets_2_AnimationMove: { from: DOMRect; to: DOMRect };
-declare function __sveltets_2_ensureAnimation(animationCall: {
+type __sveltets_2_SvelteAnimationReturnType = {
   delay?: number;
   duration?: number;
   easing?: (t: number) => number;
   css?: (t: number, u: number) => string;
   tick?: (t: number, u: number) => void;
-}): {};
+};
+declare function __sveltets_2_ensureAnimation(
+  animationCall: __sveltets_2_SvelteAnimationReturnType,
+): {};
 
 // --- Events.
 
