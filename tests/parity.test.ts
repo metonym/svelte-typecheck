@@ -97,6 +97,13 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // Each helper the generated code calls, failing, and a TS file that
+  // uses components wrongly: every name the shims' types print.
+  it("matches svelte-check where a message prints the shims' types", () => {
+    const cwd = join(root, "tests/fixtures-helpers");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check's message rewrites and filters", () => {
     const cwd = join(root, "tests/fixtures-filters");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
