@@ -47,7 +47,7 @@ export default defineConfig({
     ],
   },
   reads: {
-    "src/check.ts": "src/shims/**",
+    "src/shims.ts": "src/shims/**",
     "tests/baseline.test.ts": fixtures,
     "tests/changed.test.ts": fixtures,
     "tests/checker.test.ts": fixtures,

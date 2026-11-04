@@ -1,4 +1,4 @@
-import { chmod, cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import type { BunPlugin } from "bun";
 
@@ -9,6 +9,12 @@ const ENTRIES = ["index", "cli"];
 const DIST_PREFIX = /"(\.\/)?dist\//;
 const IMPORT = /^\s*import\b/m;
 const PACKAGE_JSON = /[\\/]package\.json$/;
+const SHIMS = /[\\/]src[\\/]shims\.ts$/;
+/** A string, which can hold `//`, or a comment. */
+const STRING_OR_COMMENT =
+  /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`|\/\/.*|\/\*[\s\S]*?\*\//g;
+/** `/// <reference>` and `// @ts-nocheck`, which mean something. */
+const DIRECTIVE = /^\/\/(?:\/|\s*@ts-)/;
 const STRIP_FIELDS = ["devDependencies", "scripts"];
 
 function fail(message: string): never {
@@ -28,6 +34,40 @@ const versionOnly: BunPlugin = {
   },
 };
 
+/** A shim as the checker needs it: no comments, no indentation. */
+function strip(text: string): string {
+  return text
+    .replace(STRING_OR_COMMENT, (token) =>
+      token.startsWith("/") && !DIRECTIVE.test(token) ? "" : token,
+    )
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .join("\n");
+}
+
+// src/shims.ts reads each shim from disk; the bundle carries them inline.
+const inlineShims: BunPlugin = {
+  name: "svelte-typecheck-inline-shims",
+  setup(build) {
+    build.onLoad({ filter: SHIMS }, async () => {
+      const dir = join(src, "shims");
+      const shims = Object.fromEntries(
+        await Promise.all(
+          (await readdir(dir)).map(async (file) => [
+            file,
+            strip(await Bun.file(join(dir, file)).text()),
+          ]),
+        ),
+      );
+      return {
+        contents: `const SHIMS = ${JSON.stringify(shims)};\nexport function shim(file) { return SHIMS[file]; }\n`,
+        loader: "js",
+      };
+    });
+  },
+};
+
 async function bundle() {
   const result = await Bun.build({
     entrypoints: ENTRIES.map((entry) => join(src, `${entry}.ts`)),
@@ -42,7 +82,7 @@ async function bundle() {
     external: ["svelte", "svelte/*"],
     // Names stay readable in a stack trace from a user's CI log.
     minify: { whitespace: true, syntax: true, identifiers: false },
-    plugins: [versionOnly],
+    plugins: [versionOnly, inlineShims],
   });
   if (!result.success) {
     fail(`build failed:\n${result.logs.map(String).join("\n")}`);
@@ -82,6 +122,4 @@ await Promise.all(
     cp(join(root, file), join(dist, file)),
   ),
 );
-// The generated code's ambient types, which the checker reads from disk.
-await cp(join(src, "shims"), join(dist, "shims"), { recursive: true });
 console.log("✓ Build completed");
