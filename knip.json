@@ -5,13 +5,15 @@
     "scripts/*.ts",
     "bench/*.bench.ts",
     "bench/check.ts",
+    "eval/*.ts",
     "ostia.config.ts"
   ],
   "project": [
     "src/**/*.ts",
     "tests/**/*.ts",
     "scripts/**/*.ts",
-    "bench/**/*.ts"
+    "bench/**/*.ts",
+    "eval/**/*.ts"
   ],
   "ignore": ["tests/fixtures*/**"],
   "ignoreDependencies": [
