@@ -932,6 +932,7 @@ export async function typecheck(
   // kept by its size and modification time for the next run.
   const fileFacts = await factsCache(join(outDir, FACTS_CACHE), incremental);
   const dropped: Diagnostic[] = [];
+  const storeErrors: Diagnostic[] = [];
   const seen = new Set<string>();
   for (const d of raw) {
     if (d.file === "") {
@@ -964,12 +965,13 @@ export async function typecheck(
             )
           : undefined;
         if (store) {
+          // After the file's other errors, as svelte-check adds them.
           for (const use of store.uses) {
             const at = locator(gen.svelte, () => gen.source).position(use);
             const end = locator(gen.svelte, () => gen.source).position(
               use + store.name.length + 1,
             );
-            diagnostics.push({
+            storeErrors.push({
               ...d,
               file: gen.svelte,
               line: at.line,
@@ -1054,6 +1056,7 @@ export async function typecheck(
     seen.add(key);
     diagnostics.push(mapped);
   }
+  diagnostics.push(...storeErrors);
   // A message that names generated code names its source, as svelte-check's
   // name the `.svelte` file: `<out>/svelte/src/A.d.svelte` is `src/A.svelte`.
   // TypeScript names a file `/`-separated, and on Windows svelte-check
