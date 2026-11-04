@@ -1076,9 +1076,7 @@ export function emit(
   }
   /** A snippet passed as a prop: a component's, or `<svelte:boundary>`'s. */
   function snippetProp(node: Node) {
-    out.from(node.expression.start, () =>
-      out.raw(JSON.stringify(node.expression.name)),
-    );
+    out.from(node.expression.start, () => out.raw(keyOf(node.expression.name)));
     out.raw(":(");
     parameters(node);
     out.raw(") => { async () => {");
