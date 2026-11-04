@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
 import {
   preprocessedDiagnostics,
-  preprocessorsOf,
+  svelteConfigOf,
   svelteDirOf,
 } from "./compiler.ts";
 import { emit } from "./emit.ts";
@@ -25,6 +25,8 @@ const JS_FILE = /\.[cm]?jsx?$/;
 /** Errors that stop a checker before it type-checks anything. */
 const SYNTAX_CODE = /^TS[18]\d{3}$/;
 const STOPPED = /Stopped before type checking/;
+/** Where `await` may go: the checker reports these, then type-checks on. */
+const AWAIT_PLACEMENT = /^TS(1375|1378)$/;
 /** What an error's range covers past its start: an identifier, number or string. */
 const TOKEN = /^(?:[\w$]+|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`]*`)/;
 
@@ -538,8 +540,8 @@ export async function typecheck(
       ).then((output) => ({ output, at: performance.now() }))
     : Promise.resolve({ output: "", at: emitted });
   const compiled: Diagnostic[] = [];
-  const preprocessors = sources.has("svelte")
-    ? await preprocessorsOf(
+  const svelteConfig = sources.has("svelte")
+    ? await svelteConfigOf(
         options.config
           ? dirname(resolve(workspace, options.config))
           : workspace,
@@ -553,7 +555,7 @@ export async function typecheck(
             texts[i] ?? "",
             relative(cwd, path),
             svelteDir,
-            preprocessors,
+            svelteConfig ?? { compilerOptions: {} },
           ),
         ),
       )
@@ -581,6 +583,7 @@ export async function typecheck(
     (d) =>
       inOutput(d.file) &&
       SYNTAX_CODE.test(d.code) &&
+      !AWAIT_PLACEMENT.test(d.code) &&
       !outputs.get(resolve(cwd, d.file))?.kit,
   );
   if (syntax.length > 0 || STOPPED.test(text))
@@ -746,12 +749,12 @@ export async function typecheck(
     importResolver([root, ...project.rootDirs], project.paths),
   );
   const sourceRank = (d: Diagnostic) => (d.source === "svelte" ? 0 : 1);
+  // Stable: in a file, the checker's order (generated code's, so a hoisted
+  // snippet's errors come first), as svelte-check keeps it.
   reported.sort(
     (a, b) =>
       (order.get(a.file) ?? 0) - (order.get(b.file) ?? 0) ||
-      sourceRank(a) - sourceRank(b) ||
-      a.line - b.line ||
-      a.column - b.column,
+      sourceRank(a) - sourceRank(b),
   );
 
   return {

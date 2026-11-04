@@ -16,7 +16,7 @@ type Preprocessor = Record<string, unknown>;
 interface Compiler {
   compile(
     source: string,
-    options: { filename: string; generate: false },
+    options: { filename: string; generate: false; dev?: boolean },
   ): { warnings: Warning[] };
   preprocess(
     source: string,
@@ -31,22 +31,39 @@ const CONFIG_FILES = [
   "svelte.config.cjs",
 ];
 
+/** What the compiler pass reads from svelte.config. */
+export interface SvelteConfig {
+  preprocess?: Preprocessor[];
+  /** As svelte-check compiles: `dev`, then the config's, then no output. */
+  compilerOptions: Record<string, unknown>;
+}
+
 /**
- * The `preprocess` of the nearest svelte.config, from `dir` up, as
- * svelte-check finds it. A vite.config isn't read: that needs Vite.
+ * The `preprocess` and `compilerOptions` of the nearest svelte.config,
+ * from `dir` up, as svelte-check finds it. A vite.config isn't read: that
+ * needs Vite.
  */
-export async function preprocessorsOf(
+export async function svelteConfigOf(
   dir: string,
   explicit?: string,
-): Promise<Preprocessor[] | undefined> {
+): Promise<SvelteConfig> {
   const path = explicit ?? configOf(dir);
-  if (!path) return;
-  const config = (await import(pathToFileURL(path).href)) as {
-    default?: { preprocess?: Preprocessor | Preprocessor[] };
+  const config = path
+    ? ((
+        (await import(pathToFileURL(path).href)) as {
+          default?: {
+            preprocess?: Preprocessor | Preprocessor[];
+            compilerOptions?: Record<string, unknown>;
+          };
+        }
+      ).default ?? {})
+    : {};
+  const { preprocess } = config;
+  return {
+    preprocess:
+      preprocess && (Array.isArray(preprocess) ? preprocess : [preprocess]),
+    compilerOptions: { dev: true, ...config.compilerOptions },
   };
-  const preprocess = config.default?.preprocess;
-  if (!preprocess) return;
-  return Array.isArray(preprocess) ? preprocess : [preprocess];
 }
 
 function configOf(dir: string): string | undefined {
@@ -89,9 +106,11 @@ function diagnosticsOf(
   compiler: Compiler,
   source: string,
   filename: string,
+  compilerOptions: Record<string, unknown> = {},
 ): CompilerDiagnostic[] {
   try {
     const { warnings } = compiler.compile(source, {
+      ...compilerOptions,
       filename,
       generate: false,
     });
@@ -150,28 +169,32 @@ export async function preprocessedDiagnostics(
   source: string,
   filename: string,
   svelteDir: string,
-  preprocessors: Preprocessor[] | undefined,
+  config: SvelteConfig,
 ): Promise<CompilerDiagnostic[]> {
   const compiler = compilerOf(svelteDir);
-  if (!preprocessors) return diagnosticsOf(compiler, source, filename);
-  const processed = await compiler.preprocess(source, preprocessors, {
+  const { preprocess, compilerOptions } = config;
+  if (!preprocess)
+    return diagnosticsOf(compiler, source, filename, compilerOptions);
+  const processed = await compiler.preprocess(source, preprocess, {
     filename,
   });
   if (processed.code === source)
-    return diagnosticsOf(compiler, source, filename);
+    return diagnosticsOf(compiler, source, filename, compilerOptions);
   const map =
     typeof processed.map === "string"
       ? (JSON.parse(processed.map) as { mappings: string })
       : processed.map;
   const toOriginal = originalPosition(map);
-  return diagnosticsOf(compiler, processed.code, filename).map((d) => {
-    const start = toOriginal(d.line, d.column);
-    const end = toOriginal(d.endLine ?? d.line, d.endColumn ?? d.column);
-    return {
-      ...d,
-      ...start,
-      endLine: end.line,
-      endColumn: end.column,
-    };
-  });
+  return diagnosticsOf(compiler, processed.code, filename, compilerOptions).map(
+    (d) => {
+      const start = toOriginal(d.line, d.column);
+      const end = toOriginal(d.endLine ?? d.line, d.endColumn ?? d.column);
+      return {
+        ...d,
+        ...start,
+        endLine: end.line,
+        endColumn: end.column,
+      };
+    },
+  );
 }
