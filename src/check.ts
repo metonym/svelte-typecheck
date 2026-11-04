@@ -15,6 +15,7 @@ import { glob } from "./glob.ts";
 import { isKitFile, isKitRouteFile, kitFile } from "./kit.ts";
 import { createLocator, type Output } from "./output.ts";
 import {
+  asTypeScriptPath,
   byFolder,
   programFiles,
   projectOf,
@@ -44,9 +45,6 @@ const GENERATED_NAME =
   /(?:\+\+)?([^/\\]+?)(?:\.d\.svelte(?:\.ts)?|\.svelte\.[jt]s)$/;
 const DRIVE_PATH = /\b[A-Z]:\//g;
 const toPosix = (path: string) => path.split(sep).join("/");
-/** A path as svelte-check's TypeScript prints it: `/`-separated, a Windows drive lowercase. */
-const asTypeScriptPath = (path: string) =>
-  toPosix(path).replace(/^[A-Z]:/, (drive) => drive.toLowerCase());
 const escapeRegExp = (text: string) =>
   text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
@@ -1126,8 +1124,19 @@ export async function typecheck(
         });
       }
   }
-  // svelte-check warns when a tsconfig includes no components.
-  if (project.tsconfig && !options.components && files.length === 0)
+  // TypeScript fails a tsconfig that includes nothing, and svelte-check
+  // reports it; one that includes no components, svelte-check warns of.
+  if (project.tsconfig && project.inputSpecs && listedFiles.length === 0)
+    diagnostics.push({
+      file: project.tsconfig,
+      line: 1,
+      column: 1,
+      severity: "error",
+      source: "ts",
+      code: "TS18003",
+      message: `No inputs were found in config file '${asTypeScriptPath(project.tsconfig)}'. Specified 'include' paths were '${JSON.stringify(project.inputSpecs.include)}' and 'exclude' paths were '${JSON.stringify(project.inputSpecs.exclude)}'.`,
+    });
+  else if (project.tsconfig && !options.components && files.length === 0)
     diagnostics.push({
       file: project.tsconfig,
       line: 1,

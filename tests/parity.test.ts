@@ -120,6 +120,38 @@ describe("svelte-check parity, machine output", () => {
     expect(warning(ours([], cwd))).toHaveLength(1);
   }, 60_000);
 
+  it.each([
+    ["an include that matches nothing", "no-inputs", { include: ["scr"] }],
+    // TypeScript reads `my.app` as a file, so "." includes nothing.
+    ["a folder whose name has a dot", "my.app", { include: ["."] }],
+    // An inherited include is named from the extending tsconfig; with no
+    // exclude, outDir is excluded.
+    [
+      "an inherited include",
+      "no-inputs-extends",
+      { extends: "./config/base.json", compilerOptions: { outDir: "out" } },
+    ],
+  ])(
+    "fails, as svelte-check does, on %s",
+    (_, name, tsconfig) => {
+      const cwd = join(root, "tests/.tmp", name);
+      mkdirSync(join(cwd, "src"), { recursive: true });
+      mkdirSync(join(cwd, "config"), { recursive: true });
+      writeFileSync(join(cwd, "tsconfig.json"), JSON.stringify(tsconfig));
+      writeFileSync(
+        join(cwd, "config/base.json"),
+        JSON.stringify({ compilerOptions: { strict: true }, include: ["lib"] }),
+      );
+      writeFileSync(join(cwd, "src/App.svelte"), "<h1>Hi</h1>\n");
+      writeFileSync(join(cwd, "src/a.ts"), "export const a: number = 1;\n");
+      expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+      const status = (command: string[]) =>
+        spawnSync(command[0] ?? "", command.slice(1), { cwd }).status;
+      expect(status([process.execPath, join(root, "src/cli.ts")])).toBe(1);
+    },
+    60_000,
+  );
+
   it("matches svelte-check with preprocessors", () => {
     const cwd = join(root, "tests/fixtures-preprocess");
     // svelte-check's css source (not supported) flags the custom style.

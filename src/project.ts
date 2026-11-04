@@ -21,6 +21,8 @@ const WILDCARD = /[*?{]/;
 const HAS_EXTENSION = /\.[^/\\]+$/;
 const NODE_MODULES_JS = /\/node_modules\/.+\.[cm]?js$/;
 const DEFAULT_EXCLUDE = ["node_modules", "bower_components", "jspm_packages"];
+/** A spec TypeScript resolves from the tsconfig it's read from, not rebased. */
+const CONFIG_DIR = "${configDir}";
 
 /** A tsconfig's JSON, comments and trailing commas allowed. */
 function parseJsonc(text: string): unknown {
@@ -39,12 +41,15 @@ interface RawConfig {
   include?: string[];
   exclude?: string[];
   files?: string[];
+  references?: unknown[];
   compilerOptions?: {
     rootDirs?: string[];
     baseUrl?: string;
     paths?: Record<string, string[]>;
     checkJs?: boolean;
     allowJs?: boolean;
+    outDir?: string;
+    declarationDir?: string;
   };
 }
 
@@ -59,6 +64,11 @@ interface Inputs {
   paths?: Record<string, string[]>;
   checkJs?: boolean;
   allowJs?: boolean;
+  /** `include` and `exclude` as written, relative to the tsconfig read first. */
+  includeSpecs?: string[];
+  excludeSpecs?: string[];
+  outDir?: string;
+  declarationDir?: string;
 }
 
 function readInputs(path: string, read: string[] = []): Inputs {
@@ -74,7 +84,23 @@ function readInputs(path: string, read: string[] = []): Inputs {
     const basePath = base.startsWith(".")
       ? resolve(dir, base)
       : createRequire(path).resolve(base);
-    inputs = { ...inputs, ...defined(readInputs(basePath, read)) };
+    const baseInputs = readInputs(basePath, read);
+    // As TypeScript rewrites them: from the base's folder to this one's.
+    const difference = toPosix(relative(dir, dirname(basePath)));
+    const rebase = (specs: string[] | undefined) =>
+      specs?.map((spec) =>
+        difference && !isAbsolute(spec) && !spec.startsWith(CONFIG_DIR)
+          ? `${difference}/${spec}`
+          : spec,
+      );
+    inputs = {
+      ...inputs,
+      ...defined({
+        ...baseInputs,
+        includeSpecs: rebase(baseInputs.includeSpecs),
+        excludeSpecs: rebase(baseInputs.excludeSpecs),
+      }),
+    };
   }
   const options = config.compilerOptions;
   const baseUrl = options?.baseUrl ? resolve(dir, options.baseUrl) : undefined;
@@ -88,6 +114,11 @@ function readInputs(path: string, read: string[] = []): Inputs {
       rootDirs: absolute(options?.rootDirs),
       checkJs: options?.checkJs,
       allowJs: options?.allowJs,
+      includeSpecs: config.include,
+      excludeSpecs: config.exclude,
+      outDir: options?.outDir && resolve(dir, options.outDir),
+      declarationDir:
+        options?.declarationDir && resolve(dir, options.declarationDir),
       baseUrl,
       paths:
         options?.paths &&
@@ -123,6 +154,9 @@ function findTsconfig(dir: string): string | undefined {
 }
 
 const toPosix = (path: string) => path.split(sep).join("/");
+/** A path as svelte-check's TypeScript prints it: `/`-separated, a Windows drive lowercase. */
+export const asTypeScriptPath = (path: string): string =>
+  toPosix(path).replace(/^[A-Z]:/, (drive) => drive.toLowerCase());
 
 /** Splits an absolute glob into the folder before its first wildcard and the rest. */
 function splitGlob(pattern: string): [base: string, rest: string] {
@@ -175,6 +209,11 @@ export interface Project {
   allowJs: boolean;
   /** The tsconfig's own `include` and `exclude`, as written. */
   raw: { include?: string[]; exclude?: string[] };
+  /**
+   * What TypeScript's "No inputs were found" names, when it would report
+   * one: not with a `files` list or project `references`.
+   */
+  inputSpecs?: { include: string[]; exclude: string[] };
   /** Whether a TS or JS file's errors are reported. */
   reports(path: string): boolean;
 }
@@ -224,6 +263,7 @@ export function projectOf(options: ProjectOptions): Project {
 
   const configFiles: string[] = [];
   const inputs = readInputs(tsconfig, configFiles);
+  const raw = parseJsonc(readFileSync(tsconfig, "utf-8")) as RawConfig;
   const include =
     inputs.include ?? (inputs.files ? [] : [join(dirname(tsconfig), "**/*")]);
   const exclude =
@@ -268,7 +308,19 @@ export function projectOf(options: ProjectOptions): Project {
     checkJs: inputs.checkJs ?? false,
     // A jsconfig.json allows JS by default.
     allowJs: inputs.allowJs ?? basename(tsconfig) === "jsconfig.json",
-    raw: parseJsonc(readFileSync(tsconfig, "utf-8")) as RawConfig,
+    raw,
+    inputSpecs:
+      inputs.files || raw.references
+        ? undefined
+        : {
+            include: inputs.includeSpecs ?? ["**/*"],
+            exclude:
+              inputs.excludeSpecs ??
+              // With none, TypeScript excludes its outputs.
+              [inputs.outDir, inputs.declarationDir].flatMap((dir) =>
+                dir ? [asTypeScriptPath(dir)] : [],
+              ),
+          },
     // As svelte-check: every file in the program, but JS in node_modules.
     reports: (path) => !NODE_MODULES_JS.test(toPosix(path)),
   };
