@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.1.1 — 2026-11-04
 
+**Fixes**
+
+- A tsconfig whose `include` matches nothing fails with TS18003, as
+  svelte-check reports it, instead of passing with a warning. A typo in
+  `include`, or `["."]` in a folder such as `my.app` (which TypeScript
+  reads as a file), no longer passes CI with nothing checked.
 - Svelte is no longer a peer dependency. svelte-typecheck always loads
   the project's own, so the range only got in the way: npm refuses to
   install alongside a Svelte outside it (a future Svelte 6), and installs

@@ -1,6 +1,6 @@
 {
   "name": "svelte-typecheck",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "license": "MIT",
   "description": "A drop-in svelte-check replacement that checks with tsc, tsgo, tsrs or bun check. Up to 11x faster, zero dependencies.",
   "author": "Eric Liu (https://github.com/metonym)",
