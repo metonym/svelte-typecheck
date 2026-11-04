@@ -1,7 +1,6 @@
-import { existsSync } from "node:fs";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import type { Preprocessor, SvelteConfig } from "./config.ts";
 import { originalPosition } from "./sourcemap.ts";
 import type { CompilerDiagnostic } from "./types.ts";
 
@@ -11,8 +10,6 @@ interface Warning {
   start?: { line: number; column: number };
   end?: { line: number; column: number };
 }
-/** A `preprocess` entry from svelte.config.js. */
-type Preprocessor = Record<string, unknown>;
 interface Compiler {
   compile(
     source: string,
@@ -23,57 +20,6 @@ interface Compiler {
     preprocessors: Preprocessor | Preprocessor[],
     options: { filename: string },
   ): Promise<{ code: string; map?: string | { mappings: string } }>;
-}
-
-const CONFIG_FILES = [
-  "svelte.config.js",
-  "svelte.config.mjs",
-  "svelte.config.cjs",
-];
-
-/** What the compiler pass reads from svelte.config. */
-export interface SvelteConfig {
-  preprocess?: Preprocessor[];
-  /** As svelte-check compiles: `dev`, then the config's, then no output. */
-  compilerOptions: Record<string, unknown>;
-}
-
-/**
- * The `preprocess` and `compilerOptions` of the nearest svelte.config,
- * from `dir` up, as svelte-check finds it. A vite.config isn't read: that
- * needs Vite.
- */
-export async function svelteConfigOf(
-  dir: string,
-  explicit?: string,
-): Promise<SvelteConfig> {
-  const path = explicit ?? configOf(dir);
-  const config = path
-    ? ((
-        (await import(pathToFileURL(path).href)) as {
-          default?: {
-            preprocess?: Preprocessor | Preprocessor[];
-            compilerOptions?: Record<string, unknown>;
-          };
-        }
-      ).default ?? {})
-    : {};
-  const { preprocess } = config;
-  return {
-    preprocess:
-      preprocess && (Array.isArray(preprocess) ? preprocess : [preprocess]),
-    compilerOptions: { dev: true, ...config.compilerOptions },
-  };
-}
-
-function configOf(dir: string): string | undefined {
-  for (let at = dir; ; at = dirname(at)) {
-    for (const name of CONFIG_FILES) {
-      const path = join(at, name);
-      if (existsSync(path)) return path;
-    }
-    if (dirname(at) === at) return;
-  }
 }
 
 /** The Svelte package a project checks against: `svelte`, from `cwd`. */

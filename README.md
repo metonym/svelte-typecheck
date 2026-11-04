@@ -58,7 +58,7 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 | `--tsconfig <path>`           | tsconfig or jsconfig, relative to the workspace (default: the nearest from the workspace up). The components it includes are checked, and its TS and JS files' errors reported |
 | `--no-tsconfig`               | Check every component under the workspace, and no TS or JS files                                                                                                               |
 | `--ignore <list>`             | With `--no-tsconfig`: paths to skip, comma-separated                                                                                                                           |
-| `--config <path>`             | The svelte.config to read preprocessors from                                                                                                                                   |
+| `--config <path>`             | The vite.config or svelte.config to read preprocessors and `compilerOptions` from                                                                                              |
 | `--diagnostic-sources <list>` | `js`, `svelte` and `css`, comma-separated (default: all)                                                                                                                       |
 | `--threshold error`           | Print errors only                                                                                                                                                              |
 | `--compiler-warnings <list>`  | `code:ignore` or `code:error`, comma-separated                                                                                                                                 |
@@ -77,7 +77,6 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 ### Differences from svelte-check
 
 - **CSS diagnostics** (`--diagnostic-sources css`): accepted, but nothing is reported. svelte-check runs a CSS language service on `<style>`, a dependency this package leaves out; Svelte's compiler still reports invalid CSS.
-- **Preprocessors and `compilerOptions`** come from `svelte.config.{js,mjs,cjs}`, not a `vite.config`, which would need Vite.
 - **`COMPLETED <n> FILES`** counts components, not every file in TypeScript's program.
 - **`--diagnostic-sources svelte`** with a tsconfig reports no type errors, as svelte-check's docs say; svelte-check itself reports them.
 - **`--tsgo-experimental-api`** is accepted, and does what `--tsgo` does.

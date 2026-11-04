@@ -67,12 +67,13 @@ try {
         .filter((d) => d.kind === "import" && d.source !== null)
         .map((d) => d.source?.value ?? ""),
     ];
-    // One computed import(): the project's svelte.config.
+    // Two computed import()s: the project's svelte.config, and its own Vite
+    // for a vite.config.
     const computed = lexDynamicImports(code).filter(
       (d) => d.kind === "import" && d.source === null,
     );
     assert(
-      computed.length <= 1,
+      computed.length <= 2,
       `dist/${file} has ${computed.length} computed import()s`,
     );
     for (const specifier of specifiers)

@@ -30,7 +30,8 @@ svelte-check's options:
                             no TS or JS files
   --ignore <list>           With --no-tsconfig: paths to skip, relative to
                             the workspace, comma-separated
-  --config <path>           svelte.config to read preprocessors from
+  --config <path>           vite.config or svelte.config to read preprocessors
+                            and compilerOptions from (default: the nearest)
   --diagnostic-sources <list>
                             js, svelte and css, comma-separated (default: all;
                             css reports nothing)
