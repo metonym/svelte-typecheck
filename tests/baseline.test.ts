@@ -47,9 +47,30 @@ describe("--baseline", () => {
     expect(fresh.stdout).toContain("Errors.svelte:10:9");
 
     // A fixed one is counted, to drop from the baseline.
-    writeFileSync(errors, source.replace("missing", "count"));
-    expect(cli("--baseline", "baseline.json").stdout).toContain(
-      "1 in the baseline are fixed",
+    writeFileSync(errors, source.replace("<p>{missing}</p>", "<p></p>"));
+    const fixed = cli("--baseline", "baseline.json");
+    expect(fixed.status).toBe(0);
+    expect(fixed.stdout).toContain("1 in the baseline are fixed");
+    // With --strict-baseline, the baseline only goes down: until it drops
+    // what's fixed, the run fails.
+    const strict = cli("--baseline", "baseline.json", "--strict-baseline");
+    expect(strict.status).toBe(1);
+    expect(strict.stdout).toContain("1 in the baseline are fixed");
+    cli("--baseline", "baseline.json", "--update-baseline");
+    expect(cli("--baseline", "baseline.json", "--strict-baseline").status).toBe(
+      0,
     );
   }, 60_000);
+
+  it("takes --strict-baseline only with a baseline of every file", () => {
+    const output = (r: ReturnType<typeof cli>) => r.stdout + r.stderr;
+    expect(output(cli("--strict-baseline"))).toContain(
+      "--strict-baseline needs --baseline <file>",
+    );
+    expect(
+      output(
+        cli("--baseline", "baseline.json", "--strict-baseline", "--changed"),
+      ),
+    ).toContain("--strict-baseline takes every file's: drop --changed");
+  });
 });
