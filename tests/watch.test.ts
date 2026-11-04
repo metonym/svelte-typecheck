@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { cp, mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { typecheck } from "../src/check.ts";
 import type { TypecheckResult } from "../src/types.ts";
@@ -38,6 +38,35 @@ describe("incremental", () => {
     await rm(join(dir, "Broken.svelte"));
     expect((await run()).diagnostics).toEqual([]);
     expect(existsSync(join(outDir, "svelte/++Broken.svelte.ts"))).toBe(false);
+  }, 30_000);
+});
+
+describe("incremental, with a component unchanged", () => {
+  it("maps an error a changed import causes in it", async () => {
+    const dir = await workspace("incremental-import");
+    const outDir = join(
+      root,
+      "node_modules/.cache/svelte-typecheck/test-incremental-import",
+    );
+    await rm(outDir, { recursive: true, force: true });
+    const run = () => typecheck({ cwd: root, workspace: dir, outDir });
+    expect((await run()).diagnostics).toEqual([]);
+    // Clean.svelte passes `count={double}`, a number; it's now a string.
+    const child = join(dir, "Child.svelte");
+    await writeFile(
+      child,
+      (await readFile(child, "utf-8")).replace(
+        "export let count: number;",
+        "export let count: string;",
+      ),
+    );
+    const [error] = (await run()).diagnostics;
+    expect(error?.file).toBe(join(dir, "Clean.svelte"));
+    expect([error?.line, error?.column, error?.code]).toEqual([
+      12,
+      8,
+      "TS2322",
+    ]);
   }, 30_000);
 });
 
