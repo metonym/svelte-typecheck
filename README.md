@@ -81,6 +81,10 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 - **`--diagnostic-sources svelte`** with a tsconfig reports no type errors, as svelte-check's docs say; svelte-check itself reports them.
 - **`--tsgo-experimental-api`** is accepted, and does what `--tsgo` does.
 - **tsconfig option errors** that only matter to an emitting build, such as a JS file that `tsc` would overwrite, aren't reported: the checker runs with `noEmit`.
+- **A union's members** can print in another order, as TypeScript orders them by when it first meets each type: `Element | Document` where svelte-check has `Document | Element`.
+- **A syntax error in a TS or JS file** stops `tsc` and the other CLI checkers from type-checking at all, so only syntax errors are reported until it's fixed; svelte-check's language service reports the type errors in other files too. A component's syntax errors don't do this.
+- **Svelte 3 and 4 with `lang="ts"` and no preprocessors**: svelte-check strips the types with a fallback preprocessor and reports the compiler's warnings; here the compiler can't read the script, so there are none.
+- **`--out-dir` outside the project** can't find its packages from the generated code; the default is inside `node_modules`.
 
 ### API
 

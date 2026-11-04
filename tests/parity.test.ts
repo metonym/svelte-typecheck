@@ -92,6 +92,11 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check on markup that doesn't parse, TypeScript in JS, no allowJs and a scss style", () => {
+    const cwd = join(root, "tests/fixtures-edge");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check's message rewrites and filters", () => {
     const cwd = join(root, "tests/fixtures-filters");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));

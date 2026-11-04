@@ -31,8 +31,22 @@ describe("emit", () => {
     expect(out.code).toContain(
       "let double = __sveltets_2_invalidate(() => (a * 2));",
     );
-    // A parent can pass any value, so `a` isn't narrowed to its default.
-    expect(out.code).toContain("a = __sveltets_2_any(a);");
+  });
+
+  it("widens a prop as svelte2tsx does: with no default, a type or a boolean default", () => {
+    const { out } = emit(
+      `<script lang="ts">
+  export let a = 1;
+  export let b: number = 1;
+  export let c = false;
+  export let d;
+</script>
+`,
+    );
+    expect(out.code).not.toContain("a = __sveltets_2_any(a);");
+    expect(out.code).toContain("b = __sveltets_2_any(b);");
+    expect(out.code).toContain("c = __sveltets_2_any(c);");
+    expect(out.code).toContain("d = __sveltets_2_any(0);");
   });
 
   it("checks a repeated event handler in a call of its own", () => {

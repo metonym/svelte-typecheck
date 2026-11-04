@@ -1,6 +1,8 @@
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
+import { lexComponent } from "sveast";
 import type { Preprocessor, SvelteConfig } from "./config.ts";
+import { createLocator } from "./output.ts";
 import { originalPosition } from "./sourcemap.ts";
 import type { CompilerDiagnostic } from "./types.ts";
 
@@ -119,28 +121,105 @@ export async function preprocessedDiagnostics(
 ): Promise<CompilerDiagnostic[]> {
   const compiler = compilerOf(svelteDir);
   const { preprocess, compilerOptions } = config;
-  if (!preprocess)
-    return diagnosticsOf(compiler, source, filename, compilerOptions);
-  const processed = await compiler.preprocess(source, preprocess, {
-    filename,
-  });
-  if (processed.code === source)
-    return diagnosticsOf(compiler, source, filename, compilerOptions);
-  const map =
-    typeof processed.map === "string"
-      ? (JSON.parse(processed.map) as { mappings: string })
-      : processed.map;
-  const toOriginal = originalPosition(map);
-  return diagnosticsOf(compiler, processed.code, filename, compilerOptions).map(
-    (d) => {
+  let diagnostics: CompilerDiagnostic[];
+  const processed = preprocess
+    ? await compiler.preprocess(source, preprocess, { filename })
+    : undefined;
+  if (!processed || processed.code === source)
+    diagnostics = diagnosticsOf(compiler, source, filename, compilerOptions);
+  else {
+    const map =
+      typeof processed.map === "string"
+        ? (JSON.parse(processed.map) as { mappings: string })
+        : processed.map;
+    const toOriginal = originalPosition(map);
+    diagnostics = diagnosticsOf(
+      compiler,
+      processed.code,
+      filename,
+      compilerOptions,
+    ).map((d) => {
       const start = toOriginal(d.line, d.column);
       const end = toOriginal(d.endLine ?? d.line, d.endColumn ?? d.column);
-      return {
-        ...d,
-        ...start,
-        endLine: end.line,
-        endColumn: end.column,
-      };
-    },
-  );
+      return { ...d, ...start, endLine: end.line, endColumn: end.column };
+    });
+  }
+  return asSvelteCheck(diagnostics, source, Boolean(preprocess));
+}
+
+const TEXT_TYPE = /^text\//;
+const EXPORTED_TYPE = (name: string) =>
+  new RegExp(`\\bexport\\s+?(enum|namespace)\\s+?${name}\\b`);
+
+/**
+ * What svelte-check does with the compiler's diagnostics. Without
+ * preprocessors, a `lang` it can't compile (`lang="scss"`, a non-TS
+ * script) makes a parse error and that section's warnings false
+ * positives; a parse error in a script or style gets a hint about
+ * preprocessors.
+ */
+function asSvelteCheck(
+  diagnostics: CompilerDiagnostic[],
+  source: string,
+  preprocessed: boolean,
+): CompilerDiagnostic[] {
+  const lexed = lexComponent(source);
+  const script = lexed.instance ?? lexed.module;
+  const langOf = (
+    attributes: { name: string; value: string | true }[] = [],
+  ) => {
+    const lang =
+      attributes.find((a) => a.name === "lang") ??
+      attributes.find((a) => a.name === "type");
+    return typeof lang?.value === "string"
+      ? lang.value.replace(TEXT_TYPE, "")
+      : "";
+  };
+  const scriptLang = langOf(script?.attributes);
+  const styleLang = langOf(lexed.css?.attributes);
+  const ignoreScript =
+    !preprocessed && scriptLang !== "" && scriptLang !== "ts";
+  const ignoreStyle = !preprocessed && styleLang !== "";
+  const offsetOf = createLocator(source).offset;
+  const inside = (
+    d: CompilerDiagnostic,
+    tag?: { content: { start: number; end: number } } | null,
+  ) => {
+    if (!tag) return false;
+    const at = offsetOf(d.line, d.column);
+    return tag.content.start <= at && at <= tag.content.end;
+  };
+  const kept: CompilerDiagnostic[] = [];
+  for (const d of diagnostics) {
+    if (d.severity === "error") {
+      if (d.message.includes("expected")) {
+        if (!preprocessed && (scriptLang || styleLang)) continue;
+        const inScript = inside(d, script);
+        if (inScript || inside(d, lexed.css))
+          d.message +=
+            "\n\nIf you expect this syntax to work, here are some suggestions: " +
+            (inScript
+              ? '\nIf you use typescript with `svelte-preprocess`, did you add `lang="ts"` to your `script` tag? '
+              : '\nIf you use less/SCSS with `svelte-preprocess`, did you add `lang="scss"`/`lang="less"` to your `style` tag? If you use SCSS, it may be necessary to add the path to your NODE runtime to the setting `svelte.language-server.runtime`, or use `sass` instead of `node-sass`. ') +
+            "\nDid you setup a `svelte.config.js` or `vite.config.js`? \nSee https://github.com/sveltejs/language-tools/tree/master/docs#using-with-preprocessors for more info.";
+      }
+      kept.push(d);
+      continue;
+    }
+    if (ignoreScript && !d.code.startsWith("a11y")) continue;
+    if (
+      ignoreStyle &&
+      (d.code === "css_unused_selector" || d.code === "css-unused-selector")
+    )
+      continue;
+    if (d.code === "export_let_unused" || d.code === "unused-export-let") {
+      const name = d.message.slice(
+        d.message.indexOf("'") + 1,
+        d.message.lastIndexOf("'"),
+      );
+      if (EXPORTED_TYPE(name).test(source)) continue;
+    }
+    kept.push(d);
+  }
+  return kept;
 }
