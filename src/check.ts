@@ -34,6 +34,9 @@ const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 const CONTINUATION = /^\s+\S/;
 const GLOBAL_DIAGNOSTIC = /^error (TS\d+): (.*)$/;
 const TS_MODULE = /\.[cm]?tsx?$/;
+const DECLARATION_FILE = /\.d\.[cm]?ts$/;
+/** A comment that hides the next line's error from TypeScript. */
+const TS_DIRECTIVE = /^\s*\/\/\s*@ts-(ignore|expect-error)\b/;
 const LINE_BREAK = /\r?\n/;
 const JS_FILE = /\.[cm]?jsx?$/;
 /** Errors that stop a checker before it type-checks anything. */
@@ -59,7 +62,7 @@ const STORE_ERROR = /^TS(2769|2345)$/;
 const REACTIVE_NOISE = /^TS(7028|2695)$/;
 
 /** The caches' shape, in each one's key: a new shape misses the old. */
-const CACHE_FORMAT = 1;
+const CACHE_FORMAT = 2;
 /** The last run's result, and a key to what it read. */
 const RESULT_CACHE = "result.json";
 interface ResultCache {
@@ -1114,10 +1117,14 @@ export async function typecheck(
           !TS_SCRIPT.test(texts[i] ?? "") && !existsSync(`${path}.d.ts`),
       ),
     );
-    const resolveImport = importResolver(
+    const resolvePath = importResolver(
       [root, ...project.rootDirs],
       project.paths,
     );
+    // An import of the package's own name, which `paths` didn't find.
+    const resolveSelf = importResolver([], project.selfExports);
+    const resolveImport = (from: string, specifier: string) =>
+      resolvePath(from, specifier) ?? resolveSelf(from, specifier);
     /** A TS source's `.svelte` imports, by line and column. */
     const svelteImportsOf = (content: string, component: boolean) => {
       if (!content.includes(".svelte")) return [];
@@ -1128,12 +1135,16 @@ export async function typecheck(
           )
         : [[0, content.length] as const];
       const locate = createLocator(content);
+      const lines = content.split("\n");
       return ranges.flatMap(([start, end]) =>
         lexImportsExports(content.slice(start, end)).flatMap((statement) => {
           const specifier = statement.source?.value;
           if (!specifier?.endsWith(".svelte")) return [];
           const at = locate.position(start + (statement.source?.start ?? 0));
-          return [[specifier, at.line, at.column] as const];
+          // A `@ts-ignore` or `@ts-expect-error` on the line before.
+          const directive = (TS_DIRECTIVE.exec(lines[at.line - 2] ?? "")?.[1] ??
+            null) as "ignore" | "expect-error" | null;
+          return [[specifier, at.line, at.column, directive] as const];
         }),
       );
     };
@@ -1141,14 +1152,22 @@ export async function typecheck(
       ...files.filter((_, i) => TS_SCRIPT.test(texts[i] ?? "")),
       ...listedFiles.filter((path) => TS_MODULE.test(path)),
     ];
-    for (const path of tsSources)
-      for (const [specifier, line, column] of fileFacts.of(
+    /** `@ts-expect-error`s that would have hidden TS7016, by file and line. */
+    const expected = new Set<string>();
+    for (const path of tsSources) {
+      // With `skipLibCheck`, a declaration file's errors aren't reported.
+      if (project.skipLibCheck && DECLARATION_FILE.test(path)) continue;
+      for (const [specifier, line, column, directive] of fileFacts.of(
         path,
         "svelteImports",
         (content) => svelteImportsOf(content, path.endsWith(".svelte")),
       )) {
         const target = resolveImport(path, specifier);
         if (!target || !untyped.has(target)) continue;
+        if (directive) {
+          if (directive === "expect-error") expected.add(`${path}:${line - 1}`);
+          continue;
+        }
         diagnostics.push({
           file: path,
           line,
@@ -1159,6 +1178,16 @@ export async function typecheck(
           message: `Could not find a declaration file for module '${specifier}'. '${asTypeScriptPath(target)}' implicitly has an 'any' type.`,
         });
       }
+    }
+    // An `@ts-expect-error` that TS7016 would have used isn't unused, as
+    // TypeScript reports it here, where nothing reads the import.
+    if (expected.size > 0) {
+      const kept = diagnostics.filter(
+        (d) => !(d.code === "TS2578" && expected.has(`${d.file}:${d.line}`)),
+      );
+      diagnostics.length = 0;
+      diagnostics.push(...kept);
+    }
   }
   // TypeScript fails a tsconfig that includes nothing, and svelte-check
   // reports it; one that includes no components, svelte-check warns of.
@@ -1278,8 +1307,16 @@ interface Facts {
   stat: string;
   /** Its imports' specifiers, in TypeScript's order. */
   specifiers?: string[];
-  /** Its `.svelte` imports, by line and column. */
-  svelteImports?: (readonly [string, number, number])[];
+  /**
+   * Its `.svelte` imports, by line and column, and the `@ts-ignore` or
+   * `@ts-expect-error` on the line before, if any.
+   */
+  svelteImports?: (readonly [
+    string,
+    number,
+    number,
+    "ignore" | "expect-error" | null,
+  ])[];
 }
 
 /** Facts about files, read once per change of a file's size or time. */

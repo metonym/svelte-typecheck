@@ -104,6 +104,12 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // Without `allowJs`, an import of a JS component has no declaration.
+  it("matches svelte-check on imports of a JS component without allowJs", () => {
+    const cwd = join(root, "tests/fixtures-untyped");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check's message rewrites and filters", () => {
     const cwd = join(root, "tests/fixtures-filters");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));

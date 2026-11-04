@@ -48,6 +48,8 @@ interface RawConfig {
     paths?: Record<string, string[]>;
     checkJs?: boolean;
     allowJs?: boolean;
+    skipLibCheck?: boolean;
+    moduleResolution?: string;
     outDir?: string;
     declarationDir?: string;
   };
@@ -64,6 +66,8 @@ interface Inputs {
   paths?: Record<string, string[]>;
   checkJs?: boolean;
   allowJs?: boolean;
+  skipLibCheck?: boolean;
+  moduleResolution?: string;
   /** `include` and `exclude` as written, relative to the tsconfig read first. */
   includeSpecs?: string[];
   excludeSpecs?: string[];
@@ -114,6 +118,8 @@ function readInputs(path: string, read: string[] = []): Inputs {
       rootDirs: absolute(options?.rootDirs),
       checkJs: options?.checkJs,
       allowJs: options?.allowJs,
+      skipLibCheck: options?.skipLibCheck,
+      moduleResolution: options?.moduleResolution,
       includeSpecs: config.include,
       excludeSpecs: config.exclude,
       outDir: options?.outDir && resolve(dir, options.outDir),
@@ -207,6 +213,13 @@ export interface Project {
   checkJs: boolean;
   /** Whether a JS component is in the program at all, or untyped. */
   allowJs: boolean;
+  /** Whether a declaration file's errors go unreported. */
+  skipLibCheck: boolean;
+  /**
+   * The package's `exports`, as `paths`: what an import of its own name
+   * finds, once `paths` finds nothing.
+   */
+  selfExports: Record<string, string[]>;
   /** The tsconfig's own `include` and `exclude`, as written. */
   raw: { include?: string[]; exclude?: string[] };
   /**
@@ -256,6 +269,8 @@ export function projectOf(options: ProjectOptions): Project {
       // svelte-check's options with no tsconfig.
       checkJs: true,
       allowJs: true,
+      skipLibCheck: true,
+      selfExports: {},
       raw: {},
       reports: () => false,
     };
@@ -308,6 +323,11 @@ export function projectOf(options: ProjectOptions): Project {
     checkJs: inputs.checkJs ?? false,
     // A jsconfig.json allows JS by default.
     allowJs: inputs.allowJs ?? basename(tsconfig) === "jsconfig.json",
+    skipLibCheck: inputs.skipLibCheck ?? false,
+    // Resolution from before `exports` doesn't read them.
+    selfExports: LEGACY_RESOLUTION.test(inputs.moduleResolution ?? "")
+      ? {}
+      : exportsOf(dirname(tsconfig)),
     raw,
     inputSpecs:
       inputs.files || raw.references
@@ -346,6 +366,52 @@ function importsOf(dir: string): Record<string, string[]> {
   }
   return paths;
 }
+
+/** A package's `exports` under its own name, in `paths`' shape. */
+function exportsOf(dir: string): Record<string, string[]> {
+  const path = findUp(dir, "package.json");
+  if (!path) return {};
+  let name: unknown;
+  let exports: unknown;
+  try {
+    ({ name, exports } = JSON.parse(readFileSync(path, "utf-8")) as {
+      name?: unknown;
+      exports?: unknown;
+    });
+  } catch {
+    return {};
+  }
+  if (typeof name !== "string" || exports == null) return {};
+  // Subpaths start with `.`; anything else is one entry's conditions.
+  const subpaths =
+    typeof exports === "object" &&
+    !Array.isArray(exports) &&
+    Object.keys(exports).some((key) => key.startsWith("."))
+      ? (exports as Record<string, unknown>)
+      : { ".": exports };
+  const paths: Record<string, string[]> = {};
+  for (const [key, value] of Object.entries(subpaths)) {
+    if (!key.startsWith(".")) continue;
+    const targets = exportTargets(value)
+      .filter((target) => target.startsWith("./"))
+      .map((target) => resolve(dirname(path), target));
+    if (targets.length > 0)
+      paths[key === "." ? name : `${name}/${key.slice(2)}`] = targets;
+  }
+  return paths;
+}
+
+/** An `exports` entry's targets, in the order TypeScript tries them. */
+function exportTargets(value: unknown): string[] {
+  if (typeof value === "string") return [value];
+  if (Array.isArray(value)) return value.flatMap(exportTargets);
+  if (!value || typeof value !== "object") return [];
+  return Object.entries(value).flatMap(([condition, target]) =>
+    EXPORT_CONDITIONS.has(condition) ? exportTargets(target) : [],
+  );
+}
+const EXPORT_CONDITIONS = new Set(["types", "import", "default"]);
+const LEGACY_RESOLUTION = /^(node|node10|classic)$/i;
 
 /** An `imports` entry's target, preferring its `types` condition. */
 function importTarget(value: unknown): string | undefined {
