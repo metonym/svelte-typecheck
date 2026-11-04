@@ -199,7 +199,7 @@ const JS_EXTENSION = /\.([cm]?)js(x?)$/;
  */
 function programOrder(
   roots: string[],
-  read: (path: string) => string,
+  specifiersOf: (path: string) => string[],
   resolveImport: (from: string, specifier: string) => string | undefined,
   /** Each file's imports, filled in as it's read. */
   imports: Map<string, Set<string>> = new Map(),
@@ -209,12 +209,8 @@ function programOrder(
   const visit = (path: string) => {
     if (order.has(path)) return;
     order.set(path, Number.POSITIVE_INFINITY);
-    const text = read(path);
-    for (const m of [
-      ...text.matchAll(STATIC_IMPORT),
-      ...text.matchAll(DYNAMIC_IMPORT),
-    ]) {
-      const target = resolveImport(path, m[1] ?? "");
+    for (const specifier of specifiersOf(path)) {
+      const target = resolveImport(path, specifier);
       if (!target) continue;
       imports.set(path, (imports.get(path) ?? new Set()).add(target));
       visit(target);
@@ -924,6 +920,9 @@ export async function typecheck(
     return { endLine: end.line, endColumn: end.column };
   };
   const diagnostics: Diagnostic[] = [];
+  // What's read from each project file to order and report diagnostics,
+  // kept by its size and modification time for the next run.
+  const fileFacts = await factsCache(join(outDir, FACTS_CACHE), incremental);
   const dropped: Diagnostic[] = [];
   const seen = new Set<string>();
   for (const d of raw) {
@@ -1083,45 +1082,47 @@ export async function typecheck(
       [root, ...project.rootDirs],
       project.paths,
     );
-    /** Each TS source's text, and where its imports can be. */
-    const tsSources: [string, string, [number, number][]][] = [];
-    for (const [i, path] of files.entries()) {
-      const component = texts[i] ?? "";
-      if (!TS_SCRIPT.test(component)) continue;
-      const lexed = lexComponent(component);
-      tsSources.push([
-        path,
-        component,
-        [lexed.module, lexed.instance].flatMap((script) =>
-          script ? [[script.content.start, script.content.end]] : [],
-        ),
-      ]);
-    }
-    for (const path of listedFiles)
-      if (TS_MODULE.test(path)) {
-        const script = readFileSync(path, "utf-8");
-        tsSources.push([path, script, [[0, script.length]]]);
-      }
-    for (const [path, content, ranges] of tsSources) {
+    /** A TS source's `.svelte` imports, by line and column. */
+    const svelteImportsOf = (content: string, component: boolean) => {
+      if (!content.includes(".svelte")) return [];
+      const lexed = component ? lexComponent(content) : undefined;
+      const ranges = lexed
+        ? [lexed.module, lexed.instance].flatMap((script) =>
+            script ? [[script.content.start, script.content.end] as const] : [],
+          )
+        : [[0, content.length] as const];
       const locate = createLocator(content);
-      for (const [start, end] of ranges)
-        for (const statement of lexImportsExports(content.slice(start, end))) {
+      return ranges.flatMap(([start, end]) =>
+        lexImportsExports(content.slice(start, end)).flatMap((statement) => {
           const specifier = statement.source?.value;
-          if (!specifier?.endsWith(".svelte")) continue;
-          const target = resolveImport(path, specifier);
-          if (!target || !untyped.has(target)) continue;
+          if (!specifier?.endsWith(".svelte")) return [];
           const at = locate.position(start + (statement.source?.start ?? 0));
-          diagnostics.push({
-            file: path,
-            line: at.line,
-            column: at.column,
-            severity: "error",
-            source: "ts",
-            code: "TS7016",
-            message: `Could not find a declaration file for module '${specifier}'. '${asTypeScriptPath(target)}' implicitly has an 'any' type.`,
-          });
-        }
-    }
+          return [[specifier, at.line, at.column] as const];
+        }),
+      );
+    };
+    const tsSources = [
+      ...files.filter((_, i) => TS_SCRIPT.test(texts[i] ?? "")),
+      ...listedFiles.filter((path) => TS_MODULE.test(path)),
+    ];
+    for (const path of tsSources)
+      for (const [specifier, line, column] of fileFacts.of(
+        path,
+        "svelteImports",
+        (content) => svelteImportsOf(content, path.endsWith(".svelte")),
+      )) {
+        const target = resolveImport(path, specifier);
+        if (!target || !untyped.has(target)) continue;
+        diagnostics.push({
+          file: path,
+          line,
+          column,
+          severity: "error",
+          source: "ts",
+          code: "TS7016",
+          message: `Could not find a declaration file for module '${specifier}'. '${asTypeScriptPath(target)}' implicitly has an 'any' type.`,
+        });
+      }
   }
   // svelte-check warns when a tsconfig includes no components.
   if (project.tsconfig && !options.components && files.length === 0)
@@ -1159,7 +1160,12 @@ export async function typecheck(
         .sort(byFolder),
     ],
     // Generated code, whose imports include SvelteKit's `./$types`.
-    (file) => readFileSync(generatedOf.get(file) ?? file, "utf-8"),
+    (file) =>
+      fileFacts.of(generatedOf.get(file) ?? file, "specifiers", (code) =>
+        [...code.matchAll(STATIC_IMPORT), ...code.matchAll(DYNAMIC_IMPORT)].map(
+          (m) => m[1] ?? "",
+        ),
+      ),
     importResolver([root, ...project.rootDirs], project.paths),
     imports,
   );
@@ -1203,6 +1209,7 @@ export async function typecheck(
     },
   };
   const inputs = [...order.keys()].filter((path) => !under(path, outDir));
+  if (incremental) await fileFacts.save();
   if (incremental)
     await writeFile(
       resultPath,
@@ -1214,6 +1221,48 @@ export async function typecheck(
       } satisfies ResultCache),
     );
   return result;
+}
+
+const FACTS_CACHE = "files.json";
+interface Facts {
+  /** Its size and modification time. */
+  stat: string;
+  /** Its imports' specifiers, in TypeScript's order. */
+  specifiers?: string[];
+  /** Its `.svelte` imports, by line and column. */
+  svelteImports?: (readonly [string, number, number])[];
+}
+
+/** Facts about files, read once per change of a file's size or time. */
+async function factsCache(path: string, enabled: boolean) {
+  const entries: Record<string, Facts> = enabled
+    ? await readFile(path, "utf-8")
+        .then((text) => {
+          const cache = JSON.parse(text) as {
+            format: number;
+            entries: Record<string, Facts>;
+          };
+          return cache.format === CACHE_FORMAT ? cache.entries : {};
+        })
+        .catch(() => ({}))
+    : {};
+  const used: Record<string, Facts> = {};
+  return {
+    of<K extends "specifiers" | "svelteImports">(
+      file: string,
+      kind: K,
+      compute: (text: string) => NonNullable<Facts[K]>,
+    ): NonNullable<Facts[K]> {
+      const stat = statsOf([file])[0] ?? "";
+      let facts = used[file] ?? entries[file];
+      if (facts?.stat !== stat) facts = { stat };
+      used[file] = facts;
+      facts[kind] ??= compute(readFileSync(file, "utf-8"));
+      return facts[kind] as NonNullable<Facts[K]>;
+    },
+    save: () =>
+      writeFile(path, JSON.stringify({ format: CACHE_FORMAT, entries: used })),
+  };
 }
 
 /** Each file's size and modification time, or that it's missing. */
