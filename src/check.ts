@@ -1,13 +1,15 @@
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { lexComponent, lexImportsExports } from "sveast";
+import { version as TOOL_VERSION } from "../package.json";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
 import { preprocessedDiagnostics, svelteDirOf } from "./compiler.ts";
-import { svelteConfigOf } from "./config.ts";
+import { configFingerprint, svelteConfigOf } from "./config.ts";
 import { emit } from "./emit.ts";
 import { glob } from "./glob.ts";
 import { isKitFile, isKitRouteFile, kitFile } from "./kit.ts";
@@ -19,7 +21,12 @@ import {
   relativeTo,
   scriptsOf,
 } from "./project.ts";
-import type { Diagnostic, TypecheckOptions, TypecheckResult } from "./types.ts";
+import type {
+  CompilerDiagnostic,
+  Diagnostic,
+  TypecheckOptions,
+  TypecheckResult,
+} from "./types.ts";
 
 /** `path(line,col): error TSxxxx: message`, as tsc, tsgo, tsrs and `bun check` print. */
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
@@ -54,6 +61,15 @@ const STORE_ERROR = /^TS(2769|2345)$/;
 const REACTIVE_NOISE = /^TS(7028|2695)$/;
 
 const SHIMS = fileURLToPath(new URL("./shims/", import.meta.url));
+/** The compiler pass's last results, by component. */
+const COMPILE_CACHE = "compile-cache.json";
+interface CompileCache {
+  /** svelte-typecheck's version, Svelte's and the config's. */
+  fingerprint: string;
+  /** Diagnostics, by a hash of a component's name and text. */
+  entries: Record<string, CompilerDiagnostic[]>;
+}
+const hash = (text: string) => createHash("sha1").update(text).digest("hex");
 /** The files the last incremental run wrote. */
 const MANIFEST = "manifest.json";
 
@@ -645,26 +661,64 @@ export async function typecheck(
       ).then((output) => ({ output, at: performance.now() }))
     : Promise.resolve({ output: "", at: emitted });
   const compiled: Diagnostic[] = [];
-  const svelteConfig = sources.has("svelte")
-    ? await svelteConfigOf(
-        options.config
-          ? dirname(resolve(workspace, options.config))
-          : workspace,
-        options.config ? resolve(workspace, options.config) : undefined,
-      )
+  const configDir = options.config
+    ? dirname(resolve(workspace, options.config))
+    : workspace;
+  const configFile = options.config
+    ? resolve(workspace, options.config)
     : undefined;
-  const perFile = sources.has("svelte")
-    ? await Promise.all(
-        files.map((path, i) =>
+  // The compiler pass's results by component, for an incremental run: a
+  // component whose text, Svelte, config and svelte-typecheck are the
+  // same compiles the same. With every one cached, the config, which can
+  // mean loading Vite, isn't loaded either.
+  const cachePath = join(outDir, COMPILE_CACHE);
+  const fingerprint = hash(
+    JSON.stringify([
+      TOOL_VERSION,
+      version,
+      configFingerprint(configDir, configFile),
+    ]),
+  );
+  const cache: CompileCache = incremental
+    ? ((await readFile(cachePath, "utf-8")
+        .then((text) => JSON.parse(text) as CompileCache)
+        .then((c) => (c.fingerprint === fingerprint ? c : undefined))
+        .catch(() => undefined)) ?? { fingerprint, entries: {} })
+    : { fingerprint, entries: {} };
+  const keys = files.map((path, i) =>
+    hash(`${relative(cwd, path)}\0${texts[i] ?? ""}`),
+  );
+  const perFile: CompilerDiagnostic[][] = [];
+  if (sources.has("svelte")) {
+    const missing = files
+      .map((_, i) => i)
+      .filter((i) => cache.entries[keys[i] ?? ""] === undefined);
+    if (missing.length > 0) {
+      const svelteConfig = await svelteConfigOf(configDir, configFile);
+      const fresh = await Promise.all(
+        missing.map((i) =>
           preprocessedDiagnostics(
             texts[i] ?? "",
-            relative(cwd, path),
+            relative(cwd, files[i] ?? ""),
             svelteDir,
-            svelteConfig ?? { compilerOptions: {} },
+            svelteConfig,
           ),
         ),
-      )
-    : [];
+      );
+      for (const [n, i] of missing.entries())
+        cache.entries[keys[i] ?? ""] = fresh[n] ?? [];
+    }
+    for (const key of keys) perFile.push(cache.entries[key] ?? []);
+    if (incremental) {
+      const kept = Object.fromEntries(
+        keys.map((key) => [key, cache.entries[key] ?? []]),
+      );
+      await writeFile(
+        cachePath,
+        JSON.stringify({ fingerprint, entries: kept } satisfies CompileCache),
+      );
+    }
+  }
   for (const [i, path] of files.entries())
     for (const d of perFile[i] ?? []) {
       const level = options.compilerWarnings?.[d.code];

@@ -54,6 +54,33 @@ export async function svelteConfigOf(
   };
 }
 
+/**
+ * What the config found from `dir` (or `explicit`) depends on: every
+ * vite.config and svelte.config from there up, each path and its text.
+ * Cheap to read, so a cache of the compiler pass can tell whether the
+ * config changed without loading it.
+ */
+export function configFingerprint(dir: string, explicit?: string): string {
+  const parts: string[] = [];
+  const add = (path: string) => {
+    try {
+      parts.push(path, readFileSync(path, "utf-8"));
+    } catch {
+      // Gone between the check and the read.
+    }
+  };
+  if (explicit) add(explicit);
+  else
+    for (let at = dir; ; at = dirname(at)) {
+      for (const name of [...VITE_CONFIGS, ...SVELTE_CONFIGS]) {
+        const path = join(at, name);
+        if (existsSync(path)) add(path);
+      }
+      if (dirname(at) === at) break;
+    }
+  return JSON.stringify(parts);
+}
+
 const firstIn = (dir: string, names: string[]) =>
   names.map((name) => join(dir, name)).find((path) => existsSync(path));
 
