@@ -26,6 +26,7 @@ import { Output } from "./output.ts";
 const GENERIC_PARAM =
   /^(\w+)(?:\s+extends\s+([\s\S]+?))?(?:\s*=\s*([\s\S]+))?$/;
 const TS_LANG = /^(ts|typescript)$/;
+const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 const OWNS_TEMPLATE = /@(typedef|callback)\b/;
 const JSDOC_BLOCK = /\/\*\*[\s\S]*?\*\//g;
 const CALL_PARENS = /\s*\(\s*\)$/;
@@ -41,6 +42,10 @@ const NUMBER_ATTRIBUTES = new Set(
     " ",
   ),
 );
+
+/** An object key as written: bare when it can be, as a message prints it. */
+const keyOf = (name: string) =>
+  IDENTIFIER.test(name) ? name : JSON.stringify(name);
 
 /** A generated `$$bindings` check for a component's `bind:`, and the directive. */
 interface BindingCheck {
@@ -356,14 +361,18 @@ export function emit(
 
   // --- svelte2tsx's typing interfaces: `$$Props`, `$$Events`, `$$Slots`.
   const typed = new Set<string>();
+  /** Where `$$Props` is declared: an error in checking it points there. */
+  let propsDeclaredAt = 0;
   for (const s of body) {
     const d = s.type === "ExportNamedDeclaration" ? s.declaration : s;
     if (
       (d?.type === "TSInterfaceDeclaration" ||
         d?.type === "TSTypeAliasDeclaration") &&
       TYPING_INTERFACES.has(d.id?.name)
-    )
+    ) {
       typed.add(d.id.name);
+      if (d.id.name === "$$Props") propsDeclaredAt = d.id.start;
+    }
   }
   const strictEvents =
     typed.has("$$Events") ||
@@ -1197,6 +1206,25 @@ export function emit(
     if (locals.length > 0) out.raw(`;${locals.map((l) => `${l};`).join("")}`);
   };
 
+  /**
+   * A top-level variable's type annotation, as written. A prop is typed by
+   * it rather than `typeof`, which would narrow it to its initial value.
+   */
+  const annotationOf = (name: string): string | undefined => {
+    for (const s of body) {
+      const d = s.type === "ExportNamedDeclaration" ? s.declaration : s;
+      if (d?.type !== "VariableDeclaration") continue;
+      for (const decl of d.declarations) {
+        const annotation =
+          decl.id.type === "Identifier" && decl.id.name === name
+            ? decl.id.typeAnnotation?.typeAnnotation
+            : undefined;
+        if (annotation) return source.slice(annotation.start, annotation.end);
+      }
+    }
+    return;
+  };
+
   /** Copies [from, to), leaving out `@template` blocks. */
   const copyGap = (from: number, to: number) => {
     let at = from;
@@ -1284,7 +1312,11 @@ export function emit(
             for (const name of d.declarations
               ? d.declarations.flatMap((x: Node) => idsOf(x.id))
               : [d.id?.name])
-              if (name) exportsOf.push([name, name]);
+              if (name) {
+                exportsOf.push([name, name]);
+                // A parent can pass an exported `const` or function too.
+                if (!runes) props.push({ name, local: name, optional: true });
+              }
         } else
           for (const spec of s.specifiers) {
             const binding = scopes.instance.get(spec.local.name);
@@ -1294,6 +1326,7 @@ export function emit(
                 name: spec.exported.name,
                 local: spec.local.name,
                 optional: true,
+                type: annotationOf(spec.local.name),
               });
           }
       } else if (s.type === "LabeledStatement" && s.label.name === "$") {
@@ -1384,7 +1417,7 @@ export function emit(
     return `__sveltets_2_unwrapArr(${source.slice(block.expression.start, block.expression.end)})`;
   };
   const entries = (pairs: [string, string][]) =>
-    pairs.map(([k, v]) => `${JSON.stringify(k)}: ${v}`).join(", ");
+    pairs.map(([k, v]) => `${keyOf(k)}: ${v}`).join(", ");
   if (runes) {
     runesExport();
     return {
@@ -1399,11 +1432,34 @@ export function emit(
     };
   }
   // `$$Props` is the props' type, once it agrees with the `export let`s.
-  const propsType = typed.has("$$Props")
-    ? `{ ...__sveltets_2_ensureRightProps<{${props.map((p) => `${JSON.stringify(p.name)}${p.optional ? "?" : ""}: ${p.type ?? `typeof ${p.local}`}`).join(", ")}}>(__sveltets_2_any("") as $$Props) } as $$Props`
-    : `{${entries(props.map((p) => [p.name, p.local]))}}`;
+  /** The props' type as declared: in order, optional with a default. */
+  const declaredProps = `{${props.map((p) => `${keyOf(p.name)}${p.optional ? "?" : ""}: ${p.type ?? `typeof ${p.local}`}`).join(", ")}}`;
+  out.raw("return { props: ");
+  if (typed.has("$$Props")) {
+    out.raw(`{ ...__sveltets_2_ensureRightProps<${declaredProps}>(`);
+    out.from(propsDeclaredAt, () => out.raw('__sveltets_2_any("") as $$Props'));
+    out.raw(") } as $$Props");
+  } else {
+    out.raw(`{${entries(props.map((p) => [p.name, p.local]))}}`);
+    if (isTs) out.raw(` as ${declaredProps}`);
+  }
+  const exposed = [
+    ...(accessors
+      ? props.map((p): [string, string] => [
+          p.name,
+          p.type ?? `typeof ${p.local}`,
+        ])
+      : []),
+    ...exportsOf.map(([k, v]): [string, string] => [k, `typeof ${v}`]),
+  ];
+  const exposedType = `{${exposed.map(([k, type]) => `${keyOf(k)}: ${type}`).join(", ")}}`;
+  let exportsValue = "{}";
+  if (exposed.length > 0)
+    exportsValue = isTs
+      ? `{} as any as ${exposedType}`
+      : `/** @type {${exposedType}} */ ({})`;
   out.raw(
-    `return { props: ${propsType}, exports: {${entries([...(accessors ? props.map((p): [string, string] => [p.name, p.local]) : []), ...exportsOf])}}, bindings: "", slots: ${typed.has("$$Slots") ? "{} as unknown as $$Slots, __slots: {" : "{"}`,
+    `, exports: ${exportsValue}, bindings: "", slots: ${typed.has("$$Slots") ? "{} as unknown as $$Slots, __slots: {" : "{"}`,
   );
   // A slot's props, as `let:` reads them; `any` for a value the markup scopes.
   for (const [name, attributes] of slots) {
@@ -1454,10 +1510,14 @@ export function emit(
   const rendered = strictEvents
     ? renderCall
     : `__sveltets_2_with_any_event(${renderCall})`;
-  // `$$Props` says which props are optional.
-  const withProps = typed.has("$$Props")
-    ? rendered
-    : `__sveltets_2_partial${anyProp ? "_with_any" : ""}(${optional.length > 0 ? `[${optional.join(",")}], ` : ""}${rendered})`;
+  // `$$Props`, or in TypeScript the props' declared type, says which props
+  // are optional; in JS, the props with a default.
+  let withProps = rendered;
+  if (isTs) {
+    if (anyProp && !typed.has("$$Props"))
+      withProps = `__sveltets_2_with_any(${rendered})`;
+  } else if (!typed.has("$$Props"))
+    withProps = `__sveltets_2_partial${anyProp ? "_with_any" : ""}(${optional.length > 0 ? `[${optional.join(",")}], ` : ""}${rendered})`;
   const hasSlots = slots.size > 0 || typed.has("$$Slots");
   if (isTs && typeParams.length > 0 && svelte >= 4) {
     // A generic component's type takes the parameters a use infers.
