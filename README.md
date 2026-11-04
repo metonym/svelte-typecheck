@@ -66,13 +66,24 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 | `--color`, `--no-color`       | Force color on or off                                                                                                                                                          |
 | `--tsgo`                      | Check with tsgo                                                                                                                                                                |
 
-| Its own               |                                                                                                 |
-| :-------------------- | :---------------------------------------------------------------------------------------------- |
-| `--checker <name>`    | `tsc` (default: your `typescript`), `tsgo`, `tsrs` or `bun`                                     |
-| `--components <glob>` | Components to check, relative to the workspace, instead of the tsconfig's; repeatable           |
-| `--out-dir <dir>`     | Where the generated code goes (default: `node_modules/.cache/svelte-typecheck/<workspace>`)     |
-| `--no-declarations`   | Resolve component imports to their own `.svelte.d.ts`, as a library's generated declarations do |
-| `--svelte <dir>`      | The Svelte install to check against, e.g. a Svelte 4 test harness's                             |
+| Its own               |                                                                                                                                                 |
+| :-------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--checker <name>`    | `tsc` (default: your `typescript`), `tsgo`, `tsrs` or `bun`                                                                                     |
+| `--components <glob>` | Components to check, relative to the workspace, instead of the tsconfig's; repeatable                                                           |
+| `--out-dir <dir>`     | Where the generated code goes (default: `node_modules/.cache/svelte-typecheck/<workspace>`)                                                     |
+| `--no-declarations`   | Type component imports only by their own `.svelte.d.ts`, never the generated code                                                               |
+| `--svelte <dir>`      | The Svelte install to check against, e.g. a Svelte 4 test harness's                                                                             |
+| `--changed`           | Report only the files changed from `HEAD` (and untracked ones), and the files that import them; see [Beyond svelte-check](#beyond-svelte-check) |
+| `--since <ref>`       | As `--changed`, from where the branch left `<ref>`: `--since origin/main`                                                                       |
+
+## Beyond svelte-check
+
+What svelte-typecheck does that svelte-check doesn't:
+
+|                               |                                                                                                                                                                                                                                                                 |
+| :---------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Any checker, TypeScript 7** | Checks with your project's `tsc`, including TypeScript 7's native one, or tsgo, tsrs or `bun check`; svelte-check needs TypeScript 5 or 6's JS API. See [Bring your own checker](#bring-your-own-checker).                                                      |
+| **Changed files only**        | `--changed` and `--since <ref>` report the files git sees changed and the files that import them, whose errors a change can cause. The whole program is still checked, so the errors are the same ones, fewer to read: for a pre-commit hook, or a PR's CI run. |
 
 ### Differences from svelte-check
 

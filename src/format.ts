@@ -188,6 +188,10 @@ export function writer(
         `${d.severity === "error" ? c.red("Error") : c.yellow("Warn")}: ${message}\n\n`,
       );
     },
+    /** A line svelte-check doesn't print, so only in the human formats. */
+    note(text: string) {
+      if (!machine) write(`${text}\n`);
+    },
     completion(summary: Summary, watching = false) {
       const { files, errors, warnings, filesWithProblems } = summary;
       if (machine) {

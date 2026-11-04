@@ -52,6 +52,12 @@ export interface TypecheckOptions {
    * let `tsc`, tsgo and tsrs reuse their last run (`--incremental`).
    */
   incremental?: boolean;
+  /**
+   * Report only these files' diagnostics, and those of the files that
+   * import them, relative to `cwd`. The whole program is still checked.
+   * `--changed` and `--since` pass git's changed files.
+   */
+  only?: string[];
 }
 
 /** A kind of check, as svelte-check's `--diagnostic-sources` names them. */
@@ -82,6 +88,8 @@ export interface TypecheckResult {
   tsconfig?: string;
   /** How many components were checked. */
   components: number;
+  /** Diagnostics left out by `only`. */
+  skipped: number;
   /** Errors in generated code, which map to no source. */
   dropped: Diagnostic[];
   /** Components that failed to parse. */
