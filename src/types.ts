@@ -49,7 +49,7 @@ export interface TypecheckOptions {
   compilerWarnings?: Record<string, "ignore" | "error">;
   /**
    * Keep the generated code between runs: rewrite only what changed, and
-   * let `tsc`, tsgo and tsrs reuse their last run (`--incremental`).
+   * let `tsc`, tsgo and tsrs reuse their last run. Default `true`.
    */
   incremental?: boolean;
   /**

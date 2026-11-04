@@ -353,7 +353,7 @@ export async function typecheck(
     );
 
   const started = performance.now();
-  const incremental = options.incremental ?? false;
+  const incremental = options.incremental ?? true;
   // An incremental run keeps the last run's code and rewrites what changed.
   const previous = incremental
     ? await readFile(join(outDir, MANIFEST), "utf-8")
@@ -604,6 +604,12 @@ export async function typecheck(
             : {}),
           allowArbitraryExtensions: true,
           noEmit: true,
+          // Ours, never the project's: a tsconfig's own `incremental` and
+          // `tsBuildInfoFile` would have the checker write this program's
+          // build info over the project's.
+          composite: false,
+          incremental,
+          ...(incremental ? { tsBuildInfoFile: "./tsbuildinfo" } : {}),
         },
         // Listed rather than globbed: `include` skips dot folders and
         // `node_modules`, where the generated code lives by default. In
@@ -633,17 +639,7 @@ export async function typecheck(
   const checking = sources.has("js")
     ? run(
         command.command,
-        [
-          ...command.prefix,
-          ...checkerArgs(checker, tsconfig),
-          ...(incremental && checker !== "bun"
-            ? [
-                "--incremental",
-                "--tsBuildInfoFile",
-                join(outDir, "tsbuildinfo"),
-              ]
-            : []),
-        ],
+        [...command.prefix, ...checkerArgs(checker, tsconfig)],
         cwd,
         command.shell,
       ).then((output) => ({ output, at: performance.now() }))
