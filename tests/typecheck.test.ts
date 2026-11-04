@@ -158,6 +158,30 @@ describe("typecheck", () => {
     ).toEqual(["props.ts:2 TS2322", "util.js:2 TS2322"]);
   }, 30_000);
 
+  it("reads a JSDoc cast in a template expression, as svelte-check does", async () => {
+    const dir = join(root, "tests/.tmp/template-cast");
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "jsconfig.json"),
+      JSON.stringify({
+        compilerOptions: { strict: true, checkJs: true, allowJs: true },
+        include: ["*.svelte"],
+      }),
+    );
+    writeFileSync(
+      join(dir, "Cast.svelte"),
+      '<script>\n  /** @type {string | number} */\n  export let value = "a";\n</script>\n\n<p>{/** @type {string} */ (value).length}</p>\n<p title={/** @type {string} */ (value).trim()}></p>\n',
+    );
+    const { diagnostics } = await typecheck({
+      cwd: dir,
+      diagnosticSources: ["js"],
+      checker: "bun",
+      incremental: false,
+    });
+    expect(diagnostics).toEqual([]);
+  }, 30_000);
+
   it("runs svelte.config's preprocessors first, positions mapped back", async () => {
     const { diagnostics } = await typecheck({
       cwd: root,

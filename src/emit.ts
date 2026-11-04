@@ -161,6 +161,51 @@ export interface TsInJs {
  * parse, throws the parser's error.
  */
 function parseComponent(source: string): { ast: AnyNode; tsInJs: TsInJs[] } {
+  const parsed = parseComponentSource(source);
+  includeLeadingCasts(parsed.ast.fragment, source);
+  return parsed;
+}
+
+/** A JSDoc `@type` or `@satisfies` comment, and the space after it, ending the text. */
+const LEADING_CAST =
+  /\/\*\*(?:(?!\*\/)[\s\S])*@(?:type|satisfies)\b(?:(?!\*\/)[\s\S])*\*\/\s*$/;
+const TEMPLATE_EXPRESSIONS = ["expression", "test"];
+
+/**
+ * A JSDoc cast in markup, `{/** @type {T} *\/ (value).x}`, comes before
+ * the expression's start, the parenthesis, so code copied from the start
+ * would drop it. Each template expression starts at its cast instead, as
+ * svelte2tsx keeps it.
+ */
+function includeLeadingCasts(node: AnyNode, source: string): void {
+  if (!node || typeof node !== "object") return;
+  if (Array.isArray(node)) {
+    for (const child of node) includeLeadingCasts(child, source);
+    return;
+  }
+  for (const [key, value] of Object.entries(node)) {
+    if (!value || typeof value !== "object" || key === "parent") continue;
+    if (TEMPLATE_EXPRESSIONS.includes(key)) {
+      const expression: AnyNode = value;
+      if (
+        typeof expression.start === "number" &&
+        source[expression.start] === "("
+      ) {
+        const cast = LEADING_CAST.exec(
+          source.slice(Math.max(0, expression.start - 1000), expression.start),
+        );
+        if (cast) expression.start -= cast[0].length;
+      }
+      continue;
+    }
+    includeLeadingCasts(value, source);
+  }
+}
+
+function parseComponentSource(source: string): {
+  ast: AnyNode;
+  tsInJs: TsInJs[];
+} {
   try {
     return { ast: parse(source, { css: false }), tsInJs: [] };
   } catch (error) {
