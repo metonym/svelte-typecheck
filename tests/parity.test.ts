@@ -152,6 +152,38 @@ describe("svelte-check parity, machine output", () => {
     60_000,
   );
 
+  it("places an error on a `svelte:element` where svelte-check does", () => {
+    const cwd = join(root, "tests/.tmp/svelte-element");
+    mkdirSync(cwd, { recursive: true });
+    writeFileSync(
+      join(cwd, "jsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          checkJs: true,
+          allowJs: true,
+          module: "esnext",
+          moduleResolution: "bundler",
+        },
+        include: ["*.svelte"],
+      }),
+    );
+    writeFileSync(
+      join(cwd, "Any.svelte"),
+      [
+        "<script>",
+        '  /** @template {keyof HTMLElementTagNameMap} [Tag="div"] */',
+        "  /** @type {Tag} */",
+        '  export let tag = /** @type {Tag} */ ("div");',
+        "</script>",
+        "",
+        "<svelte:element this={tag}><slot /></svelte:element>",
+        "",
+      ].join("\n"),
+    );
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check with preprocessors", () => {
     const cwd = join(root, "tests/fixtures-preprocess");
     // svelte-check's css source (not supported) flags the custom style.

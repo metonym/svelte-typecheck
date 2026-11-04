@@ -707,27 +707,32 @@ export function emit(
       out.raw(");");
     }
     out.raw(`const ${id} = `);
-    out.from(node.start + 1, () => {
-      out.raw("svelteHTML.createElement(");
-      tag();
-      out.raw(", ");
-      if (actions.length > 0)
-        out.raw(`__sveltets_2_union(${actions.join(",")}), `);
-      out.from(objectAt, () => out.raw("{"));
-      for (const a of node.attributes ?? []) {
-        const k = attributeKey(a);
-        if (k !== null && seen.has(k)) repeats.push(a);
-        else {
-          if (k !== null) seen.add(k);
-          elementAttribute(a, inComponent);
+    // svelte2tsx maps the element to its name, but `<svelte:element>` to
+    // its `<`.
+    out.from(
+      node.type === "SvelteElement" ? node.start : node.start + 1,
+      () => {
+        out.raw("svelteHTML.createElement(");
+        tag();
+        out.raw(", ");
+        if (actions.length > 0)
+          out.raw(`__sveltets_2_union(${actions.join(",")}), `);
+        out.from(objectAt, () => out.raw("{"));
+        for (const a of node.attributes ?? []) {
+          const k = attributeKey(a);
+          if (k !== null && seen.has(k)) repeats.push(a);
+          else {
+            if (k !== null) seen.add(k);
+            elementAttribute(a, inComponent);
+          }
         }
-      }
-      // `<svelte:boundary>`'s snippets are its props.
-      if (boundary)
-        for (const c of node.fragment.nodes)
-          if (c.type === "SnippetBlock") snippetProp(c);
-      out.raw("})");
-    });
+        // `<svelte:boundary>`'s snippets are its props.
+        if (boundary)
+          for (const c of node.fragment.nodes)
+            if (c.type === "SnippetBlock") snippetProp(c);
+        out.raw("})");
+      },
+    );
     out.raw(";");
     for (const a of repeats)
       out.from(objectAt, () => {
