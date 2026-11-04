@@ -19,18 +19,14 @@ describe("emit", () => {
 
   it("drops errors in code it generates", () => {
     const { out } = emit("<script>\n  let a = 1;\n</script>\n");
-    expect(out.toSource(out.code.indexOf("__sveltets_2_allPropsType"))).toBe(
-      null,
-    );
+    expect(out.toSource(out.code.indexOf("$$check.props"))).toBe(null);
   });
 
   it("declares a reactive assignment with its value's type", () => {
     const { out } = emit(
       `<script lang="ts">\n  export let a = 1;\n  $: double = a * 2;\n</script>\n`,
     );
-    expect(out.code).toContain(
-      "let double = __sveltets_2_invalidate(() => (a * 2));",
-    );
+    expect(out.code).toContain("let double = $$check.reactive(() => (a * 2));");
   });
 
   it("widens a prop as svelte2tsx does: with no default, a type or a boolean default", () => {
@@ -43,10 +39,10 @@ describe("emit", () => {
 </script>
 `,
     );
-    expect(out.code).not.toContain("a = __sveltets_2_any(a);");
-    expect(out.code).toContain("b = __sveltets_2_any(b);");
-    expect(out.code).toContain("c = __sveltets_2_any(c);");
-    expect(out.code).toContain("d = __sveltets_2_any(0);");
+    expect(out.code).not.toContain("a = $$check.any(a);");
+    expect(out.code).toContain("b = $$check.any(b);");
+    expect(out.code).toContain("c = $$check.any(c);");
+    expect(out.code).toContain("d = $$check.any(0);");
   });
 
   it("checks a repeated event handler in a call of its own", () => {
@@ -68,7 +64,7 @@ describe("emit", () => {
   it("types a Svelte 3 component as a class, without a `children` prop", () => {
     const source = `<script>\n  import Box from "./Box.svelte";\n</script>\n\n<Box>x</Box>\n`;
     const svelte3 = emit(source, { svelte: 3 }).out.code;
-    expect(svelte3).toContain("__sveltets_2_svelte3_component(");
+    expect(svelte3).toContain("SvelteComponentTyped<");
     expect(svelte3).not.toContain("children:");
     expect(emit(source).out.code).toContain("children:");
   });

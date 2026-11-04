@@ -197,7 +197,7 @@ Any version works as long as it reads a tsconfig and prints `tsc`'s format: to p
 
 1. **Find the project.** The tsconfig svelte-check would use (the nearer of tsconfig.json and jsconfig.json from the workspace up), and the components its `include` names.
 2. **Parse.** [sveast](https://github.com/metonym/sveast) parses each component and resolves its scopes: props, `$:` declarations, runes, stores, `{#each}`, `let:` and snippet scopes, every read and write.
-3. **Generate.** Each component becomes TypeScript (or JS with JSDoc) the way svelte2tsx writes it, with a map from each piece back to its source. The code, the helper types it calls (adapted from svelte2tsx's, MIT) and a tsconfig that extends yours go to `node_modules/.cache/svelte-typecheck`.
+3. **Generate.** Each component becomes TypeScript (or JS with JSDoc) the way svelte2tsx writes it, with a map from each piece back to its source. The code, the helper types it calls and a tsconfig that extends yours go to `node_modules/.cache/svelte-typecheck`. The helpers are svelte-typecheck's own, except the few names a message prints, which keep svelte2tsx's (MIT) so messages read as svelte-check's do.
 4. **Check and compile, at once.** One checker process type-checks the whole program while Svelte's compiler reports its warnings beside it.
 5. **Map and order.** Each error maps back to its `.svelte` line, with svelte-check's rewrites and filters, in the order svelte-check prints them.
 6. **Keep.** What each step learned is kept for the next run.

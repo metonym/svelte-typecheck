@@ -53,7 +53,7 @@ const TYPE_CODE = /^TS[2-7]\d{3}$/;
 /** What an error's range covers past its start: an identifier, number or string. */
 const TOKEN = /^(?:[\w$]+|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`]*`)/;
 
-/** "No overload matches this call", or a wrong argument: to `__sveltets_2_store_get`. */
+/** "No overload matches this call", or a wrong argument: to `$$check.store`. */
 const STORE_ERROR = /^TS(2769|2345)$/;
 /** Unused label, and an unused comma operand. */
 const REACTIVE_NOISE = /^TS(7028|2695)$/;

@@ -1,104 +1,28 @@
-/* eslint-disable typescript/no-explicit-any, typescript/consistent-type-imports, typescript/consistent-type-definitions --
+/* eslint-disable typescript/no-explicit-any, typescript/consistent-type-imports, typescript/consistent-type-definitions, typescript/no-namespace --
    these stand in for Svelte's runtime, which accepts anything here; an
    ambient file can't import, so types come from `import("svelte")`; and
-   the shapes keep svelte2tsx's, to diff against it. */
-// Ambient declarations for the helpers `emit.ts` calls in generated code.
-// None of them runs; each exists so the checker infers what Svelte does at
-// runtime. Adapted from svelte2tsx's svelte-shims-v4.d.ts (MIT,
-// https://github.com/sveltejs/language-tools), keeping only what `emit.ts`
-// uses and keeping its names, so generated code can be diffed against
-// svelte2tsx's when parity drifts.
+   the visible shapes are svelte-check's. */
+// The types the generated code is checked against. Nothing here runs:
+// each declaration tells the checker what Svelte does at runtime.
+//
+// Most of it is the `$$check` namespace, svelte-typecheck's own. A Svelte
+// script can't declare a `$$` name, so none collides with a component's.
+// The rest are the names a message can print, which svelte-check's
+// messages print too: they keep svelte2tsx's names and shapes (MIT,
+// https://github.com/sveltejs/language-tools), so the messages match.
 
-type SvelteAllProps = { [index: string]: any };
+// --- Printed in messages, as svelte-check prints them.
+
+/** `$x` of a value that isn't one: "(store: SvelteStore<any>): any". */
 type SvelteStore<T> = {
   subscribe: (run: (value: T) => any, invalidate?: any) => any;
 };
-/** Spells out a mapped type, for readable error messages. */
-type Expand<T> = T extends infer O ? { [K in keyof O]: O[K] } : never;
-type SvelteWithOptionalProps<Props, Keys extends keyof Props> = Omit<
-  Props,
-  Keys
-> &
-  Partial<Pick<Props, Keys>>;
-type SveltePropsAnyFallback<Props> = {
-  [K in keyof Props]: Props[K] extends never
-    ? never
-    : Props[K] extends undefined
-      ? any
-      : Props[K];
-};
-type SvelteSlotsAnyFallback<Slots> = {
-  [K in keyof Slots]: {
-    [S in keyof Slots[K]]: Slots[K][S] extends undefined ? any : Slots[K][S];
-  };
-};
-type SvelteRender<Props, Events, Slots, Exports, Bindings> = {
-  props: Props;
-  events: Events;
-  slots: Slots;
-  exports?: Exports;
-  bindings?: Bindings;
-};
-
-// --- Values: `any` stand-ins and the script's special variables.
-
-declare function __sveltets_2_any(...dummy: any[]): any;
-declare function __sveltets_2_empty(...dummy: any[]): {};
-/** `$$props`. */
-declare function __sveltets_2_allPropsType(): SvelteAllProps;
-/** `$$restProps`. */
-declare function __sveltets_2_restPropsType(): SvelteAllProps;
-/** `$: x = expr` declares `x` with `expr`'s type. */
-declare function __sveltets_2_invalidate<T>(getValue: () => T): T;
-/** `$store`: the store's value. */
-declare function __sveltets_2_store_get<T = any>(store: SvelteStore<T>): T;
-declare function __sveltets_2_store_get<
-  Store extends SvelteStore<any> | undefined | null,
->(store: Store): Store extends SvelteStore<infer T> ? T : Store;
-
-// --- Markup.
-
-/** An `{#each}` item, as a slot prop that is one is typed. */
-declare function __sveltets_2_unwrapArr<T>(arr: ArrayLike<T>): T;
-
-/** `{#each}` accepts an array or iterable, and in Svelte 5 `null`. */
-declare function __sveltets_2_ensureArray<
-  T extends ArrayLike<unknown> | Iterable<unknown>,
->(
-  array:
-    | T
-    | (typeof import("svelte") extends { mount: any }
-        ? undefined | null
-        : never),
-): T extends ArrayLike<infer U>
-  ? U[]
-  : T extends Iterable<infer U>
-    ? Iterable<U>
-    : any[];
-
+/** What `use:action` may return. */
 type __sveltets_2_SvelteActionReturnType = {
   update?: (args: any) => void;
   destroy?: () => void;
   $$_attributes?: Record<string, any>;
 } | void;
-/** `use:action`: what the action adds to the element's attributes. */
-declare function __sveltets_2_ensureAction<
-  T extends __sveltets_2_SvelteActionReturnType,
->(actionCall: T): T extends { $$_attributes?: any } ? T["$$_attributes"] : {};
-/** Joins what several actions add to an element's attributes. */
-declare function __sveltets_2_union<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>(
-  t1: T1,
-  t2?: T2,
-  t3?: T3,
-  t4?: T4,
-  t5?: T5,
-  t6?: T6,
-  t7?: T7,
-  t8?: T8,
-  t9?: T9,
-  t10?: T10,
-): T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9 & T10;
-
 type __sveltets_2_SvelteTransitionConfig = {
   delay?: number;
   duration?: number;
@@ -106,38 +30,11 @@ type __sveltets_2_SvelteTransitionConfig = {
   css?: (t: number, u: number) => string;
   tick?: (t: number, u: number) => void;
 };
+/** What `transition:`, `in:` and `out:` may return. */
 type __sveltets_2_SvelteTransitionReturnType =
   | __sveltets_2_SvelteTransitionConfig
   | (() => __sveltets_2_SvelteTransitionConfig);
-/** `transition:`, `in:` and `out:`. */
-declare function __sveltets_2_ensureTransition(
-  transitionCall: __sveltets_2_SvelteTransitionReturnType,
-): {};
-
-// --- `$$Props`, `$$Events`, `$$Slots`.
-
-/** Checks that `$$Props` agrees with the `export let`s. */
-declare function __sveltets_2_ensureRightProps<Props>(props: Props): {};
-type KeysMatching<Obj, V> = {
-  [K in keyof Obj]-?: Obj[K] extends V ? K : never;
-}[keyof Obj];
-/** `$$Events` as `createEventDispatcher`'s type argument: each event's detail. */
-declare type __sveltets_2_CustomEvents<T> = {
-  [K in KeysMatching<T, CustomEvent>]: T[K] extends CustomEvent
-    ? T[K]["detail"]
-    : T[K];
-};
-/** A `<slot>` whose props `$$Slots` declares. */
-declare function __sveltets_2_createCreateSlot<
-  Slots = Record<string, Record<string, any>>,
->(): <SlotName extends keyof Slots>(
-  slotName: SlotName,
-  attrs: Slots[SlotName],
-) => Record<string, any>;
-
-// --- `animate:`.
-
-declare var __sveltets_2_AnimationMove: { from: DOMRect; to: DOMRect };
+/** What `animate:` may return. */
 type __sveltets_2_SvelteAnimationReturnType = {
   delay?: number;
   duration?: number;
@@ -145,181 +42,12 @@ type __sveltets_2_SvelteAnimationReturnType = {
   css?: (t: number, u: number) => string;
   tick?: (t: number, u: number) => void;
 };
-declare function __sveltets_2_ensureAnimation(
-  animationCall: __sveltets_2_SvelteAnimationReturnType,
-): {};
-
-// --- Events.
-
-/** `createEventDispatcher<Typings>()`'s events, as `CustomEvent`s. */
-declare function __sveltets_2_toEventTypings<Typings>(): {
-  [Key in keyof Typings]: CustomEvent<Typings[Key]>;
-};
-/** A DOM event an element forwards with a bare `on:event`. */
-declare function __sveltets_2_mapElementEvent<
-  K extends keyof HTMLElementEventMap,
->(event: K): HTMLElementEventMap[K];
-
-// --- Components.
-
-declare type ATypedSvelteComponent = {
-  $$prop_def: any;
-  $$events_def: any;
-  $$slot_def: any;
-  $on(event: string, handler: any): () => void;
-};
+/** What a component used in markup may be, besides a Svelte 5 one. */
 declare type ConstructorOfATypedSvelteComponent = new (args: {
   target: any;
   props?: any;
-}) => ATypedSvelteComponent;
-/**
- * A component to `new` with its props: a class component (sveld's `.d.ts`,
- * Svelte 3 and 4) as it is, a Svelte 5 function component as a class.
- */
-declare function __sveltets_2_ensureComponent<
-  T extends
-    | ConstructorOfATypedSvelteComponent
-    | (typeof import("svelte") extends { mount: any }
-        ? // @ts-ignore svelte.Component doesn't exist in Svelte 4
-          import("svelte").Component<any, any, any>
-        : never)
-    | null
-    | undefined,
->(
-  type: T,
-): NonNullable<
-  T extends ConstructorOfATypedSvelteComponent
-    ? T
-    : typeof import("svelte") extends { mount: any }
-      ? // @ts-ignore svelte.Component doesn't exist in Svelte 4
-        T extends import("svelte").Component<
-          infer Props extends Record<string, any>,
-          infer Exports extends Record<string, any>,
-          infer Bindings extends string
-        >
-        ? new (
-            options: import("svelte").ComponentConstructorOptions<Props>,
-          ) => import("svelte").SvelteComponent<
-            Props,
-            Props["$$events"],
-            Props["$$slots"]
-          > &
-            Exports & { $$bindings: Bindings }
-        : never
-      : never
->;
-
-// --- What a generated component exports: `$$render()`'s props, events and
-// slots, wrapped in turn.
-
-/**
- * Props listed in `optionalProps` (those with a default) are optional. With
- * none, `emit.ts` leaves the list out: an empty one would make them all so.
- */
-declare function __sveltets_2_partial<
-  Props = {},
-  Events = {},
-  Slots = {},
-  Exports = {},
-  Bindings = string,
->(
-  render: SvelteRender<Props, Events, Slots, Exports, Bindings>,
-): {
-  props: Expand<SveltePropsAnyFallback<Props>>;
-  events: Events;
-  slots: Expand<SvelteSlotsAnyFallback<Slots>>;
-  exports?: Exports;
-  bindings?: Bindings;
-};
-declare function __sveltets_2_partial<
-  Props = {},
-  Events = {},
-  Slots = {},
-  Exports = {},
-  Bindings = string,
-  OptionalProps extends keyof Props = any,
->(
-  optionalProps: OptionalProps[],
-  render: SvelteRender<Props, Events, Slots, Exports, Bindings>,
-): {
-  props: Expand<
-    SvelteWithOptionalProps<SveltePropsAnyFallback<Props>, OptionalProps>
-  >;
-  events: Events;
-  slots: Expand<SvelteSlotsAnyFallback<Slots>>;
-  exports?: Exports;
-  bindings?: Bindings;
-};
-/** `__sveltets_2_partial` for a component that reads `$$props` or `$$restProps`. */
-declare function __sveltets_2_partial_with_any<
-  Props = {},
-  Events = {},
-  Slots = {},
-  Exports = {},
-  Bindings = string,
->(
-  render: SvelteRender<Props, Events, Slots, Exports, Bindings>,
-): {
-  props: Expand<SveltePropsAnyFallback<Props> & SvelteAllProps>;
-  events: Events;
-  slots: Expand<SvelteSlotsAnyFallback<Slots>>;
-  exports?: Exports;
-  bindings?: Bindings;
-};
-declare function __sveltets_2_partial_with_any<
-  Props = {},
-  Events = {},
-  Slots = {},
-  Exports = {},
-  Bindings = string,
-  OptionalProps extends keyof Props = any,
->(
-  optionalProps: OptionalProps[],
-  render: SvelteRender<Props, Events, Slots, Exports, Bindings>,
-): {
-  props: Expand<
-    SvelteWithOptionalProps<SveltePropsAnyFallback<Props>, OptionalProps> &
-      SvelteAllProps
-  >;
-  events: Events;
-  slots: Expand<SvelteSlotsAnyFallback<Slots>>;
-  exports?: Exports;
-  bindings?: Bindings;
-};
-/** A TypeScript component that reads `$$props` or `$$restProps`: any prop. */
-declare function __sveltets_2_with_any<
-  Props = {},
-  Events = {},
-  Slots = {},
-  Exports = {},
-  Bindings = string,
->(
-  render: SvelteRender<Props, Events, Slots, Exports, Bindings>,
-): {
-  props: Expand<Props & SvelteAllProps>;
-  events: Events;
-  slots: Slots;
-  exports?: Exports;
-  bindings?: Bindings;
-};
-/** Any event name, with a `CustomEvent`. */
-declare function __sveltets_2_with_any_event<
-  Props = {},
-  Events = {},
-  Slots = {},
-  Exports = {},
-  Bindings = string,
->(
-  render: SvelteRender<Props, Events, Slots, Exports, Bindings>,
-): {
-  props: Props;
-  events: Events & { [evt: string]: CustomEvent<any> };
-  slots: Slots;
-  exports?: Exports;
-  bindings?: Bindings;
-};
-
-/** A component both `new`-able (Svelte 4) and callable (Svelte 5). */
+}) => $$check.Typed;
+/** A legacy component: both `new`-able (Svelte 4) and callable (Svelte 5). */
 interface __sveltets_2_IsomorphicComponent<
   Props extends Record<string, any> = any,
   Events extends Record<string, any> = any,
@@ -340,16 +68,6 @@ interface __sveltets_2_IsomorphicComponent<
   ): Exports & { $set?: any; $on?: any };
   z_$$bindings?: Bindings;
 }
-declare function __sveltets_2_isomorphic_component<
-  Props extends Record<string, any>,
-  Events extends Record<string, any>,
-  Slots extends Record<string, any>,
-  Exports extends Record<string, any>,
-  Bindings extends string,
->(
-  klass: SvelteRender<Props, Events, Slots, Exports, Bindings>,
-): __sveltets_2_IsomorphicComponent<Props, Events, Slots, Exports, Bindings>;
-
 /** A component with a default `<slot>` also takes a `children` prop. */
 type __sveltets_2_PropsWithChildren<Props, Slots> = Props &
   (Slots extends { default: any }
@@ -357,70 +75,164 @@ type __sveltets_2_PropsWithChildren<Props, Slots> = Props &
       ? any
       : { children?: any }
     : {});
-declare function __sveltets_2_isomorphic_component_slots<
-  Props extends Record<string, any>,
-  Events extends Record<string, any>,
-  Slots extends Record<string, any>,
-  Exports extends Record<string, any>,
-  Bindings extends string,
->(
-  klass: SvelteRender<Props, Events, Slots, Exports, Bindings>,
-): __sveltets_2_IsomorphicComponent<
-  __sveltets_2_PropsWithChildren<Props, Slots>,
-  Events,
-  Slots,
-  Exports,
-  Bindings
->;
 
-/**
- * A component as Svelte 3 types one: a `SvelteComponentTyped` class, which
- * its `render()` typings infer props from. Svelte 3 has no function components.
- */
-declare function __sveltets_2_svelte3_component<
-  Props extends Record<string, any>,
-  Events extends Record<string, any>,
-  Slots extends Record<string, any>,
-  Exports extends Record<string, any>,
-  Bindings extends string,
->(
-  klass: SvelteRender<Props, Events, Slots, Exports, Bindings>,
-): new (
-  options: import("svelte").ComponentConstructorOptions<Props>,
-) => import("svelte").SvelteComponentTyped<Props, Events, Slots> & Exports;
+declare namespace $$check {
+  // --- Values.
 
-// Svelte 5's runes components, snippets and function bindings.
+  /** A value of any type, after checking what it's given. */
+  function any(...checked: any[]): any;
+  /** Nothing, after checking what it's given: a `data-` attribute. */
+  function none(...checked: any[]): {};
+  /** `$$props` and `$$restProps`. */
+  function props(): { [index: string]: any };
+  /** `$: x = value` declares `x` with the value's type. */
+  function reactive<T>(value: () => T): T;
+  /** `$x`: the store's value. */
+  function store<T = any>(store: SvelteStore<T>): T;
+  function store<Store extends SvelteStore<any> | undefined | null>(
+    store: Store,
+  ): Store extends SvelteStore<infer T> ? T : Store;
 
-/** A runes component: a function, typed by its `$props()`. */
-declare function __sveltets_2_fn_component<
-  Props extends Record<string, any>,
-  Exports extends Record<string, any>,
-  Bindings extends string,
->(klass: {
-  props: Props;
-  exports?: Exports;
-  bindings?: Bindings;
-  // @ts-ignore Svelte 5 only
-}): import("svelte").Component<Props, Exports, Bindings>;
-/** The props a runes component lets a parent `bind:`. */
-declare function __sveltets_$$bindings<Bindings extends string[]>(
-  ...bindings: Bindings
-): Bindings[number];
-/** `{@render x()}`, which takes only a snippet's result. */
-declare function __sveltets_2_ensureSnippet(
-  // @ts-ignore Svelte 5 only
-  val: ReturnType<import("svelte").Snippet> | undefined | null,
-): any;
-/** `bind:x={get, set}`: `set` takes what `get` returns. */
-declare function __sveltets_2_get_set_binding<T>(
-  get: (() => T) | null | undefined,
-  set: (t: T) => void,
-): T;
-/**
- * A `<svelte:element>` tag, as `string` when it may be any element (a
- * component's generic tag): typed as every element's tag, its attributes
- * are a union TypeScript can't represent. A smaller union keeps its tags.
- */
-declare function __sveltets_2_elementTag<T extends string>(
-  tag: T | undefined | null,
-): keyof HTMLElementTagNameMap extends T ? string : T;
+  // --- Markup.
+
+  /** `{#each}` takes an array or iterable, and in Svelte 5 `null`. */
+  function each<T extends ArrayLike<unknown> | Iterable<unknown>>(
+    array:
+      | T
+      | (typeof import("svelte") extends { mount: any }
+          ? undefined | null
+          : never),
+  ): T extends ArrayLike<infer U>
+    ? U[]
+    : T extends Iterable<infer U>
+      ? Iterable<U>
+      : any[];
+  /** An `{#each}` item, as a slot prop that is one is typed. */
+  function item<T>(array: ArrayLike<T>): T;
+  /** `use:action`: what it adds to the element's attributes. */
+  function action<T extends __sveltets_2_SvelteActionReturnType>(
+    returned: T,
+  ): T extends { $$_attributes?: any } ? T["$$_attributes"] : {};
+  /** What an element's actions add to its attributes, together. */
+  function attributes<T extends unknown[]>(...added: T): Joined<T>;
+  type Joined<T extends unknown[]> = T extends [infer First, ...infer Rest]
+    ? First & Joined<Rest>
+    : unknown;
+  function transition(returned: __sveltets_2_SvelteTransitionReturnType): {};
+  function animation(returned: __sveltets_2_SvelteAnimationReturnType): {};
+  /** An animation's second argument. */
+  const move: { from: DOMRect; to: DOMRect };
+  /** A DOM event an element forwards with a bare `on:event`. */
+  function domEvent<K extends keyof HTMLElementEventMap>(
+    event: K,
+  ): HTMLElementEventMap[K];
+  /** `bind:x={get, set}`: `set` takes what `get` returns. */
+  function getSet<T>(get: (() => T) | null | undefined, set: (t: T) => void): T;
+  /**
+   * A `<svelte:element>` tag, as `string` when it may be any element (a
+   * component's generic tag): typed as every element's tag, its attributes
+   * are a union TypeScript can't represent. A smaller union keeps its tags.
+   */
+  function elementTag<T extends string>(
+    tag: T | undefined | null,
+  ): keyof HTMLElementTagNameMap extends T ? string : T;
+  /** `{@render x()}`, which takes only a snippet's result. */
+  function snippet(
+    // @ts-ignore Svelte 5 only
+    rendered: ReturnType<import("svelte").Snippet> | undefined | null,
+  ): any;
+
+  // --- `$$Props`, `$$Events` and `$$Slots`.
+
+  /** Checks that `$$Props` agrees with the `export let`s. */
+  function matches<Props>(props: Props): {};
+  /** `$$Events` as `createEventDispatcher`'s type argument. */
+  type Details<T> = {
+    [K in KeysMatching<T, CustomEvent>]: T[K] extends CustomEvent
+      ? T[K]["detail"]
+      : T[K];
+  };
+  type KeysMatching<T, V> = {
+    [K in keyof T]-?: T[K] extends V ? K : never;
+  }[keyof T];
+  /** `createEventDispatcher<Typings>()`'s events. */
+  function dispatched<Typings>(): {
+    [K in keyof Typings]: CustomEvent<Typings[K]>;
+  };
+  /** A `<slot>` whose props `$$Slots` declares. */
+  function slots<Slots = Record<string, Record<string, any>>>(): <
+    Name extends keyof Slots,
+  >(
+    slotName: Name,
+    attrs: Slots[Name],
+  ) => Record<string, any>;
+
+  // --- Components.
+
+  /** A component instance, as `new` makes one. */
+  type Typed = {
+    $$prop_def: any;
+    $$events_def: any;
+    $$slot_def: any;
+    $on(event: string, handler: any): () => void;
+  };
+  /**
+   * A component to `new` with its props: a class component (sveld's
+   * `.d.ts`, Svelte 3 and 4) as it is, a Svelte 5 function one as a class.
+   */
+  function component<
+    T extends
+      | ConstructorOfATypedSvelteComponent
+      | (typeof import("svelte") extends { mount: any }
+          ? // @ts-ignore svelte.Component doesn't exist in Svelte 4
+            import("svelte").Component<any, any, any>
+          : never)
+      | null
+      | undefined,
+  >(
+    type: T,
+  ): NonNullable<
+    T extends ConstructorOfATypedSvelteComponent
+      ? T
+      : typeof import("svelte") extends { mount: any }
+        ? // @ts-ignore svelte.Component doesn't exist in Svelte 4
+          T extends import("svelte").Component<
+            infer Props extends Record<string, any>,
+            infer Exports extends Record<string, any>,
+            infer Bindings extends string
+          >
+          ? new (
+              options: import("svelte").ComponentConstructorOptions<Props>,
+            ) => import("svelte").SvelteComponent<
+              Props,
+              Props["$$events"],
+              Props["$$slots"]
+            > &
+              Exports & { $$bindings: Bindings }
+          : never
+        : never
+  >;
+  /** The props a runes component lets a parent `bind:`. */
+  function bindings<B extends string[]>(...bindings: B): B[number];
+
+  // --- A legacy component's type, from what `$$render` returns. Each
+  // spells out a mapped type, so a message prints the props, not these.
+
+  type Expand<T> = T extends infer O ? { [K in keyof O]: O[K] } : never;
+  /** A JS component's props: one that's only ever `undefined` is any. */
+  type Loose<Props> = {
+    [K in keyof Props]: Props[K] extends never
+      ? never
+      : Props[K] extends undefined
+        ? any
+        : Props[K];
+  };
+  type LooseSlots<Slots> = {
+    [K in keyof Slots]: {
+      [S in keyof Slots[K]]: Slots[K][S] extends undefined ? any : Slots[K][S];
+    };
+  };
+  /** Props with a default are optional. */
+  type WithOptional<Props, Keys extends keyof Props> = Omit<Props, Keys> &
+    Partial<Pick<Props, Keys>>;
+}

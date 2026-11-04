@@ -19,9 +19,9 @@ import { Output } from "./output.ts";
  * Turns a component into TypeScript (or JS with JSDoc, for a component
  * without `lang="ts"`) that a type checker can read, the way svelte2tsx
  * does: the instance script becomes a `$$render` function, the markup an
- * `async () => {}` inside it, and the component the default export. The
- * `__sveltets_2_*` helpers it calls are declared in `shims.d.ts`, and
- * `svelteHTML` in svelte's `svelte-html.d.ts`.
+ * `async () => {}` inside it, and the component the default export, typed
+ * from what `$$render` returns. The `$$check` helpers it calls are
+ * declared in `shims.d.ts`, and `svelteHTML` in svelte's `svelte-html.d.ts`.
  */
 const GENERIC_PARAM =
   /^(\w+)(?:\s+extends\s+([\s\S]+?))?(?:\s*=\s*([\s\S]+))?$/;
@@ -506,7 +506,7 @@ export function emit(
   const storeDeclarations: StoreDeclaration[] = [];
   const declareStore = (name: string) => {
     const start = out.code.length;
-    out.raw(`let $${name} = __sveltets_2_store_get(${name});`);
+    out.raw(`let $${name} = $$check.store(${name});`);
     storeDeclarations.push({
       start,
       end: out.code.length,
@@ -576,12 +576,12 @@ export function emit(
           out.copy(at, at + a.name.length).raw(";");
         } else attrValue(a.value).raw(";");
       } else if (a.type === "AnimateDirective") {
-        out.raw("__sveltets_2_ensureAnimation(");
-        directiveCall(a, tag, ",__sveltets_2_AnimationMove");
+        out.raw("$$check.animation(");
+        directiveCall(a, tag, ",$$check.move");
         out.raw(");");
       } else if (a.type === "TransitionDirective") {
         transitions.push([a.start, a.end]);
-        out.raw("__sveltets_2_ensureTransition(");
+        out.raw("$$check.transition(");
         directiveCall(a, tag);
         out.raw(");");
       }
@@ -606,7 +606,7 @@ export function emit(
         return;
       }
       if (a.name.startsWith("data-")) {
-        out.raw("...__sveltets_2_empty({");
+        out.raw("...$$check.none({");
         key(a, a.name);
         attrValue(a.value).raw("}),");
         return;
@@ -631,10 +631,7 @@ export function emit(
       if (a.expression) expression(a.expression);
       else {
         out.raw("undefined");
-        forwarded.set(
-          a.name,
-          `__sveltets_2_mapElementEvent(${JSON.stringify(a.name)})`,
-        );
+        forwarded.set(a.name, `$$check.domEvent(${JSON.stringify(a.name)})`);
       }
       out.raw(",");
     } else if (a.type === "BindDirective" && a.name !== "this") {
@@ -653,7 +650,7 @@ export function emit(
     out
       .raw("() => ")
       .copy(target.start, target.end)
-      .raw(" = __sveltets_2_any(null);");
+      .raw(" = $$check.any(null);");
   };
   /** `bind:x={get, set}` as svelte2tsx checks it: `set` takes what `get` returns. */
   const isGetSet = (e: Node) =>
@@ -661,7 +658,7 @@ export function emit(
   const bound = (e: Node) => {
     if (!isGetSet(e)) return expression(e);
     const [get, set] = e.expressions;
-    out.raw("__sveltets_2_get_set_binding(").copy(get.start, get.end).raw(",");
+    out.raw("$$check.getSet(").copy(get.start, get.end).raw(",");
     return out.copy(set.start, set.end).raw(")");
   };
   /** `{@attach fn}`, which the element's typings take under a symbol key. */
@@ -703,7 +700,7 @@ export function emit(
       if (a.type !== "UseDirective") continue;
       const action = `$$_action${uid++}`;
       actions.push(action);
-      out.raw(`const ${action} = __sveltets_2_ensureAction(`);
+      out.raw(`const ${action} = $$check.action(`);
       directiveCall(a, tagText);
       out.raw(");");
     }
@@ -717,7 +714,7 @@ export function emit(
         tag();
         out.raw(", ");
         if (actions.length > 0)
-          out.raw(`__sveltets_2_union(${actions.join(",")}), `);
+          out.raw(`$$check.attributes(${actions.join(",")}), `);
         out.from(objectAt, () => out.raw("{"));
         for (const a of node.attributes ?? []) {
           const k = attributeKey(a);
@@ -805,16 +802,14 @@ export function emit(
     const hasDefault =
       rest.some((c) => c.type !== "Text" || c.data.trim()) &&
       !snippets.some((s) => s.expression.name === "children");
-    out.raw(`{ const ${id}C = __sveltets_2_ensureComponent(`);
+    out.raw(`{ const ${id}C = $$check.component(`);
     ctor();
     out.raw("); ");
     out.from(node.start + 1, () => {
-      out.raw(
-        `const ${id} = new ${id}C({ target: __sveltets_2_any(), props: {`,
-      );
+      out.raw(`const ${id} = new ${id}C({ target: $$check.any(), props: {`);
       // Svelte 5 passes slot content as a `children` snippet.
       if (hasDefault && svelte >= 5)
-        out.raw("children:() => { return __sveltets_2_any(0); },");
+        out.raw("children:() => { return $$check.any(0); },");
       for (const a of node.attributes ?? []) {
         if (a.type === "Attribute") {
           if (inComponent && a.name === "slot") continue;
@@ -856,8 +851,7 @@ export function emit(
           }
         }
       } else if (a.type === "OnDirective" && !a.expression) {
-        if (!forwarded.has(a.name))
-          forwarded.set(a.name, "__sveltets_2_any(0)");
+        if (!forwarded.has(a.name)) forwarded.set(a.name, "$$check.any(0)");
       } else if (a.type === "OnDirective" && a.expression) {
         out.from(nameAt(a), () =>
           out.raw(`${id}.$on(${JSON.stringify(a.name)}, `),
@@ -896,7 +890,7 @@ export function emit(
         return expression(node.expression).raw(";");
       case "RenderTag":
         return out
-          .raw(";__sveltets_2_ensureSnippet(")
+          .raw(";$$check.snippet(")
           .copy(node.expression.start, node.expression.end)
           .raw(");");
       case "RegularElement":
@@ -910,11 +904,11 @@ export function emit(
         return element(
           node,
           () => {
-            out.raw("__sveltets_2_elementTag(");
+            out.raw("$$check.elementTag(");
             expression(node.tag);
             out.raw(")");
           },
-          "__sveltets_2_any(0)",
+          "$$check.any(0)",
           inComponent,
         );
       case "SvelteWindow":
@@ -923,14 +917,14 @@ export function emit(
         return element(
           node,
           () => out.raw(JSON.stringify(node.name)),
-          "__sveltets_2_any(0)",
+          "$$check.any(0)",
           false,
         );
       case "SvelteBoundary":
         return element(
           node,
           () => out.raw('"svelte:boundary"'),
-          "__sveltets_2_any(0)",
+          "$$check.any(0)",
           false,
         );
       case "SvelteHead":
@@ -951,7 +945,7 @@ export function emit(
       case "SvelteComponent":
         return component(node, () => expression(node.expression), inComponent);
       case "SvelteSelf":
-        return component(node, () => out.raw("__sveltets_2_any(0)"));
+        return component(node, () => out.raw("$$check.any(0)"));
       case "SlotElement": {
         const nameAttr = (node.attributes ?? []).find(
           (a: Node) => a.type === "Attribute" && a.name === "name",
@@ -964,7 +958,7 @@ export function emit(
         if (typed.has("$$Slots")) {
           // A slot `$$Slots` doesn't declare: an error at its name.
           const name = JSON.stringify(nameAttr ? textOf(nameAttr) : "default");
-          out.raw("__sveltets_createSlot(");
+          out.raw("$$slot(");
           if (nameAttr?.value?.[0])
             out.from(nameAttr.value[0].start, () => out.raw(name));
           else out.raw(name);
@@ -995,7 +989,7 @@ export function emit(
         out.raw("for (let ");
         if (node.context) out.copy(node.context.start, node.context.end);
         else out.raw("$$_item");
-        out.raw(" of __sveltets_2_ensureArray(");
+        out.raw(" of $$check.each(");
         out.copy(node.expression.start, node.expression.end).raw(")) {");
         if (node.index) out.raw(`let ${node.index} = 1;`);
         if (node.key) expression(node.key).raw(";");
@@ -1020,7 +1014,7 @@ export function emit(
         out.raw("}{ const ");
         if (node.error) out.copy(node.error.start, node.error.end);
         else out.raw("$$_e");
-        out.raw(" = __sveltets_2_any(0);");
+        out.raw(" = $$check.any(0);");
         fragment(node.catch);
         return out.raw("}}\n");
       }
@@ -1089,7 +1083,7 @@ export function emit(
     parameters(node);
     out.raw(") => { async () => {");
     fragment(node.body);
-    out.raw("}; return __sveltets_2_any(0); },");
+    out.raw("}; return $$check.any(0); },");
   }
   /** A snippet as svelte2tsx declares it: an arrow that returns a snippet's result. */
   function snippet(node: Node) {
@@ -1109,7 +1103,7 @@ export function emit(
       `)${isTs ? ": ReturnType<import('svelte').Snippet>" : ""} => { async () => {`,
     );
     fragment(node.body);
-    out.raw("}; return __sveltets_2_any(0); };\n");
+    out.raw("}; return $$check.any(0); };\n");
   }
 
   /**
@@ -1146,7 +1140,7 @@ export function emit(
   out.raw(
     runes
       ? `${async}function $$render${generics}() { `
-      : `${async}function $$render${generics}() { let $$props = __sveltets_2_allPropsType(); let $$restProps = __sveltets_2_restPropsType(); let $$slots = __sveltets_2_any(0); ${typed.has("$$Slots") ? "const __sveltets_createSlot = __sveltets_2_createCreateSlot<$$Slots>(); " : ""}`,
+      : `${async}function $$render${generics}() { let $$props = $$check.props(); let $$restProps = $$check.props(); let $$slots = $$check.any(0); ${typed.has("$$Slots") ? "const $$slot = $$check.slots<$$Slots>(); " : ""}`,
   );
   for (const name of storeAtStart) declareStore(name);
   out.raw("\n");
@@ -1358,9 +1352,7 @@ export function emit(
                       : undefined,
                 });
                 if (widens)
-                  out.raw(
-                    `;${name} = __sveltets_2_any(${decl.init ? name : 0});`,
-                  );
+                  out.raw(`;${name} = $$check.any(${decl.init ? name : 0});`);
               }
             }
           else
@@ -1398,7 +1390,7 @@ export function emit(
         if (declares) {
           out.raw("let ").copy(e.left.start, e.left.end);
           out
-            .raw(" = __sveltets_2_invalidate(() => (")
+            .raw(" = $$check.reactive(() => (")
             .copy(e.right.start, e.right.end)
             .raw("));");
         } else out.raw(";() => {").copy(s.start, s.end).raw("}");
@@ -1421,7 +1413,7 @@ export function emit(
         if (call)
           out
             .copy(s.start, call.callee.end)
-            .raw("<__sveltets_2_CustomEvents<$$Events>>")
+            .raw("<$$check.Details<$$Events>>")
             .copy(call.callee.end, s.end);
         else out.copy(s.start, s.end);
       }
@@ -1469,7 +1461,7 @@ export function emit(
       markupScoped({ type: "ExpressionTag", expression: block.expression })
     )
       return;
-    return `__sveltets_2_unwrapArr(${source.slice(block.expression.start, block.expression.end)})`;
+    return `$$check.item(${source.slice(block.expression.start, block.expression.end)})`;
   };
   const entries = (pairs: [string, string][]) =>
     pairs.map(([k, v]) => `${keyOf(k)}: ${v}`).join(", ");
@@ -1491,8 +1483,8 @@ export function emit(
   const declaredProps = `{${props.map((p) => `${keyOf(p.name)}${p.optional ? "?" : ""}: ${p.type ?? `typeof ${p.local}`}`).join(", ")}}`;
   out.raw("return { props: ");
   if (typed.has("$$Props")) {
-    out.raw(`{ ...__sveltets_2_ensureRightProps<${declaredProps}>(`);
-    out.from(propsDeclaredAt, () => out.raw('__sveltets_2_any("") as $$Props'));
+    out.raw(`{ ...$$check.matches<${declaredProps}>(`);
+    out.from(propsDeclaredAt, () => out.raw('$$check.any("") as $$Props'));
     out.raw(") } as $$Props");
   } else {
     out.raw(`{${entries(props.map((p) => [p.name, p.local]))}}`);
@@ -1524,7 +1516,7 @@ export function emit(
         out.raw(`${JSON.stringify(a.name)}: `);
         const each = eachItemOf(a.value);
         if (each) out.raw(each);
-        else if (markupScoped(a.value)) out.raw("__sveltets_2_any(0)");
+        else if (markupScoped(a.value)) out.raw("$$check.any(0)");
         else attrValue(a.value);
         out.raw(", ");
       } else if (
@@ -1552,48 +1544,67 @@ export function emit(
     : "";
   const eventsType = typed.has("$$Events")
     ? "{} as unknown as $$Events"
-    : `{${typings.startsWith("<") ? `...__sveltets_2_toEventTypings${typings}(), ` : ""}${entries([...forwarded])}}`;
+    : `{${typings.startsWith("<") ? `...$$check.dispatched${typings}(), ` : ""}${entries([...forwarded])}}`;
   out.raw(`}, events: ${eventsType} };\n}\n`);
   const optional = props
     .filter((p) => p.optional)
     .map((p) => JSON.stringify(p.name));
   // `$$restProps` or `$$props` lets a parent pass any prop.
   const anyProp = USES_ALL_PROPS.test(source);
-  // Undeclared events are any `CustomEvent`, unless they're strict.
-  const renderCall = topLevelAwait ? "$$$render" : "$$render()";
-  if (topLevelAwait) out.raw("const $$$render = await $$render();\n");
-  const rendered = strictEvents
-    ? renderCall
-    : `__sveltets_2_with_any_event(${renderCall})`;
-  // `$$Props`, or in TypeScript the props' declared type, says which props
-  // are optional; in JS, the props with a default.
-  let withProps = rendered;
-  if (isTs) {
-    if (anyProp && !typed.has("$$Props"))
-      withProps = `__sveltets_2_with_any(${rendered})`;
-  } else if (!typed.has("$$Props"))
-    withProps = `__sveltets_2_partial${anyProp ? "_with_any" : ""}(${optional.length > 0 ? `[${optional.join(",")}], ` : ""}${rendered})`;
   const hasSlots = slots.size > 0 || typed.has("$$Slots");
+  if (topLevelAwait) out.raw("const $$$render = await $$render();\n");
+  /**
+   * A legacy component's props, events and slots, from `$$render`'s
+   * return type: the types svelte-check gives them, which messages print.
+   */
+  const legacyTypes = (rendered: string) => {
+    const part = (name: string) => `${rendered}["${name}"]`;
+    // `$$Props`, or in TypeScript the props' declared type, says which
+    // props are optional; in JS, those with a default are.
+    let propsType = part("props");
+    let slotTypes = part("slots");
+    if (!typed.has("$$Props") && !isTs) {
+      const loose = `$$check.Loose<${propsType}>`;
+      const withOptional =
+        optional.length > 0
+          ? `$$check.WithOptional<${loose}, ${optional.join(" | ")}>`
+          : loose;
+      propsType = `$$check.Expand<${withOptional}${anyProp ? " & { [index: string]: any }" : ""}>`;
+      slotTypes = `$$check.Expand<$$check.LooseSlots<${slotTypes}>>`;
+    } else if (!typed.has("$$Props") && anyProp)
+      propsType = `$$check.Expand<${propsType} & { [index: string]: any }>`;
+    // Undeclared events are any `CustomEvent`, unless they're strict.
+    const events = strictEvents
+      ? part("events")
+      : `${part("events")} & { [evt: string]: CustomEvent<any>; }`;
+    return { props: propsType, events, slots: slotTypes };
+  };
   if (isTs && typeParams.length > 0 && svelte >= 4) {
     // A generic component's type takes the parameters a use infers.
     const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[1] ?? p);
     const args = `<${names.join(", ")}>`;
-    // A function, since `$$` in a replacement string means `$`.
-    const wrapped = withProps.replaceAll(renderCall, () =>
-      topLevelAwait ? `(await $$render${args}())` : `$$render${args}()`,
-    );
-    const part = (name: string) =>
-      `ReturnType<__sveltets_Render${args}["${name}"]>`;
+    const rendered = topLevelAwait
+      ? `Awaited<ReturnType<typeof $$render${args}>>`
+      : `ReturnType<typeof $$render${args}>`;
+    const types = legacyTypes(rendered);
+    const part = (name: string) => `ReturnType<$$Render${args}["${name}"]>`;
     const children = hasSlots ? " & { children?: any }" : "";
     out.raw(
-      `class __sveltets_Render${generics} { props() { return ${wrapped}.props; } events() { return ${wrapped}.events; } slots() { return ${wrapped}.slots; } bindings() { return ""; } exports() { return $$render${args}().exports; } }\n` +
-        `interface $$IsomorphicComponent { new ${generics}(options: import("svelte").ComponentConstructorOptions<${part("props")}${children}>): import("svelte").SvelteComponent<${part("props")}, ${part("events")}, ${part("slots")}> & { $$bindings?: ${part("bindings")} } & ${part("exports")}; ${generics}(internal: unknown, props: ${part("props")} & { $$events?: ${part("events")}; $$slots?: ${part("slots")}${hasSlots ? "; children?: any" : ""} }): ${part("exports")}; z_$$bindings?: ReturnType<__sveltets_Render<${names.map(() => "any").join(", ")}>["bindings"]>; }\n` +
-        `const $$Component: $$IsomorphicComponent = null as any;\ntype $$Component${generics} = InstanceType<typeof $$Component${args}>;\n`,
+      `class $$Render${generics} { props(): ${types.props} { return null as any; } events(): ${types.events} { return null as any; } slots(): ${types.slots} { return null as any; } bindings() { return ""; } exports(): ${rendered}["exports"] { return null as any; } }\n` +
+        `interface $$Generic { new ${generics}(options: import("svelte").ComponentConstructorOptions<${part("props")}${children}>): import("svelte").SvelteComponent<${part("props")}, ${part("events")}, ${part("slots")}> & { $$bindings?: ${part("bindings")} } & ${part("exports")}; ${generics}(internal: unknown, props: ${part("props")} & { $$events?: ${part("events")}; $$slots?: ${part("slots")}${hasSlots ? "; children?: any" : ""} }): ${part("exports")}; z_$$bindings?: ReturnType<$$Render<${names.map(() => "any").join(", ")}>["bindings"]>; }\n` +
+        `const $$Component: $$Generic = null as any;\ntype $$Component${generics} = InstanceType<typeof $$Component${args}>;\n`,
     );
   } else {
-    out.raw(
-      `const $$Component = ${svelte < 4 ? "__sveltets_2_svelte3_component" : `__sveltets_2_isomorphic_component${hasSlots ? "_slots" : ""}`}(${withProps});\n`,
-    );
+    const rendered = renderedType();
+    const types = legacyTypes(rendered);
+    const exported = `${rendered}["exports"]`;
+    // Svelte 3 types a component as a `SvelteComponentTyped` class; 4 and
+    // 5 as one that's also callable, which takes slot content as `children`.
+    const type =
+      svelte < 4
+        ? `new (options: import("svelte").ComponentConstructorOptions<${types.props}>) => import("svelte").SvelteComponentTyped<${types.props}, ${types.events}, ${types.slots}> & ${exported}`
+        : `__sveltets_2_IsomorphicComponent<${hasSlots ? `__sveltets_2_PropsWithChildren<${types.props}, ${types.slots}>` : types.props}, ${types.events}, ${types.slots}, ${exported}, ${rendered}["bindings"]>`;
+    declareComponent(type);
     if (isTs) out.raw("type $$Component = InstanceType<typeof $$Component>;\n");
     else
       out.raw(
@@ -1613,10 +1624,32 @@ export function emit(
     bindingChecks,
   };
 
+  /** `$$render`'s return type, named once for the default export's. */
+  function renderedType() {
+    const type = topLevelAwait
+      ? "typeof $$$render"
+      : "ReturnType<typeof $$render>";
+    out.raw(
+      isTs
+        ? `type $$Rendered = ${type};\n`
+        : `/** @typedef {${type}} $$Rendered */\n`,
+    );
+    return "$$Rendered";
+  }
+
+  /** The default export, typed: nothing to infer, so nothing to call. */
+  function declareComponent(type: string) {
+    out.raw(
+      isTs
+        ? `declare const $$Component: ${type};\n`
+        : `const $$Component = /** @type {${type}} */ (/** @type {unknown} */ (null));\n`,
+    );
+  }
+
   /** A runes component: a function typed by `$props()`, as svelte2tsx types it. */
   function runesExport() {
     const exported = `{${entries(exportsOf)}}`;
-    const bindable = `__sveltets_$$bindings(${bindings.length > 0 ? bindings.map((b) => JSON.stringify(b)).join(", ") : '""'})`;
+    const bindable = `$$check.bindings(${bindings.length > 0 ? bindings.map((b) => JSON.stringify(b)).join(", ") : '""'})`;
     const none = isTs
       ? "{} as Record<string, never>"
       : "/** @type {Record<string, never>} */({})";
@@ -1626,23 +1659,22 @@ export function emit(
     if (isTs && typeParams.length > 0) {
       const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[1] ?? p);
       const args = `<${names.join(", ")}>`;
-      const part = (name: string) =>
-        `ReturnType<__sveltets_Render${args}["${name}"]>`;
+      const part = (name: string) => `ReturnType<$$Render${args}["${name}"]>`;
       const renderType = topLevelAwait
         ? `Awaited<ReturnType<typeof $$render${args}>>`
         : `ReturnType<typeof $$render${args}>`;
       const method = (name: string) =>
         `${name}(): ${renderType}["${name}"] { return null as any; }`;
       out.raw(
-        `class __sveltets_Render${generics} { ${method("props")} ${method("events")} ${method("slots")} bindings() { return ${bindable}; } ${method("exports")} }\n` +
-          `interface $$IsomorphicComponent { new ${generics}(options: import("svelte").ComponentConstructorOptions<${part("props")}>): import("svelte").SvelteComponent<${part("props")}, ${part("events")}, ${part("slots")}> & { $$bindings?: ${part("bindings")} } & ${part("exports")}; ${generics}(internal: unknown, props: ${part("props")} & {}): ${part("exports")}; z_$$bindings?: ReturnType<__sveltets_Render<${names.map(() => "any").join(", ")}>["bindings"]>; }\n` +
-          `const $$Component: $$IsomorphicComponent = null as any;\ntype $$Component${generics} = InstanceType<typeof $$Component${args}>;\n`,
+        `class $$Render${generics} { ${method("props")} ${method("events")} ${method("slots")} bindings() { return ${bindable}; } ${method("exports")} }\n` +
+          `interface $$Generic { new ${generics}(options: import("svelte").ComponentConstructorOptions<${part("props")}>): import("svelte").SvelteComponent<${part("props")}, ${part("events")}, ${part("slots")}> & { $$bindings?: ${part("bindings")} } & ${part("exports")}; ${generics}(internal: unknown, props: ${part("props")} & {}): ${part("exports")}; z_$$bindings?: ReturnType<$$Render<${names.map(() => "any").join(", ")}>["bindings"]>; }\n` +
+          `const $$Component: $$Generic = null as any;\ntype $$Component${generics} = InstanceType<typeof $$Component${args}>;\n`,
       );
     } else {
-      out.raw(
-        topLevelAwait
-          ? "const $$$render = await $$render();\nconst $$Component = __sveltets_2_fn_component($$$render);\n"
-          : "const $$Component = __sveltets_2_fn_component($$render());\n",
+      if (topLevelAwait) out.raw("const $$$render = await $$render();\n");
+      const rendered = renderedType();
+      declareComponent(
+        `import("svelte").Component<${rendered}["props"], ${rendered}["exports"], ${rendered}["bindings"]>`,
       );
       out.raw(
         isTs
