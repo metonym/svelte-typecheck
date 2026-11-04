@@ -46,6 +46,23 @@ describe("typecheck", () => {
     30_000,
   );
 
+  it("reports them on Svelte 3, with its element types from the shims", async () => {
+    const result = await typecheck({
+      cwd: root,
+      workspace: "tests/fixtures",
+      svelte: "node_modules/svelte3",
+      outDir: "node_modules/.cache/svelte-typecheck/test-svelte3",
+    });
+    expect(
+      result.diagnostics
+        .filter((d) => d.source !== "svelte")
+        .map(
+          (d) =>
+            `${relative(join(root, "tests/fixtures"), d.file)}:${d.line}:${d.column} ${d.code}`,
+        ),
+    ).toEqual(EXPECTED);
+  }, 30_000);
+
   describe("compiler diagnostics", () => {
     const check = (options: Parameters<typeof typecheck>[0] = {}) =>
       typecheck({

@@ -4,7 +4,6 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 import { lexComponent, lexImportsExports } from "sveast";
 import { version as TOOL_VERSION } from "../package.json";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
@@ -22,6 +21,7 @@ import {
   relativeTo,
   scriptsOf,
 } from "./project.ts";
+import { shim } from "./shims.ts";
 import type {
   CompilerDiagnostic,
   Diagnostic,
@@ -58,7 +58,6 @@ const STORE_ERROR = /^TS(2769|2345)$/;
 /** Unused label, and an unused comma operand. */
 const REACTIVE_NOISE = /^TS(7028|2695)$/;
 
-const SHIMS = fileURLToPath(new URL("./shims/", import.meta.url));
 /** The caches' shape, in each one's key: a new shape misses the old. */
 const CACHE_FORMAT = 1;
 /** The last run's result, and a key to what it read. */
@@ -394,10 +393,11 @@ export async function typecheck(
     readFileSync(join(svelteDir, "package.json"), "utf-8"),
   ) as { version: string };
   const svelteMajor = Number(version.split(".")[0]);
-  // Svelte 4 and 5 ship element typings; Svelte 3 doesn't.
+  // Svelte 4 and 5 ship element typings; Svelte 3 doesn't, so ours are
+  // written beside the shims.
   const svelteHtml =
     svelteMajor === 3
-      ? join(SHIMS, "svelte3-elements.d.ts")
+      ? join(outDir, "svelte-html.d.ts")
       : join(svelteDir, "svelte-html.d.ts");
 
   const checker =
@@ -747,7 +747,8 @@ export async function typecheck(
     // A copy beside the generated code, so its `import("svelte")` is the
     // project's Svelte, not whichever this package was installed with.
     const shims = join(outDir, "shims.d.ts");
-    write(shims, readFileSync(join(SHIMS, "shims.d.ts"), "utf-8"));
+    write(shims, shim("shims.d.ts"));
+    if (svelteMajor === 3) write(svelteHtml, shim("svelte3-elements.d.ts"));
 
     const rel = (path: string) => relativeTo(outDir, path);
     /** The program's root files: generated code in place of what it replaces. */
