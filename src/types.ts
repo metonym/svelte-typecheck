@@ -111,3 +111,34 @@ export interface CompilerDiagnostic {
   endLine?: number;
   endColumn?: number;
 }
+
+/**
+ * Diagnostics a project accepts for now, to report only new ones. Each is
+ * known by its file, code, message and the text of its line, not the
+ * line's number, so an edit above it doesn't make it new.
+ */
+export interface Baseline {
+  version: 1;
+  diagnostics: BaselineEntry[];
+}
+
+export interface BaselineEntry {
+  /** Relative to the workspace, `/`-separated. */
+  file: string;
+  code: string;
+  message: string;
+  /** The text of the diagnostic's line, trimmed. */
+  line: string;
+  /** How many such diagnostics there are. */
+  count: number;
+}
+
+/** What a baseline leaves of a run's diagnostics. */
+export interface BaselineResult {
+  /** The diagnostics the baseline doesn't have. */
+  diagnostics: Diagnostic[];
+  /** How many it has, and were left out. */
+  known: number;
+  /** How many it has that the run no longer reports. */
+  fixed: number;
+}

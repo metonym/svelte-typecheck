@@ -75,15 +75,18 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 | `--svelte <dir>`      | The Svelte install to check against, e.g. a Svelte 4 test harness's                                                                             |
 | `--changed`           | Report only the files changed from `HEAD` (and untracked ones), and the files that import them; see [Beyond svelte-check](#beyond-svelte-check) |
 | `--since <ref>`       | As `--changed`, from where the branch left `<ref>`: `--since origin/main`                                                                       |
+| `--baseline <file>`   | Report only diagnostics the baseline doesn't have; see [Beyond svelte-check](#beyond-svelte-check)                                              |
+| `--update-baseline`   | Write the run's diagnostics to `--baseline`'s file                                                                                              |
 
 ## Beyond svelte-check
 
 What svelte-typecheck does that svelte-check doesn't:
 
-|                               |                                                                                                                                                                                                                                                                 |
-| :---------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Any checker, TypeScript 7** | Checks with your project's `tsc`, including TypeScript 7's native one, or tsgo, tsrs or `bun check`; svelte-check needs TypeScript 5 or 6's JS API. See [Bring your own checker](#bring-your-own-checker).                                                      |
-| **Changed files only**        | `--changed` and `--since <ref>` report the files git sees changed and the files that import them, whose errors a change can cause. The whole program is still checked, so the errors are the same ones, fewer to read: for a pre-commit hook, or a PR's CI run. |
+|                               |                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| :---------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Any checker, TypeScript 7** | Checks with your project's `tsc`, including TypeScript 7's native one, or tsgo, tsrs or `bun check`; svelte-check needs TypeScript 5 or 6's JS API. See [Bring your own checker](#bring-your-own-checker).                                                                                                                                                                                                                                                                                             |
+| **Baselines**                 | `--update-baseline --baseline errors.json` records today's diagnostics; `--baseline errors.json` then reports, and fails on, only new ones. A diagnostic is known by its file, code, message and line's text, not its line number, so edits around it don't make it new; fixed ones are counted, to drop with `--update-baseline`. For turning on `strict`, a new rule, or a checker upgrade without fixing everything first. Its paths are the workspace's, so the file is the same on every machine. |
+| **Changed files only**        | `--changed` and `--since <ref>` report the files git sees changed and the files that import them, whose errors a change can cause. The whole program is still checked, so the errors are the same ones, fewer to read: for a pre-commit hook, or a PR's CI run.                                                                                                                                                                                                                                        |
 
 ### Differences from svelte-check
 
@@ -100,7 +103,12 @@ What svelte-typecheck does that svelte-check doesn't:
 ### API
 
 ```ts
-import { compilerDiagnostics, typecheck } from "svelte-typecheck";
+import {
+  applyBaseline,
+  compilerDiagnostics,
+  createBaseline,
+  typecheck,
+} from "svelte-typecheck";
 
 const { diagnostics, components, timings } = await typecheck({
   workspace: "src",
@@ -109,6 +117,11 @@ const { diagnostics, components, timings } = await typecheck({
 
 // Svelte's own warnings and errors (a11y, unused CSS, invalid markup).
 compilerDiagnostics(source, "Button.svelte");
+
+// What's new since a baseline, in the files a change reaches.
+const result = await typecheck({ only: ["src/Button.svelte"] });
+const baseline = createBaseline(result.diagnostics, result.workspace);
+applyBaseline(result.diagnostics, baseline, result.workspace).diagnostics; // []
 ```
 
 ## Bring your own checker
