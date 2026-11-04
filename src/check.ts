@@ -1251,7 +1251,9 @@ export async function typecheck(
       compile: compiledAt - emitted,
     },
   };
-  const inputs = [...order.keys()].filter((path) => !under(path, outDir));
+  const inputs = [...order.keys()]
+    .filter((path) => !under(path, outDir))
+    .flatMap((path) => [path, ...declarationsBeside(path)]);
   if (incremental) await fileFacts.save();
   if (incremental)
     await writeFile(
@@ -1306,6 +1308,14 @@ async function factsCache(path: string, enabled: boolean) {
     save: () =>
       writeFile(path, JSON.stringify({ format: CACHE_FORMAT, entries: used })),
   };
+}
+
+/**
+ * The declarations TypeScript reads in place of a JS file an import names,
+ * so a change to them, or their creation, is a change to the run.
+ */
+function declarationsBeside(path: string): string[] {
+  return JS_EXTENSION.test(path) ? [path.replace(JS_EXTENSION, ".d.$1ts")] : [];
 }
 
 /** Each file's size and modification time, or that it's missing. */
