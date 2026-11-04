@@ -416,3 +416,11 @@ declare function __sveltets_2_get_set_binding<T>(
   get: (() => T) | null | undefined,
   set: (t: T) => void,
 ): T;
+/**
+ * A `<svelte:element>` tag, as `string` when it may be any element (a
+ * component's generic tag): typed as every element's tag, its attributes
+ * are a union TypeScript can't represent. A smaller union keeps its tags.
+ */
+declare function __sveltets_2_elementTag<T extends string>(
+  tag: T | undefined | null,
+): keyof HTMLElementTagNameMap extends T ? string : T;

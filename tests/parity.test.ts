@@ -152,37 +152,66 @@ describe("svelte-check parity, machine output", () => {
     60_000,
   );
 
-  it("places an error on a `svelte:element` where svelte-check does", () => {
+  describe("`svelte:element`", () => {
     const cwd = join(root, "tests/.tmp/svelte-element");
-    mkdirSync(cwd, { recursive: true });
-    writeFileSync(
-      join(cwd, "jsconfig.json"),
-      JSON.stringify({
-        compilerOptions: {
-          strict: true,
-          checkJs: true,
-          allowJs: true,
-          module: "esnext",
-          moduleResolution: "bundler",
-        },
-        include: ["*.svelte"],
-      }),
-    );
-    writeFileSync(
-      join(cwd, "Any.svelte"),
-      [
-        "<script>",
-        '  /** @template {keyof HTMLElementTagNameMap} [Tag="div"] */',
-        "  /** @type {Tag} */",
-        '  export let tag = /** @type {Tag} */ ("div");',
-        "</script>",
-        "",
-        "<svelte:element this={tag}><slot /></svelte:element>",
-        "",
-      ].join("\n"),
-    );
-    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
-  }, 60_000);
+    const component = (markup: string) => {
+      mkdirSync(cwd, { recursive: true });
+      writeFileSync(
+        join(cwd, "jsconfig.json"),
+        JSON.stringify({
+          compilerOptions: {
+            strict: true,
+            checkJs: true,
+            allowJs: true,
+            module: "esnext",
+            moduleResolution: "bundler",
+          },
+          include: ["*.svelte"],
+        }),
+      );
+      writeFileSync(
+        join(cwd, "Any.svelte"),
+        [
+          "<script>",
+          '  /** @template {keyof HTMLElementTagNameMap} [Tag="div"] */',
+          "  /** @type {Tag} */",
+          '  export let tag = /** @type {Tag} */ ("div");',
+          "  /** @type {boolean} */",
+          "  export let link = false;",
+          "</script>",
+          "",
+          markup,
+          "",
+        ].join("\n"),
+      );
+    };
+    const TOO_COMPLEX = "union type that is too complex";
+
+    it("checks a tag that may be any element, where svelte-check gives up", () => {
+      component("<svelte:element this={tag}><slot /></svelte:element>");
+      // svelte-check reports TypeScript's limit instead; see the README.
+      expect(svelteCheck([], cwd).some((l) => l.includes(TOO_COMPLEX))).toBe(
+        true,
+      );
+      expect(ours([], cwd).some((l) => l.startsWith("ERROR"))).toBe(false);
+    }, 60_000);
+
+    it("places an attribute error where svelte-check does", () => {
+      component(
+        "<svelte:element this={tag} title={1}><slot /></svelte:element>",
+      );
+      const at = (lines: string[]) =>
+        lines.filter((l) => l.startsWith("ERROR")).map((l) => l.split(" ")[2]);
+      expect(at(ours([], cwd))).toEqual(at(svelteCheck([], cwd)));
+    }, 60_000);
+
+    it("matches svelte-check on a tag from a few elements", () => {
+      component(
+        '<svelte:element this={link ? "a" : "div"} href="/" title={{}}><slot /></svelte:element>',
+      );
+      expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+    }, 60_000);
+  });
 
   it("matches svelte-check with preprocessors", () => {
     const cwd = join(root, "tests/fixtures-preprocess");
