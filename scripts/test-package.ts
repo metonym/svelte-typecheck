@@ -168,6 +168,38 @@ try {
     `node without Bun picked ${nodeOnly.stdout}${nodeOnly.stderr}`,
   );
 
+  // A compiler-only run needs no checker: in a folder outside the project,
+  // where no `typescript` resolves, with no checker on PATH either.
+  const bare = join(dir, "bare");
+  write(bare, { "App.svelte": '<img src="a.png">\n' });
+  const noChecker = noBun
+    .split(delimiter)
+    .filter((entry) =>
+      ["", ".exe", ".cmd"].every(
+        (ext) => !existsSync(join(entry, `tsc${ext}`)),
+      ),
+    )
+    .join(delimiter);
+  const compilerOnly = spawnSync(
+    process.env.NODE ?? "node",
+    [
+      join(project, "node_modules/svelte-typecheck/cli.js"),
+      "--no-tsconfig",
+      "--diagnostic-sources",
+      "svelte",
+      "--svelte",
+      join(project, "node_modules/svelte"),
+      "--output",
+      "machine",
+    ],
+    { cwd: bare, encoding: "utf-8", env: { ...process.env, PATH: noChecker } },
+  );
+  assert(
+    compilerOnly.status === 0 &&
+      compilerOnly.stdout.includes("a11y_missing_attribute"),
+    `a compiler-only run without a checker: exit ${compilerOnly.status}\n${compilerOnly.stdout}${compilerOnly.stderr}`,
+  );
+
   write(project, {
     "smoke.js": `import assert from "node:assert/strict";
 import { compilerDiagnostics, typecheck } from "svelte-typecheck";

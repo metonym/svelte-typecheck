@@ -99,7 +99,11 @@ export interface TypecheckResult {
   dropped: Diagnostic[];
   /** Components that failed to parse. */
   failed: { file: string; message: string }[];
-  checker: Checker;
+  /**
+   * The checker that ran. Unset when only the compiler's diagnostics were
+   * asked for and no checker is installed.
+   */
+  checker?: Checker;
   /** The checker's version, when its package says. */
   checkerVersion?: string;
   /** Milliseconds spent emitting, type-checking and compiling. */

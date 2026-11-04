@@ -406,7 +406,8 @@ export async function typecheck(
   // From the workspace up: a monorepo package's own install, then a
   // hoisted one, wherever the run starts.
   const command = checker && checkerCommand(checker, workspace);
-  if (!(checker && command))
+  // The compiler's diagnostics alone run no checker, so need none.
+  if (sources.has("js") && !(checker && command))
     throw new Error(
       `No type checker found: install \`typescript\` (or one of ${CHECKERS.slice(1).join(", ")}), or name one with \`checker\`.`,
     );
@@ -448,7 +449,7 @@ export async function typecheck(
           CACHE_FORMAT,
           version,
           checker,
-          command.version,
+          command?.version,
           cwd,
           options,
           configFingerprint(configDir, configFile),
@@ -831,14 +832,15 @@ export async function typecheck(
   const emitted = performance.now();
 
   // The compiler pass runs while the checker's process works.
-  const checking = sources.has("js")
-    ? run(
-        command.command,
-        [...command.prefix, ...checkerArgs(checker, tsconfig)],
-        cwd,
-        command.shell,
-      ).then((output) => ({ output, at: performance.now() }))
-    : Promise.resolve({ output: "", at: emitted });
+  const checking =
+    checker && command && sources.has("js")
+      ? run(
+          command.command,
+          [...command.prefix, ...checkerArgs(checker, tsconfig)],
+          cwd,
+          command.shell,
+        ).then((output) => ({ output, at: performance.now() }))
+      : Promise.resolve({ output: "", at: emitted });
   const compiled: Diagnostic[] = [];
   // The compiler pass's results by component, for an incremental run: a
   // component whose text, Svelte, config and svelte-typecheck are the
@@ -1245,7 +1247,7 @@ export async function typecheck(
     dropped,
     failed,
     checker,
-    checkerVersion: command.version,
+    checkerVersion: command?.version,
     timings: {
       emit: emitted - started,
       check: checked - emitted,
