@@ -77,7 +77,7 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 ### Differences from svelte-check
 
 - **CSS diagnostics** (`--diagnostic-sources css`): accepted, but nothing is reported. svelte-check runs a CSS language service on `<style>`, a dependency this package leaves out; Svelte's compiler still reports invalid CSS.
-- **Preprocessors** come from `svelte.config.{js,mjs,cjs}`, not a `vite.config`, which would need Vite.
+- **Preprocessors and `compilerOptions`** come from `svelte.config.{js,mjs,cjs}`, not a `vite.config`, which would need Vite.
 - **`COMPLETED <n> FILES`** counts components, not every file in TypeScript's program.
 - **`--diagnostic-sources svelte`** with a tsconfig reports no type errors, as svelte-check's docs say; svelte-check itself reports them.
 - **`--tsgo-experimental-api`** is accepted, and does what `--tsgo` does.

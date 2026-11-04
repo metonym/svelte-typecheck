@@ -1,4 +1,4 @@
-import { isReference, isRunesMode, parse, walk } from "sveast";
+import { isReference, isRunesMode, parse, SKIP, walk } from "sveast";
 import { analyzeScopes } from "sveast/scope";
 import {
   isKitErrorFile,
@@ -91,6 +91,8 @@ function jsdocTemplates(generics: string) {
 }
 
 const JSDOC_TYPE = /@type\b/;
+const FUNCTION =
+  /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|MethodDefinition|PropertyDefinition)$/;
 
 /** The type svelte2tsx infers for a prop from its default. */
 // eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
@@ -192,6 +194,16 @@ export function emit(
     out.copy(at, module.content.end).raw("\n");
   }
   const body: Node[] = instance?.content.body ?? [];
+  /** Svelte 5's `await` at the instance script's top level makes `$$render` async. */
+  let topLevelAwait = false;
+  if (svelte >= 5)
+    for (const s of body)
+      walk(s, {
+        enter(node: Node) {
+          if (node.type === "AwaitExpression") topLevelAwait = true;
+          return FUNCTION.test(node.type) ? SKIP : undefined;
+        },
+      });
   for (const s of body)
     if (s.type === "ImportDeclaration") copyStatement(s).raw("\n");
 
@@ -232,6 +244,8 @@ export function emit(
       );
     }
   let generics = "";
+  /** In JS, the component's `@template` tags, written right above `$$render`. */
+  let templateDoc = "";
   if (instance) {
     const tags: string[] = [];
     const attr = instance.attributes.find((a: Node) => a.name === "generics");
@@ -258,7 +272,8 @@ export function emit(
           );
       // The rest of the block (its description) stays where it was.
     }
-    if (tags.length > 0 && !isTs) out.raw(`/**\n${tags.join("\n")}\n */\n`);
+    if (tags.length > 0 && !isTs)
+      templateDoc = `/**\n${tags.join("\n")}\n */\n`;
   }
   if (typeParams.length > 0) generics = `<${typeParams.join(", ")}>`;
 
@@ -748,6 +763,47 @@ export function emit(
     }
   };
 
+  /** Root snippets that read no instance binding, nor such a snippet. */
+  function hoistable(snippets: Node[]): Set<Node> {
+    const names = new Set(snippets.map((s) => s.expression.name));
+    const reads = new Map<Node, { instance: boolean; snippets: Set<string> }>();
+    for (const s of snippets) {
+      const read = { instance: false, snippets: new Set<string>() };
+      walk(s, {
+        enter(node: Node, parent: Node) {
+          if (node === s.expression) return;
+          // `<Foo>` reads `Foo`, which the instance script may import.
+          let name: string | undefined;
+          if (node.type === "Component") name = node.name.split(".")[0];
+          else if (node.type === "Identifier" && isReference(node, parent))
+            name = node.name;
+          if (!name) return;
+          const b =
+            node.type === "Identifier" ? scopes.bindingOf(node) : undefined;
+          if (b && b.scope !== scopes.instance && b.scope !== scopes.module)
+            return;
+          if (b?.scope === scopes.instance || scopes.instance?.get(name))
+            read.instance = true;
+          else if (names.has(name)) read.snippets.add(name);
+        },
+      });
+      reads.set(s, read);
+    }
+    const kept = new Set(snippets.filter((s) => !reads.get(s)?.instance));
+    for (let changed = true; changed;) {
+      changed = false;
+      const keptNames = new Set([...kept].map((s) => s.expression.name));
+      for (const s of kept)
+        if (
+          [...(reads.get(s)?.snippets ?? [])].some((n) => !keptNames.has(n))
+        ) {
+          kept.delete(s);
+          changed = true;
+        }
+    }
+    return kept;
+  }
+
   /** A snippet's parameters, as written. */
   function parameters(node: Node) {
     for (const [i, p] of (node.parameters as Node[]).entries()) {
@@ -769,11 +825,16 @@ export function emit(
   /** A snippet as svelte2tsx declares it: an arrow that returns a snippet's result. */
   function snippet(node: Node) {
     out.raw("const ").copy(node.expression.start, node.expression.end);
-    out.raw(
-      isTs
-        ? ` = ${node.typeParams ? `<${node.typeParams}>` : ""}(`
-        : " = /** @returns {ReturnType<import('svelte').Snippet>} */ (",
-    );
+    if (isTs) {
+      out.raw(" = ");
+      if (node.typeParams) {
+        // An error in them points at their `<`, as svelte2tsx maps them.
+        const at = source.indexOf("<", node.expression.end);
+        out.from(at, () => out.raw(`<${node.typeParams}>`));
+      }
+      out.raw("(");
+    } else
+      out.raw(" = /** @returns {ReturnType<import('svelte').Snippet>} */ (");
     parameters(node);
     out.raw(
       `)${isTs ? ": ReturnType<import('svelte').Snippet>" : ""} => { async () => {`,
@@ -804,15 +865,24 @@ export function emit(
       }
   }
 
+  // With a module script, a root snippet that reads nothing of the
+  // instance's goes to the top level, where the module script can export it.
+  const rootSnippets: Node[] = ast.fragment.nodes.filter(
+    (n: Node) => n.type === "SnippetBlock",
+  );
+  const moduleSnippets = module ? hoistable(rootSnippets) : new Set<Node>();
+  for (const n of rootSnippets) if (moduleSnippets.has(n)) snippet(n);
+  out.raw(templateDoc);
+  const async = topLevelAwait ? "async " : "";
   out.raw(
     runes
-      ? `function $$render${generics}() { `
-      : `function $$render${generics}() { let $$props = __sveltets_2_allPropsType(); let $$restProps = __sveltets_2_restPropsType(); let $$slots = __sveltets_2_any(0); ${typed.has("$$Slots") ? "const __sveltets_createSlot = __sveltets_2_createCreateSlot<$$Slots>(); " : ""}`,
+      ? `${async}function $$render${generics}() { `
+      : `${async}function $$render${generics}() { let $$props = __sveltets_2_allPropsType(); let $$restProps = __sveltets_2_restPropsType(); let $$slots = __sveltets_2_any(0); ${typed.has("$$Slots") ? "const __sveltets_createSlot = __sveltets_2_createCreateSlot<$$Slots>(); " : ""}`,
   );
   for (const name of storeAtStart) declareStore(name);
   out.raw("\n");
   // The root's snippets, which the instance script can read.
-  for (const n of ast.fragment.nodes) if (n.type === "SnippetBlock") snippet(n);
+  for (const n of rootSnippets) if (!moduleSnippets.has(n)) snippet(n);
 
   // --- Instance script, statement by statement.
   const props: {
@@ -1157,9 +1227,11 @@ export function emit(
   // `$$restProps` or `$$props` lets a parent pass any prop.
   const anyProp = USES_ALL_PROPS.test(source);
   // Undeclared events are any `CustomEvent`, unless they're strict.
+  const renderCall = topLevelAwait ? "$$$render" : "$$render()";
+  if (topLevelAwait) out.raw("const $$$render = await $$render();\n");
   const rendered = strictEvents
-    ? "$$render()"
-    : "__sveltets_2_with_any_event($$render())";
+    ? renderCall
+    : `__sveltets_2_with_any_event(${renderCall})`;
   // `$$Props` says which props are optional.
   const withProps = typed.has("$$Props")
     ? rendered
@@ -1170,9 +1242,8 @@ export function emit(
     const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[1] ?? p);
     const args = `<${names.join(", ")}>`;
     // A function, since `$$` in a replacement string means `$`.
-    const wrapped = withProps.replaceAll(
-      "$$render()",
-      () => `$$render${args}()`,
+    const wrapped = withProps.replaceAll(renderCall, () =>
+      topLevelAwait ? `(await $$render${args}())` : `$$render${args}()`,
     );
     const part = (name: string) =>
       `ReturnType<__sveltets_Render${args}["${name}"]>`;
@@ -1211,13 +1282,22 @@ export function emit(
       const args = `<${names.join(", ")}>`;
       const part = (name: string) =>
         `ReturnType<__sveltets_Render${args}["${name}"]>`;
+      const renderType = topLevelAwait
+        ? `Awaited<ReturnType<typeof $$render${args}>>`
+        : `ReturnType<typeof $$render${args}>`;
+      const method = (name: string) =>
+        `${name}(): ${renderType}["${name}"] { return null as any; }`;
       out.raw(
-        `class __sveltets_Render${generics} { props() { return $$render${args}().props; } events() { return $$render${args}().events; } slots() { return $$render${args}().slots; } bindings() { return ${bindable}; } exports() { return $$render${args}().exports; } }\n` +
+        `class __sveltets_Render${generics} { ${method("props")} ${method("events")} ${method("slots")} bindings() { return ${bindable}; } ${method("exports")} }\n` +
           `interface $$IsomorphicComponent { new ${generics}(options: import("svelte").ComponentConstructorOptions<${part("props")}>): import("svelte").SvelteComponent<${part("props")}, ${part("events")}, ${part("slots")}> & { $$bindings?: ${part("bindings")} } & ${part("exports")}; ${generics}(internal: unknown, props: ${part("props")} & {}): ${part("exports")}; z_$$bindings?: ReturnType<__sveltets_Render<${names.map(() => "any").join(", ")}>["bindings"]>; }\n` +
           `const $$Component: $$IsomorphicComponent = null as any;\ntype $$Component${generics} = InstanceType<typeof $$Component${args}>;\n`,
       );
     } else {
-      out.raw("const $$Component = __sveltets_2_fn_component($$render());\n");
+      out.raw(
+        topLevelAwait
+          ? "const $$$render = await $$render();\nconst $$Component = __sveltets_2_fn_component($$$render);\n"
+          : "const $$Component = __sveltets_2_fn_component($$render());\n",
+      );
       out.raw(
         isTs
           ? "type $$Component = ReturnType<typeof $$Component>;\n"

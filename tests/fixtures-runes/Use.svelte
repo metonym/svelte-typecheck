@@ -4,6 +4,8 @@
   import Inferred from "./Inferred.svelte";
   import List from "./List.svelte";
   import Loose from "./Loose.svelte";
+  import Loaded from "./Loaded.svelte";
+  import Rows, { row as exportedRow } from "./Rows.svelte";
   import { counter } from "./counter.svelte.js";
 
   let v = $state(1);
@@ -47,3 +49,6 @@
 {@render row("1")}
 {@render notSnippet()}
 <Loose a={1} b="x" bind:c={text} />
+<Loaded url={1} />
+<Rows n="2" />
+{@render exportedRow("x")}
