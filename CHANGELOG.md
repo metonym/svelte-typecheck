@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.1.7 — 2026-11-04
+
+**Internal**
+
+- The package is smaller, 124.5KB packed from 129.5KB: the README is a
+  quick start, with the rest of the docs in `docs/` on GitHub, and
+  `index.d.ts` drops its leading comment.
+
 ## 0.1.6 — 2026-11-04
 
 **Fixes**
