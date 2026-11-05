@@ -148,6 +148,36 @@ describe("incremental, with nothing changed", () => {
     await writeFile(dts, "export const count: string;\n");
     expect((await run()).diagnostics.map((d) => d.code)).toEqual(["TS2322"]);
   }, 30_000);
+
+  it("checks again once a component's own declarations appear or go", async () => {
+    const dir = await workspace("replay-svelte-dts");
+    const outDir = join(
+      root,
+      "node_modules/.cache/svelte-typecheck/test-replay-svelte-dts",
+    );
+    await rm(outDir, { recursive: true, force: true });
+    // Only the components, as carbon-components-svelte's: the
+    // declarations are outside `include`.
+    const tsconfig = JSON.parse(
+      await readFile(join(dir, "tsconfig.json"), "utf-8"),
+    );
+    await writeFile(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({ ...tsconfig, include: ["*.svelte"] }),
+    );
+    const run = () => typecheck({ cwd: root, workspace: dir, outDir });
+    expect((await run()).diagnostics).toEqual([]);
+    // What an import of Child.svelte finds in place of its code, as a
+    // build that writes declarations beside the components leaves them.
+    const dts = join(dir, "Child.svelte.d.ts");
+    await writeFile(
+      dts,
+      'import type { Component } from "svelte";\ndeclare const Child: Component<{ count: string }>;\nexport default Child;\n',
+    );
+    expect((await run()).diagnostics.length).toBeGreaterThan(0);
+    await rm(dts);
+    expect((await run()).diagnostics).toEqual([]);
+  }, 30_000);
 });
 
 describe("the project's own build info", () => {

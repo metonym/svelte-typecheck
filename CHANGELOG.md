@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- An incremental run checks again when a component's own
+  `X.svelte.d.ts` appears, changes or goes, such as one a build writes
+  beside it, where it returned the last run's result. Outside the
+  tsconfig's `include`, it wasn't one of the files the run watched.
+
 ## 0.1.8 — 2026-11-04
 
 **Performance**
