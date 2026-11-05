@@ -6,6 +6,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { readdir } from "node:fs/promises";
@@ -18,6 +19,8 @@ const root = resolve(import.meta.dir, "..");
 const dist = join(root, "dist");
 const dir = mkdtempSync(join(tmpdir(), "svelte-typecheck-package-"));
 const ALLOWED = /^(node:|\.\/|svelte\/compiler$)/;
+// The packed tarball's ceiling: docs live in docs/, not the package.
+const MAX_PACKED_BYTES = 128 * 1024;
 const MACHINE_ERROR = /^\d+ ERROR "(.+)" (\d+:\d+) /gm;
 
 const WINDOWS = process.platform === "win32";
@@ -100,6 +103,11 @@ try {
     ["pack", "--pack-destination", dir, "--silent"],
     dist,
   ).trim();
+  const packed = statSync(join(dir, tarball)).size;
+  assert(
+    packed <= MAX_PACKED_BYTES,
+    `the tarball is ${packed} bytes, over ${MAX_PACKED_BYTES}`,
+  );
 
   // A project with the fixtures, svelte and TypeScript 6 for `tsc`.
   const project = join(dir, "project");
