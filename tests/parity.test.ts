@@ -159,6 +159,42 @@ describe("svelte-check parity, machine output", () => {
     60_000,
   );
 
+  it("leaves an element's attributes unchecked with an action, as svelte-check does", () => {
+    const cwd = join(root, "tests/.tmp/action-attributes");
+    mkdirSync(cwd, { recursive: true });
+    writeFileSync(
+      join(cwd, "jsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          checkJs: true,
+          allowJs: true,
+          module: "esnext",
+          moduleResolution: "bundler",
+        },
+        include: ["*.svelte"],
+      }),
+    );
+    writeFileSync(
+      join(cwd, "App.svelte"),
+      [
+        "<script>",
+        "  /** @type {number | string | undefined} */",
+        '  export let tabindex = "0";',
+        "  /** @param {HTMLElement} node */",
+        "  function noop(node) {",
+        "    void node;",
+        "  }",
+        "</script>",
+        "",
+        "<input use:noop {tabindex} />",
+        "<input {tabindex} />",
+        "",
+      ].join("\n"),
+    );
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   describe("`svelte:element`", () => {
     const cwd = join(root, "tests/.tmp/svelte-element");
     const component = (markup: string) => {
