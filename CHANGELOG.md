@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- The compiler's pass runs on the worker when the workspace is given
+  through a symlink (`/tmp` on macOS) that leads to the working
+  directory, where it ran on the main thread and held up the run.
+
 ## 0.1.9 — 2026-11-05
 
 **Fixes**
