@@ -1,8 +1,3 @@
-// The package's public API, as consumers see it: the build copies this file
-// as dist/index.d.ts, so it imports nothing and holds only declarations.
-// tests/api.test.ts fails when an implementation's signature drifts from
-// its declaration here.
-
 /** A type checker that reads a tsconfig and prints errors as `tsc` does. */
 export type Checker = "bun" | "tsrs" | "tsgo" | "tsc";
 
