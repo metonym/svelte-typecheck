@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import {
   compileAll,
@@ -143,5 +143,21 @@ describe("compileAll with a config's shape", () => {
     expect(results).toEqual([[]]);
     expect(shape?.preprocess).toEqual([{ name: "", hooks: ["markup"] }]);
     expect((await compileAll({ ...request, shape })).results).toEqual([[]]);
+  });
+});
+
+describe("configNeedsChdir", () => {
+  it("knows the cwd through a symlink", async () => {
+    const link = join(root, "tests/.tmp/kit-link");
+    await rm(link, { force: true });
+    await symlink(join(root, "tests/fixtures-kit"), link);
+    const cwd = process.cwd();
+    process.chdir(join(root, "tests/fixtures-kit"));
+    try {
+      expect(configNeedsChdir(link)).toBe(false);
+      expect(configNeedsChdir(link, join(link, "vite.config.ts"))).toBe(false);
+    } finally {
+      process.chdir(cwd);
+    }
   });
 });

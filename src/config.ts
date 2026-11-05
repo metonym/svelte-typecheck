@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -87,14 +87,27 @@ export function configFingerprint(dir: string, explicit?: string): string {
  * reads svelte.config.js from there.
  */
 export function configNeedsChdir(dir: string, explicit?: string): boolean {
-  const cwd = process.cwd();
+  // Real paths both: `dir` may name the cwd through a symlink, as `/tmp`
+  // does `/private/tmp` on macOS.
+  const cwd = realPath(process.cwd());
   if (explicit)
-    return !SVELTE_CONFIG.test(basename(explicit)) && dirname(explicit) !== cwd;
-  for (let at = dir; ; at = dirname(at)) {
+    return (
+      !SVELTE_CONFIG.test(basename(explicit)) &&
+      realPath(dirname(explicit)) !== cwd
+    );
+  for (let at = realPath(dir); ; at = dirname(at)) {
     if (at !== cwd && firstIn(at, VITE_CONFIGS)) return true;
     if (dirname(at) === at) return false;
   }
 }
+
+const realPath = (path: string) => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return path;
+  }
+};
 
 const firstIn = (dir: string, names: string[]) =>
   names.map((name) => join(dir, name)).find((path) => existsSync(path));
