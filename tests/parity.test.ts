@@ -238,7 +238,7 @@ describe("svelte-check parity, machine output", () => {
 
     it("checks a tag that may be any element, where svelte-check gives up", () => {
       component("<svelte:element this={tag}><slot /></svelte:element>");
-      // svelte-check reports TypeScript's limit instead; see the README.
+      // svelte-check reports TypeScript's limit instead; see docs/svelte-check.md.
       expect(svelteCheck([], cwd).some((l) => l.includes(TOO_COMPLEX))).toBe(
         true,
       );
