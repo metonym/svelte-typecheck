@@ -113,11 +113,24 @@ declare namespace $$check {
   function action<T extends __sveltets_2_SvelteActionReturnType>(
     returned: T,
   ): T extends { $$_attributes?: any } ? T["$$_attributes"] : {};
-  /** What an element's actions add to its attributes, together. */
-  function attributes<T extends unknown[]>(...added: T): Joined<T>;
-  type Joined<T extends unknown[]> = T extends [infer First, ...infer Rest]
-    ? First & Joined<Rest>
-    : unknown;
+  /**
+   * What an element's actions add to its attributes, together. Ten optional
+   * parameters, as svelte2tsx's `__sveltets_2_union` has them: TypeScript
+   * then infers the element's attributes from the attributes alone, as it
+   * does for svelte-check, rather than from what's added too.
+   */
+  function attributes<T1, T2, T3, T4, T5, T6, T7, T8, T9, T10>(
+    t1: T1,
+    t2?: T2,
+    t3?: T3,
+    t4?: T4,
+    t5?: T5,
+    t6?: T6,
+    t7?: T7,
+    t8?: T8,
+    t9?: T9,
+    t10?: T10,
+  ): T1 & T2 & T3 & T4 & T5 & T6 & T7 & T8 & T9 & T10;
   function transition(returned: __sveltets_2_SvelteTransitionReturnType): {};
   function animation(returned: __sveltets_2_SvelteAnimationReturnType): {};
   /** An animation's second argument. */
