@@ -6,7 +6,7 @@ parentPort?.on(
   "message",
   async ({ id, request }: { id: number; request: CompileRequest }) => {
     try {
-      parentPort?.postMessage({ id, results: await compileAll(request) });
+      parentPort?.postMessage({ id, result: await compileAll(request) });
     } catch (error) {
       parentPort?.postMessage({
         id,

@@ -11,6 +11,7 @@ import {
   compileAll,
   compileOffThread,
   type CompileRequest,
+  type ConfigShape,
   svelteDirOf,
 } from "./compiler.ts";
 import { configFingerprint } from "./config.ts";
@@ -102,6 +103,9 @@ interface CompileCache {
   fingerprint: string;
   /** Diagnostics, by a hash of a component's name and text. */
   entries: Record<string, CompilerDiagnostic[]>;
+  /** The config's shape, and the packages it was read with. */
+  shape?: ConfigShape;
+  shapeKey?: string;
 }
 const hash = (text: string) => createHash("sha1").update(text).digest("hex");
 /** Components to compile before the compiler's pass moves to a worker. */
@@ -528,10 +532,13 @@ export async function typecheck(
         .map((_, i) => i)
         .filter((i) => cache.entries[keys[i] ?? ""] === undefined)
     : [];
+  // A Vite plugin's preprocessors are the installed package's.
+  const shapeKey = hash(JSON.stringify(statsOf(packageFilesOf(projectDir))));
   const compileRequest: CompileRequest = {
     svelteDir,
     configDir,
     configFile,
+    shape: cache.shapeKey === shapeKey ? cache.shape : undefined,
     components: missing.map((i) => ({
       source: texts[i] ?? "",
       filename: relative(cwd, files[i] ?? ""),
@@ -985,7 +992,9 @@ export async function typecheck(
       const fresh =
         (await compilingOffThread) ?? (await compileAll(compileRequest));
       for (const [n, i] of missing.entries())
-        cache.entries[keys[i] ?? ""] = fresh[n] ?? [];
+        cache.entries[keys[i] ?? ""] = fresh.results[n] ?? [];
+      cache.shape = fresh.shape;
+      cache.shapeKey = fresh.shape && shapeKey;
     }
     for (const key of keys) perFile.push(cache.entries[key] ?? []);
     if (incremental) {
@@ -994,7 +1003,12 @@ export async function typecheck(
       );
       await writeFile(
         cachePath,
-        JSON.stringify({ fingerprint, entries: kept } satisfies CompileCache),
+        JSON.stringify({
+          fingerprint,
+          entries: kept,
+          shape: cache.shape,
+          shapeKey: cache.shapeKey,
+        } satisfies CompileCache),
       );
     }
   }

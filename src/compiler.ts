@@ -124,6 +124,8 @@ async function preprocessedDiagnostics(
   filename: string,
   svelteDir: string,
   config: SvelteConfig,
+  /** Whether the config has preprocessors, when they're left out of `config`. */
+  preprocessed = Boolean(config.preprocess),
 ): Promise<CompilerDiagnostic[]> {
   const compiler = compilerOf(svelteDir);
   const { preprocess, compilerOptions } = config;
@@ -150,7 +152,60 @@ async function preprocessedDiagnostics(
       return { ...d, ...start, endLine: end.line, endColumn: end.column };
     });
   }
-  return asSvelteCheck(diagnostics, source, Boolean(preprocess));
+  return asSvelteCheck(diagnostics, source, preprocessed);
+}
+
+/**
+ * What a later run needs to know of a config to compile a component
+ * without loading it: its preprocessors, by name and the tags they read,
+ * and its compiler options.
+ */
+export interface ConfigShape {
+  preprocess: { name: string; hooks: Hook[] }[];
+  preprocessed: boolean;
+  compilerOptions: Record<string, unknown>;
+}
+type Hook = "markup" | "script" | "style";
+const HOOKS: Hook[] = ["markup", "script", "style"];
+/** Preprocessors that never change code: SvelteKit's only warns. */
+const UNCHANGING = new Set(["sveltekit:warnings"]);
+/** The tags Svelte's `preprocess` hands each hook, anywhere in the markup. */
+const TAG: Record<Exclude<Hook, "markup">, RegExp> = {
+  script: /<script[\s/>]/i,
+  style: /<style[\s/>]/i,
+};
+
+/** Only JSON: a function (`warningFilter`, `cssHash`) can't be kept. */
+function isJson(value: unknown): boolean {
+  if (value === null || ["string", "number", "boolean"].includes(typeof value))
+    return true;
+  if (Array.isArray(value)) return value.every(isJson);
+  return (
+    typeof value === "object" &&
+    Object.getPrototypeOf(value) === Object.prototype &&
+    Object.values(value as object).every((v) => v === undefined || isJson(v))
+  );
+}
+
+function shapeOf(config: SvelteConfig): ConfigShape | undefined {
+  if (!isJson(config.compilerOptions)) return;
+  return {
+    preprocess: (config.preprocess ?? []).map((p) => ({
+      name: typeof p.name === "string" ? p.name : "",
+      hooks: HOOKS.filter((hook) => typeof p[hook] === "function"),
+    })),
+    preprocessed: Boolean(config.preprocess),
+    compilerOptions: config.compilerOptions,
+  };
+}
+
+/** Whether no preprocessor that can change code reads any of `source`. */
+function untouched(source: string, shape: ConfigShape): boolean {
+  return shape.preprocess.every(
+    (p) =>
+      UNCHANGING.has(p.name) ||
+      p.hooks.every((hook) => hook !== "markup" && !TAG[hook].test(source)),
+  );
 }
 
 /** Components to compile, with what finds their compiler and config. */
@@ -158,24 +213,55 @@ export interface CompileRequest {
   svelteDir: string;
   configDir: string;
   configFile?: string;
+  /** The config's shape, as the last run that loaded it found it. */
+  shape?: ConfigShape;
   components: { source: string; filename: string }[];
 }
 
-/** `preprocessedDiagnostics` for each component, with the config loaded once. */
+export interface CompileResult {
+  results: CompilerDiagnostic[][];
+  /** The shape of the config this run loaded, or used without loading. */
+  shape?: ConfigShape;
+}
+
+/**
+ * `preprocessedDiagnostics` for each component, with the config loaded
+ * once; not at all when, by its shape, no preprocessor that can change
+ * code reads any of them, as a Vite config can take half a second.
+ */
 export async function compileAll(
   request: CompileRequest,
-): Promise<CompilerDiagnostic[][]> {
+): Promise<CompileResult> {
+  const { shape, svelteDir } = request;
+  if (shape && request.components.every((c) => untouched(c.source, shape)))
+    return {
+      shape,
+      results: await Promise.all(
+        request.components.map(({ source, filename }) =>
+          preprocessedDiagnostics(
+            source,
+            filename,
+            svelteDir,
+            { compilerOptions: shape.compilerOptions },
+            shape.preprocessed,
+          ),
+        ),
+      ),
+    };
   const config = await svelteConfigOf(request.configDir, request.configFile);
-  return Promise.all(
-    request.components.map(({ source, filename }) =>
-      preprocessedDiagnostics(source, filename, request.svelteDir, config),
+  return {
+    shape: shapeOf(config),
+    results: await Promise.all(
+      request.components.map(({ source, filename }) =>
+        preprocessedDiagnostics(source, filename, svelteDir, config),
+      ),
     ),
-  );
+  };
 }
 
 interface Pending {
   request: CompileRequest;
-  done: (results: CompilerDiagnostic[][]) => void;
+  done: (result: CompileResult) => void;
   fail: (error: Error) => void;
 }
 
@@ -196,16 +282,12 @@ function startWorker(): Worker {
   const started = new Worker(new URL(file, import.meta.url));
   started.on(
     "message",
-    (reply: {
-      id: number;
-      results?: CompilerDiagnostic[][];
-      error?: string;
-    }) => {
+    (reply: { id: number; result?: CompileResult; error?: string }) => {
       const job = pending.get(reply.id);
       if (!job) return;
       pending.delete(reply.id);
       if (pending.size === 0) started.unref();
-      if (reply.results) job.done(reply.results);
+      if (reply.result) job.done(reply.result);
       else job.fail(new Error(reply.error));
     },
   );
@@ -230,7 +312,7 @@ function startWorker(): Worker {
  */
 export function compileOffThread(
   request: CompileRequest,
-): Promise<CompilerDiagnostic[][]> | undefined {
+): Promise<CompileResult> | undefined {
   if (configNeedsChdir(request.configDir, request.configFile)) return;
   try {
     worker ??= startWorker();

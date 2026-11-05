@@ -41,7 +41,70 @@ describe("the compiler pass's cache", () => {
       component,
       `${await readFile(component, "utf-8")}<img src="b.png" />\n`,
     );
+    // A changed component: a config with no preprocessors, whose shape
+    // the first run kept, isn't loaded either.
+    expect(warnings()).toBe(2);
+    expect(existsSync(loaded)).toBe(false);
+
+    // A changed config is.
+    await writeFile(
+      join(dir, "svelte.config.js"),
+      `${await readFile(join(dir, "svelte.config.js"), "utf-8")}// changed\n`,
+    );
     expect(warnings()).toBe(2);
     expect(existsSync(loaded)).toBe(true);
+  }, 60_000);
+
+  it("leaves the config unloaded for a changed component no preprocessor that changes code reads", async () => {
+    const dir = join(root, "tests/.tmp/compile-cache-shape");
+    await rm(dir, { recursive: true, force: true });
+    await mkdir(dir, { recursive: true });
+    await Promise.all(
+      ["Warnings.svelte", "tsconfig.json"].map((file) =>
+        cp(join(root, "tests/fixtures", file), join(dir, file)),
+      ),
+    );
+    // A style preprocessor that strips `#!custom`, and SvelteKit's, which
+    // only warns; a marker each time a run loads it.
+    await writeFile(
+      join(dir, "svelte.config.js"),
+      `import { writeFileSync } from "node:fs";
+writeFileSync(new URL("./loaded", import.meta.url), "");
+export default {
+  preprocess: [
+    { name: "strip", style: ({ content }) => ({ code: content.replace("#!custom", "") }) },
+    { name: "sveltekit:warnings", markup() {}, script() {} },
+  ],
+};
+`,
+    );
+    const run = () =>
+      spawnSync(
+        process.execPath,
+        [join(root, "src/cli.ts"), "--output", "machine"],
+        { cwd: dir, encoding: "utf-8" },
+      ).stdout;
+    const loaded = join(dir, "loaded");
+    expect(run().match(WARNING)?.length).toBe(1);
+    expect(existsSync(loaded)).toBe(true);
+
+    // No `<style>`: compiled as the config would, without loading it.
+    await rm(loaded);
+    const component = join(dir, "Warnings.svelte");
+    const source = await readFile(component, "utf-8");
+    await writeFile(component, `${source}<img src="b.png" />\n`);
+    expect(run().match(WARNING)?.length).toBe(2);
+    expect(existsSync(loaded)).toBe(false);
+
+    // A `<style>` the preprocessor reads: loaded, and `#!custom` stripped
+    // before the compiler sees it, so it reports no CSS error.
+    await writeFile(
+      component,
+      `${source}<style>\n  #!custom\n  img { color: red; }\n</style>\n`,
+    );
+    const output = run();
+    expect(existsSync(loaded)).toBe(true);
+    expect(output).not.toContain(" ERROR ");
+    expect(output.match(WARNING)?.length).toBe(1);
   }, 60_000);
 });

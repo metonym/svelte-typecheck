@@ -26,5 +26,6 @@ export default defineConfig({
     run("compile", "tsrs"),
     // With the config loaded through Vite, as for a SvelteKit project.
     run("vite", "tsrs"),
+    run("vite-changed", "tsrs"),
   ],
 });
