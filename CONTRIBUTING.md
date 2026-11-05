@@ -35,7 +35,7 @@ The SvelteKit fixture needs SvelteKit's generated files; its parity test runs `s
 
 ## Rules every change must keep
 
-- **svelte-check is the reference.** Where the output differs from svelte-check's, read what svelte2tsx and svelte-check do (`node_modules/svelte-check/dist/src/index.js` bundles both) and do the same, then add a fixture that shows it. A difference we keep on purpose goes in the README's "Differences from svelte-check".
+- **svelte-check is the reference.** Where the output differs from svelte-check's, read what svelte2tsx and svelte-check do (`node_modules/svelte-check/dist/src/index.js` bundles both) and do the same, then add a fixture that shows it. A difference we keep on purpose goes in [docs/svelte-check.md](docs/svelte-check.md#differences-from-svelte-check).
 - **Never pass silently.** Generated code that doesn't parse fails the run as our bug, and a checker error that names no file is reported on the tsconfig. A run that checked nothing must not look like a clean one.
 - **Never write the project's files.** Everything goes to the output folder; the generated tsconfig sets its own `incremental`, `composite` and `tsBuildInfoFile` so the project's never come into play.
 - **Bump `CACHE_FORMAT`** (`src/check.ts`) when a cache's shape changes, so a new run misses an old file instead of reading the wrong shape.
@@ -124,4 +124,4 @@ A performance change is a `perf:` commit with a before-and-after table in its me
 - [ ] `bun run lint`, `bun run typecheck`, `bun run knip`, `bun run test` and `bun run test:package` pass. Check the exit code: piping `bun run lint` into `tail` hides a failure.
 - [ ] Parity changes: a fixture shows the behavior, and `bun eval/diff.ts` on a real project, with errors planted, still matches.
 - [ ] Performance changes: `bun run bench` against your baseline, and `eval/ab.ts` on a real project.
-- [ ] The README and this guide still describe what the code does.
+- [ ] The README, `docs/` and this guide still describe what the code does.
