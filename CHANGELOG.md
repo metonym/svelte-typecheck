@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.1.6 — 2026-11-04
+
+**Fixes**
+
+- A compiler-only run (`--diagnostic-sources svelte`) works without a
+  type checker installed, as svelte-check's does (#23). A result's
+  `checker` is unset when none ran and none is installed.
+- Without `allowJs`, a JS component is `any` to TypeScript, as in
+  svelte-check, rather than Svelte's `*.svelte` type, so its use is
+  checked as svelte-check checks it.
+- An untyped import of a JS component is reported where TypeScript
+  reports it: not under `skipLibCheck` or `@ts-ignore`, and through the
+  package's own name too.
+- A snippet passed to a component is written as a bare key, so messages
+  name it as svelte-check does, with its "Did you mean" hints.
+- tsgo's paths are read when `$PWD` names the folder through a symlink,
+  such as macOS's `/tmp`, where a run crashed.
+
+**Internal**
+
+- The generated code is checked with svelte-typecheck's own helpers, and
+  the shims are inlined in the bundle.
+
 ## 0.1.5 — 2026-11-04
 
 **Fixes**
