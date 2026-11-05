@@ -4,14 +4,15 @@
 // - cold: nothing kept from the last run (`--no-incremental`);
 // - changed: one component edited since the last run;
 // - unchanged: nothing changed since the last run, so it's replayed;
-// - compile: the compiler pass alone, cold.
+// - compile: the compiler pass alone, cold;
+// - vite: cold, on the corpus with a SvelteKit vite.config, from its folder.
 import { readFile, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { typecheck } from "../src/check.ts";
 import type { Checker, TypecheckOptions } from "../src/types.ts";
-import { corpus } from "./corpus.ts";
+import { corpus, viteCorpus } from "./corpus.ts";
 
-const MODES = ["cold", "changed", "unchanged", "compile"] as const;
+const MODES = ["cold", "changed", "unchanged", "compile", "vite"] as const;
 const [mode, checker] = process.argv.slice(2) as [
   (typeof MODES)[number],
   Checker,
@@ -19,7 +20,12 @@ const [mode, checker] = process.argv.slice(2) as [
 if (!MODES.includes(mode))
   throw new Error(`mode is one of ${MODES.join(", ")}`);
 
-const workspace = await corpus();
+const outDir = resolve(
+  `node_modules/.cache/svelte-typecheck/bench-${mode}-${checker}`,
+);
+// Run from a project's folder, as its vite.config is loaded.
+const workspace = mode === "vite" ? await viteCorpus() : await corpus();
+if (mode === "vite") process.chdir(workspace);
 if (mode === "changed") {
   // A new comment in one component, each run.
   const page = join(workspace, "Page0.svelte");
@@ -29,7 +35,7 @@ if (mode === "changed") {
 const options: TypecheckOptions = {
   workspace,
   checker,
-  outDir: `node_modules/.cache/svelte-typecheck/bench-${mode}-${checker}`,
+  outDir,
   incremental: mode === "changed" || mode === "unchanged",
   diagnosticSources: mode === "compile" ? ["svelte"] : undefined,
 };

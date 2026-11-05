@@ -1,7 +1,13 @@
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
-import { lexComponent } from "sveast";
-import type { Preprocessor, SvelteConfig } from "./config.ts";
+import { Worker } from "node:worker_threads";
+import { lexComponent } from "sveast/lexer";
+import {
+  configNeedsChdir,
+  type Preprocessor,
+  type SvelteConfig,
+  svelteConfigOf,
+} from "./config.ts";
 import { createLocator } from "./output.ts";
 import { originalPosition } from "./sourcemap.ts";
 import type { CompilerDiagnostic } from "./types.ts";
@@ -113,7 +119,7 @@ export function compilerDiagnostics(
  * `compilerDiagnostics` after svelte.config's preprocessors, with each
  * position mapped back to the source, as svelte-check does.
  */
-export async function preprocessedDiagnostics(
+async function preprocessedDiagnostics(
   source: string,
   filename: string,
   svelteDir: string,
@@ -145,6 +151,99 @@ export async function preprocessedDiagnostics(
     });
   }
   return asSvelteCheck(diagnostics, source, Boolean(preprocess));
+}
+
+/** Components to compile, with what finds their compiler and config. */
+export interface CompileRequest {
+  svelteDir: string;
+  configDir: string;
+  configFile?: string;
+  components: { source: string; filename: string }[];
+}
+
+/** `preprocessedDiagnostics` for each component, with the config loaded once. */
+export async function compileAll(
+  request: CompileRequest,
+): Promise<CompilerDiagnostic[][]> {
+  const config = await svelteConfigOf(request.configDir, request.configFile);
+  return Promise.all(
+    request.components.map(({ source, filename }) =>
+      preprocessedDiagnostics(source, filename, request.svelteDir, config),
+    ),
+  );
+}
+
+interface Pending {
+  request: CompileRequest;
+  done: (results: CompilerDiagnostic[][]) => void;
+  fail: (error: Error) => void;
+}
+
+/**
+ * One worker for the process, kept for the next run (`--watch`'s) with its
+ * compiler and config loaded; unreferenced while idle, so it never keeps
+ * the process alive.
+ */
+let worker: Worker | undefined;
+const pending = new Map<number, Pending>();
+let nextId = 0;
+
+function startWorker(): Worker {
+  // Beside this module, in the source and in the bundle.
+  const file = import.meta.url.endsWith(".ts")
+    ? "compile-worker.ts"
+    : "compile-worker.js";
+  const started = new Worker(new URL(file, import.meta.url));
+  started.on(
+    "message",
+    (reply: {
+      id: number;
+      results?: CompilerDiagnostic[][];
+      error?: string;
+    }) => {
+      const job = pending.get(reply.id);
+      if (!job) return;
+      pending.delete(reply.id);
+      if (pending.size === 0) started.unref();
+      if (reply.results) job.done(reply.results);
+      else job.fail(new Error(reply.error));
+    },
+  );
+  // A worker that can't start, or dies: what it had runs here instead.
+  const fallBack = () => {
+    if (worker !== started) return;
+    worker = undefined;
+    const jobs = [...pending.values()];
+    pending.clear();
+    for (const job of jobs) compileAll(job.request).then(job.done, job.fail);
+  };
+  started.on("error", fallBack);
+  started.on("exit", fallBack);
+  return started;
+}
+
+/**
+ * `compileAll` on a worker thread, so the compiler's pass runs while this
+ * one generates code and the checker checks it; `undefined` when loading
+ * the config needs `process.chdir`, which a worker can't do, or there's
+ * no worker.
+ */
+export function compileOffThread(
+  request: CompileRequest,
+): Promise<CompilerDiagnostic[][]> | undefined {
+  if (configNeedsChdir(request.configDir, request.configFile)) return;
+  try {
+    worker ??= startWorker();
+  } catch {
+    return;
+  }
+  const id = nextId++;
+  const running = worker;
+  return new Promise((done, fail) => {
+    pending.set(id, { request, done, fail });
+    running.ref();
+    running.postMessage({ id, request });
+  });
 }
 
 const TEXT_TYPE = /^text\//;

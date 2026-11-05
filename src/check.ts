@@ -4,14 +4,18 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { lexComponent, lexImportsExports } from "sveast";
+import { lexComponent, lexImportsExports } from "sveast/lexer";
 import { version as TOOL_VERSION } from "../package.json";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
-import { preprocessedDiagnostics, svelteDirOf } from "./compiler.ts";
-import { configFingerprint, svelteConfigOf } from "./config.ts";
-import { emit } from "./emit.ts";
+import {
+  compileAll,
+  compileOffThread,
+  type CompileRequest,
+  svelteDirOf,
+} from "./compiler.ts";
+import { configFingerprint } from "./config.ts";
+import type { emit } from "./emit.ts";
 import { glob } from "./glob.ts";
-import { isKitFile, isKitRouteFile, kitFile } from "./kit.ts";
 import { createLocator, type Output } from "./output.ts";
 import {
   asTypeScriptPath,
@@ -100,6 +104,8 @@ interface CompileCache {
   entries: Record<string, CompilerDiagnostic[]>;
 }
 const hash = (text: string) => createHash("sha1").update(text).digest("hex");
+/** Components to compile before the compiler's pass moves to a worker. */
+const OFF_THREAD_AT = 16;
 /** The files the last incremental run wrote. */
 const MANIFEST = "manifest.json";
 
@@ -494,6 +500,52 @@ export async function typecheck(
     ...files.map((file) => dirname(file)),
   ]);
 
+  // The compiler pass's results by component, for an incremental run: a
+  // component whose text, Svelte, config and svelte-typecheck are the
+  // same compiles the same. With every one cached, the config, which can
+  // mean loading Vite, isn't loaded either. The rest compile on a worker
+  // from here, while this thread generates code and the checker runs.
+  const cachePath = join(outDir, COMPILE_CACHE);
+  const fingerprint = hash(
+    JSON.stringify([
+      TOOL_VERSION,
+      CACHE_FORMAT,
+      version,
+      configFingerprint(configDir, configFile),
+    ]),
+  );
+  const cache: CompileCache = incremental
+    ? ((await readFile(cachePath, "utf-8")
+        .then((text) => JSON.parse(text) as CompileCache)
+        .then((c) => (c.fingerprint === fingerprint ? c : undefined))
+        .catch(() => undefined)) ?? { fingerprint, entries: {} })
+    : { fingerprint, entries: {} };
+  const keys = files.map((path, i) =>
+    hash(`${relative(cwd, path)}\0${texts[i] ?? ""}`),
+  );
+  const missing = sources.has("svelte")
+    ? files
+        .map((_, i) => i)
+        .filter((i) => cache.entries[keys[i] ?? ""] === undefined)
+    : [];
+  const compileRequest: CompileRequest = {
+    svelteDir,
+    configDir,
+    configFile,
+    components: missing.map((i) => ({
+      source: texts[i] ?? "",
+      filename: relative(cwd, files[i] ?? ""),
+    })),
+  };
+  // Worth a worker's start only with as much code to generate beside it;
+  // with none to generate or checker to wait for, nothing runs beside it.
+  const compilingOffThread =
+    missing.length >= OFF_THREAD_AT && sources.has("js")
+      ? compileOffThread(compileRequest)
+      : undefined;
+  // Unhandled until awaited, after the checker: a rejection is the run's.
+  compilingOffThread?.catch(() => {});
+
   const outputs = new Map<
     string,
     {
@@ -511,15 +563,28 @@ export async function typecheck(
   >();
   const writes: Promise<void>[] = [];
   const written = new Set<string>();
+  /** What this run generated, by path, so it isn't read back from disk. */
+  const generated = new Map<string, string>();
+  /** Each folder's `mkdir`, made once for all the files written in it. */
+  const folders = new Map<string, Promise<unknown>>();
+  const folder = (dir: string) => {
+    let made = folders.get(dir);
+    if (!made) {
+      made = mkdir(dir, { recursive: true });
+      folders.set(dir, made);
+    }
+    return made;
+  };
   const write = (path: string, content: string) => {
     written.add(path);
+    generated.set(path, content);
     writes.push(
       (incremental
         ? readFile(path, "utf-8").catch(() => undefined)
         : Promise.resolve(undefined)
       ).then(async (old) => {
         if (old === content) return;
-        await mkdir(dirname(path), { recursive: true });
+        await folder(dirname(path));
         await writeFile(path, content);
       }),
     );
@@ -544,6 +609,7 @@ export async function typecheck(
           !TS_SCRIPT.test(texts[i] ?? "") && !existsSync(`${path}.d.ts`),
       ),
     );
+    if (untyped.size === 0) return [];
     const resolvePath = importResolver(
       [root, ...project.rootDirs],
       project.paths,
@@ -569,6 +635,9 @@ export async function typecheck(
   // The compiler's diagnostics alone need no generated code, and leave
   // the last run's in place.
   if (sources.has("js")) {
+    // Loaded here: a run that returns the last result never parses.
+    const [{ emit }, { isKitFile, isKitRouteFile, kitFile }] =
+      await Promise.all([import("./emit.ts"), import("./kit.ts")]);
     // Each component's generated code, by a hash of what it's made from:
     // an incremental run regenerates only what changed. One that didn't is
     // generated again, in memory, only to map an error the checker reports
@@ -909,45 +978,12 @@ export async function typecheck(
         ).then((output) => ({ output, at: performance.now() }))
       : Promise.resolve({ output: "", at: emitted });
   const compiled: Diagnostic[] = [];
-  // The compiler pass's results by component, for an incremental run: a
-  // component whose text, Svelte, config and svelte-typecheck are the
-  // same compiles the same. With every one cached, the config, which can
-  // mean loading Vite, isn't loaded either.
-  const cachePath = join(outDir, COMPILE_CACHE);
-  const fingerprint = hash(
-    JSON.stringify([
-      TOOL_VERSION,
-      CACHE_FORMAT,
-      version,
-      configFingerprint(configDir, configFile),
-    ]),
-  );
-  const cache: CompileCache = incremental
-    ? ((await readFile(cachePath, "utf-8")
-        .then((text) => JSON.parse(text) as CompileCache)
-        .then((c) => (c.fingerprint === fingerprint ? c : undefined))
-        .catch(() => undefined)) ?? { fingerprint, entries: {} })
-    : { fingerprint, entries: {} };
-  const keys = files.map((path, i) =>
-    hash(`${relative(cwd, path)}\0${texts[i] ?? ""}`),
-  );
   const perFile: CompilerDiagnostic[][] = [];
   if (sources.has("svelte")) {
-    const missing = files
-      .map((_, i) => i)
-      .filter((i) => cache.entries[keys[i] ?? ""] === undefined);
     if (missing.length > 0) {
-      const svelteConfig = await svelteConfigOf(configDir, configFile);
-      const fresh = await Promise.all(
-        missing.map((i) =>
-          preprocessedDiagnostics(
-            texts[i] ?? "",
-            relative(cwd, files[i] ?? ""),
-            svelteDir,
-            svelteConfig,
-          ),
-        ),
-      );
+      // Here, once the checker runs, when there's no worker for it.
+      const fresh =
+        (await compilingOffThread) ?? (await compileAll(compileRequest));
       for (const [n, i] of missing.entries())
         cache.entries[keys[i] ?? ""] = fresh[n] ?? [];
     }
@@ -1234,7 +1270,8 @@ export async function typecheck(
     : diagnostics;
   // In TypeScript's program order, as svelte-check lists them: a file's
   // imports before it; in a file, the compiler's before the checker's.
-  // The generated code, read back from disk rather than generated again.
+  // The generated code: as this run wrote it, or read back from disk
+  // rather than generated again.
   const generatedOf = new Map(
     [...outputs].map(([genPath, gen]) => [gen.svelte, genPath]),
   );
@@ -1252,12 +1289,19 @@ export async function typecheck(
         .sort(byFolder),
     ],
     // Generated code, whose imports include SvelteKit's `./$types`.
-    (file) =>
-      fileFacts.of(generatedOf.get(file) ?? file, "specifiers", (code) =>
-        [...code.matchAll(STATIC_IMPORT), ...code.matchAll(DYNAMIC_IMPORT)].map(
-          (m) => m[1] ?? "",
-        ),
-      ),
+    (file) => {
+      const path = generatedOf.get(file) ?? file;
+      return fileFacts.of(
+        path,
+        "specifiers",
+        (code) =>
+          [
+            ...code.matchAll(STATIC_IMPORT),
+            ...code.matchAll(DYNAMIC_IMPORT),
+          ].map((m) => m[1] ?? ""),
+        generated.get(path),
+      );
+    },
     importResolver([root, ...project.rootDirs], project.paths),
     imports,
   );
@@ -1414,12 +1458,14 @@ async function factsCache(path: string, enabled: boolean) {
       file: string,
       kind: K,
       compute: (text: string) => NonNullable<Facts[K]>,
+      /** The file's text, when it's known without reading it. */
+      text?: string,
     ): NonNullable<Facts[K]> {
       const stat = statsOf([file])[0] ?? "";
       let facts = used[file] ?? entries[file];
       if (facts?.stat !== stat) facts = { stat };
       used[file] = facts;
-      facts[kind] ??= compute(readFileSync(file, "utf-8"));
+      facts[kind] ??= compute(text ?? readFileSync(file, "utf-8"));
       return facts[kind] as NonNullable<Facts[K]>;
     },
     save: () =>

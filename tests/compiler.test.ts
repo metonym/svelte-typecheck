@@ -1,4 +1,15 @@
-import { compilerDiagnostics } from "../src/compiler.ts";
+import { readFileSync } from "node:fs";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { join } from "node:path";
+import {
+  compileAll,
+  compileOffThread,
+  compilerDiagnostics,
+  svelteDirOf,
+} from "../src/compiler.ts";
+import { configNeedsChdir } from "../src/config.ts";
+
+const root = join(import.meta.dir, "..");
 
 describe("compilerDiagnostics", () => {
   it("reports an a11y warning where it is", () => {
@@ -29,5 +40,65 @@ describe("compilerDiagnostics", () => {
       severity: "error",
       code: "attribute_duplicate",
     });
+  });
+});
+
+describe("compileOffThread", () => {
+  it("compiles on a worker as here, after the config's preprocessors", async () => {
+    const configDir = join(root, "tests/fixtures-preprocess");
+    const request = {
+      svelteDir: svelteDirOf(root),
+      configDir,
+      components: [
+        {
+          source: readFileSync(join(configDir, "Styled.svelte"), "utf-8"),
+          filename: "Styled.svelte",
+        },
+      ],
+    };
+    const offThread = compileOffThread(request);
+    expect(offThread).toBeDefined();
+    const results = await offThread;
+    // The stripped block moved the warning up 5 lines; mapped back.
+    expect(results?.[0]?.map((d) => `${d.line} ${d.code}`)).toEqual([
+      "10 a11y_missing_attribute",
+    ]);
+    expect(results).toEqual(await compileAll(request));
+  }, 30_000);
+
+  it("loads the config on the worker, not here", async () => {
+    const configDir = join(root, "tests/.tmp/compile-worker");
+    await rm(configDir, { recursive: true, force: true });
+    await mkdir(configDir, { recursive: true });
+    // Records the thread that loads it.
+    await writeFile(
+      join(configDir, "svelte.config.js"),
+      'import { writeFileSync } from "node:fs";\nimport { isMainThread } from "node:worker_threads";\nwriteFileSync(new URL("./thread", import.meta.url), isMainThread ? "main" : "worker");\nexport default {};\n',
+    );
+    const results = await compileOffThread({
+      svelteDir: svelteDirOf(root),
+      configDir,
+      components: [{ source: '<img src="a.png">\n', filename: "Img.svelte" }],
+    });
+    expect(results?.[0]?.map((d) => d.code)).toEqual([
+      "a11y_missing_attribute",
+    ]);
+    expect(await readFile(join(configDir, "thread"), "utf-8")).toBe("worker");
+  }, 30_000);
+
+  it("leaves a vite.config outside the cwd to this thread", () => {
+    const configDir = join(root, "tests/fixtures-kit");
+    expect(process.cwd()).not.toBe(configDir);
+    expect(configNeedsChdir(configDir)).toBe(true);
+    expect(configNeedsChdir(join(root, "tests/fixtures-preprocess"))).toBe(
+      false,
+    );
+    expect(
+      compileOffThread({
+        svelteDir: svelteDirOf(root),
+        configDir,
+        components: [],
+      }),
+    ).toBeUndefined();
   });
 });

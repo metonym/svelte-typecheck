@@ -3,6 +3,7 @@ node_modules
 dist
 *.tgz
 bench/corpus
+bench/corpus-vite
 .ostia
 tests/.tmp
 .svelte-kit
