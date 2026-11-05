@@ -1,11 +1,13 @@
 import { readFileSync } from "node:fs";
 import { mkdir, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import {
   compileAll,
   compileOffThread,
   compilerDiagnostics,
   svelteDirOf,
+  warmOffThread,
 } from "../src/compiler.ts";
 import { configNeedsChdir } from "../src/config.ts";
 
@@ -144,6 +146,71 @@ describe("compileAll with a config's shape", () => {
     expect(shape?.preprocess).toEqual([{ name: "", hooks: ["markup"] }]);
     expect((await compileAll({ ...request, shape })).results).toEqual([[]]);
   });
+});
+
+describe("compileAll without the hooks a component doesn't reach", () => {
+  it("hands a preprocessor only the components with a tag it reads", async () => {
+    const dir = join(root, "tests/.tmp/compile-untouched");
+    await rm(dir, { recursive: true, force: true });
+    await mkdir(dir, { recursive: true });
+    // Counts the styles it's handed, on this thread's global.
+    await writeFile(
+      join(dir, "svelte.config.js"),
+      "export default { preprocess: [{ name: 'counting', style: () => { globalThis.__styles = (globalThis.__styles ?? 0) + 1; } }] };\n",
+    );
+    const img = '<img src="a.png">\n';
+    // And counts the components Svelte's `preprocess` is called on.
+    const compiler = createRequire(join(svelteDirOf(root), "package.json"))(
+      "svelte/compiler",
+    ) as { preprocess: (...args: unknown[]) => Promise<unknown> };
+    const preprocess = compiler.preprocess;
+    let preprocessed = 0;
+    compiler.preprocess = (...args) => {
+      preprocessed++;
+      return preprocess(...args);
+    };
+    const { results } = await compileAll({
+      svelteDir: svelteDirOf(root),
+      configDir: dir,
+      components: [
+        { source: img, filename: "Plain.svelte" },
+        {
+          source: `${img}<style>img { color: red; }</style>\n`,
+          filename: "Styled.svelte",
+        },
+      ],
+    });
+    compiler.preprocess = preprocess;
+    expect(preprocessed).toBe(1);
+    expect((globalThis as { __styles?: number }).__styles).toBe(1);
+    expect(results.map((r) => r.map((d) => `${d.line} ${d.code}`))).toEqual([
+      ["1 a11y_missing_attribute"],
+      ["1 a11y_missing_attribute"],
+    ]);
+  });
+});
+
+describe("warmOffThread", () => {
+  it("starts the worker on the config, then compiles with it", async () => {
+    const configDir = join(root, "tests/.tmp/compile-warm");
+    await rm(configDir, { recursive: true, force: true });
+    await mkdir(configDir, { recursive: true });
+    await writeFile(
+      join(configDir, "svelte.config.js"),
+      'import { appendFileSync } from "node:fs";\nimport { isMainThread } from "node:worker_threads";\nappendFileSync(new URL("./loads", import.meta.url), isMainThread ? "main\\n" : "worker\\n");\nexport default {};\n',
+    );
+    const source = { svelteDir: svelteDirOf(root), configDir };
+    warmOffThread(source);
+    const component = { source: '<img src="a.png">\n', filename: "Img.svelte" };
+    const compiled = await compileOffThread({
+      ...source,
+      components: [component],
+    });
+    expect(compiled?.results[0]?.map((d) => d.code)).toEqual([
+      "a11y_missing_attribute",
+    ]);
+    expect(await readFile(join(configDir, "loads"), "utf-8")).toBe("worker\n");
+  }, 30_000);
 });
 
 describe("configNeedsChdir", () => {

@@ -13,6 +13,7 @@ import {
   type CompileRequest,
   type ConfigShape,
   svelteDirOf,
+  warmOffThread,
 } from "./compiler.ts";
 import { configFingerprint } from "./config.ts";
 import type { emit } from "./emit.ts";
@@ -431,6 +432,22 @@ export async function typecheck(
 
   const started = performance.now();
   const incremental = options.incremental ?? true;
+  const configDir = options.config
+    ? dirname(resolve(workspace, options.config))
+    : workspace;
+  const configFile = options.config
+    ? resolve(workspace, options.config)
+    : undefined;
+  // A run with no compiler results kept compiles every component on the
+  // worker: it loads the compiler and config (through Vite, up to half a
+  // second) while this thread reads and generates.
+  if (
+    sources.has("svelte") &&
+    sources.has("js") &&
+    project.components.length >= OFF_THREAD_AT &&
+    !(incremental && existsSync(join(outDir, COMPILE_CACHE)))
+  )
+    warmOffThread({ svelteDir, configDir, configFile });
   // An incremental run keeps the last run's code and rewrites what changed.
   const previous = incremental
     ? await readFile(join(outDir, MANIFEST), "utf-8")
@@ -442,12 +459,6 @@ export async function typecheck(
   const listedFiles = project.tsconfig
     ? programFiles(project)
     : [...files].sort(byFolder);
-  const configDir = options.config
-    ? dirname(resolve(workspace, options.config))
-    : workspace;
-  const configFile = options.config
-    ? resolve(workspace, options.config)
-    : undefined;
 
   // Nothing the run reads has changed since the last one: its result. The
   // files are known by their size and modification time, which a `stat`

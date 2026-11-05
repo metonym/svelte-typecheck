@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+**Performance**
+
+- A run that compiles every component, such as the first or one with
+  `--no-incremental`, starts loading the compiler and the Svelte config
+  on the worker as soon as it has found the components, instead of after
+  reading them. A component that no preprocessor reads is compiled
+  without calling Svelte's `preprocess` on it, which parsed it for
+  nothing: none of the preprocessors has a markup hook, or a hook for a
+  `<script>` or `<style>` it has. On carbon-components-svelte (1,276
+  components, `vite-preprocess` with a style hook only), cold runs are
+  12% faster with `bun check` and 7% faster with tsrs.
+
 **Fixes**
 
 - The compiler's pass runs on the worker when the workspace is given
