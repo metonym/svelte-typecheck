@@ -208,6 +208,48 @@ try {
     `a compiler-only run without a checker: exit ${compilerOnly.status}\n${compilerOnly.stdout}${compilerOnly.stderr}`,
   );
 
+  // Enough components that the compiler's pass runs on a worker, whose
+  // file the bundle carries: the config it loads records the thread.
+  const many = join(project, "many");
+  write(many, {
+    ...Object.fromEntries(
+      Array.from({ length: 16 }, (_, i) => [
+        `Img${i}.svelte`,
+        '<img src="a.png">\n',
+      ]),
+    ),
+    "svelte.config.js":
+      'import { writeFileSync } from "node:fs";\nimport { isMainThread } from "node:worker_threads";\nwriteFileSync(new URL("./thread", import.meta.url), isMainThread ? "main" : "worker");\nexport default {};\n',
+  });
+  for (const runtime of ["node", "bun"]) {
+    rmSync(join(many, "thread"), { force: true });
+    const result = run(
+      runtime,
+      [
+        join(project, "node_modules/svelte-typecheck/cli.js"),
+        "--workspace",
+        "many",
+        "--no-tsconfig",
+        "--checker",
+        "tsc",
+        "--no-incremental",
+        "--output",
+        "machine",
+      ],
+      project,
+    );
+    const thread = existsSync(join(many, "thread"))
+      ? readFileSync(join(many, "thread"), "utf-8")
+      : "none";
+    assert(
+      result.status === 0 &&
+        result.stdout.match(/a11y_missing_attribute/g)?.length === 16 &&
+        thread === "worker",
+      `${runtime}: the compiler's pass on a worker: exit ${result.status}, config loaded on ${thread}\n${result.stdout}${result.stderr}`,
+    );
+  }
+  rmSync(many, { recursive: true, force: true });
+
   write(project, {
     "smoke.js": `import assert from "node:assert/strict";
 import { compilerDiagnostics, typecheck } from "svelte-typecheck";

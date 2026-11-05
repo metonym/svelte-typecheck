@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 const FIXTURES = join(import.meta.dirname, "../tests/fixtures");
@@ -90,6 +90,30 @@ export async function corpus(): Promise<string> {
   await Promise.all(writes);
   await writeFile(marker, VERSION);
   return CORPUS;
+}
+
+/**
+ * The corpus, with a SvelteKit vite.config, in `bench/corpus-vite`: the
+ * compiler's pass loads it through Vite, as for most projects.
+ */
+export async function viteCorpus(): Promise<string> {
+  const dir = join(import.meta.dirname, "corpus-vite");
+  const marker = join(dir, ".version");
+  if (existsSync(marker) && (await readFile(marker, "utf-8")) === VERSION)
+    return dir;
+  await rm(dir, { recursive: true, force: true });
+  await cp(await corpus(), dir, { recursive: true });
+  await Promise.all([
+    writeFile(
+      join(dir, "vite.config.ts"),
+      'import { sveltekit } from "@sveltejs/kit/vite";\n\nexport default { plugins: [sveltekit()] };\n',
+    ),
+    writeFile(
+      join(dir, "package.json"),
+      '{ "name": "corpus-vite", "private": true, "type": "module" }\n',
+    ),
+  ]);
+  return dir;
 }
 
 /** The corpus's components, as `[name, source]`. */

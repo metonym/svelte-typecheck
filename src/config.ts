@@ -81,6 +81,21 @@ export function configFingerprint(dir: string, explicit?: string): string {
   return JSON.stringify(parts);
 }
 
+/**
+ * Whether loading the config found from `dir` (or `explicit`) changes the
+ * working directory: a vite.config outside it, whose SvelteKit (before 3)
+ * reads svelte.config.js from there.
+ */
+export function configNeedsChdir(dir: string, explicit?: string): boolean {
+  const cwd = process.cwd();
+  if (explicit)
+    return !SVELTE_CONFIG.test(basename(explicit)) && dirname(explicit) !== cwd;
+  for (let at = dir; ; at = dirname(at)) {
+    if (at !== cwd && firstIn(at, VITE_CONFIGS)) return true;
+    if (dirname(at) === at) return false;
+  }
+}
+
 const firstIn = (dir: string, names: string[]) =>
   names.map((name) => join(dir, name)).find((path) => existsSync(path));
 

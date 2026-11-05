@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+**Performance**
+
+- The compiler's pass starts on a worker thread before code is
+  generated, when 16 components or more need compiling, so loading the
+  Svelte config (Vite's included) and the compiler overlaps generating
+  code and the checker. Cold runs on the bench corpus are 15 to 21%
+  faster with tsrs, tsgo and `bun check`, and 16% faster with a SvelteKit
+  vite.config.
+- A run that returns the last result no longer loads the parser.
+
 ## 0.1.7 — 2026-11-04
 
 **Internal**

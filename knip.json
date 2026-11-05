@@ -1,7 +1,7 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
   "entry": [
-    "src/{index,cli}.ts",
+    "src/{index,cli,compile-worker}.ts",
     "scripts/*.ts",
     "bench/*.bench.ts",
     "bench/check.ts",

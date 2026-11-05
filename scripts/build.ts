@@ -5,7 +5,7 @@ import type { BunPlugin } from "bun";
 const root = resolve(import.meta.dir, "..");
 const src = join(root, "src");
 const dist = join(root, "dist");
-const ENTRIES = ["index", "cli"];
+const ENTRIES = ["index", "cli", "compile-worker"];
 const DIST_PREFIX = /"(\.\/)?dist\//;
 const IMPORT = /^\s*import\b/m;
 const PACKAGE_JSON = /[\\/]package\.json$/;

@@ -58,6 +58,9 @@ function run(dist: string, outDir: string): Promise<Sample> {
   return new Promise((done) => {
     const start = performance.now();
     const child = spawn("/usr/bin/time", args, {
+      // From the project, as its scripts run, so its vite.config is in
+      // the working directory.
+      cwd: project,
       // This repo's checkers too, for a project that has only some.
       env: {
         ...process.env,

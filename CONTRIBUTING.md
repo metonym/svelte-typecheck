@@ -27,7 +27,7 @@ The SvelteKit fixture needs SvelteKit's generated files; its parity test runs `s
 1. **Project.** `projectOf` (`src/project.ts`) finds the tsconfig as svelte-check does (the nearer of tsconfig.json and jsconfig.json from the workspace up) and reads it with the ones it extends: the components its `include` names, its `rootDirs`, `paths` (and package.json `imports`), `allowJs` and `checkJs`. `programFiles` lists the project's files in TypeScript's root order.
 2. **Replay.** With nothing the run reads changed since the last one (each file known by a `stat`), the last result comes back here (`result.json`).
 3. **Generate.** `emit` (`src/emit.ts`) turns each component into TypeScript, or JS with JSDoc, the way svelte2tsx does, and records where each piece came from (`src/output.ts`), so an error maps back to its `.svelte` line. `src/kit.ts` adds SvelteKit's types to route files, hooks and param matchers, in copies that replace them. The generated code, a copy of the shims (`src/shims/`, inlined in the bundle by the build: the `$$check` helpers, and the names a message prints, kept as svelte-check prints them) and a tsconfig that extends the project's go to the output folder; unchanged components aren't generated again (`emit-cache.json`).
-4. **Check and compile.** The checker (`src/checker.ts`: the project's `tsc`, tsgo, tsrs or `bun check`) runs on the generated tsconfig while the Svelte compiler's pass (`src/compiler.ts`) runs here, after the Svelte config's preprocessors (`src/config.ts`: a vite.config through the project's own Vite, or a svelte.config). Compiler results are kept by component (`compile-cache.json`).
+4. **Check and compile.** The checker (`src/checker.ts`: the project's `tsc`, tsgo, tsrs or `bun check`) runs on the generated tsconfig while the Svelte compiler's pass (`src/compiler.ts`) runs after the Svelte config's preprocessors (`src/config.ts`: a vite.config through the project's own Vite, or a svelte.config). With 16 components or more to compile, the pass starts on a worker thread (`src/compile-worker.ts`) before step 3, so loading the config and the compiler overlaps generating code; with fewer, or a vite.config outside the working directory (which needs `process.chdir`), it runs on the main thread once the checker starts. Compiler results are kept by component (`compile-cache.json`).
 5. **Map.** Each checker error maps back to its source; errors in purely generated code are dropped, and svelte-check's rewrites and filters apply (store misuse, non-bindable `bind:`, `$:` labels and more).
 6. **Order.** Diagnostics come out in TypeScript's program order, a file's imports before it, as svelte-check prints them. What's read from each file for this is kept by its `stat` (`files.json`).
 
@@ -88,7 +88,7 @@ bun run bench            # ostia: every workload, against the saved baseline
 bun run bench:baseline   # save this run as the baseline
 ```
 
-The workloads (`ostia.config.ts`) generate code in process, and run the corpus (`bench/corpus.ts`, 400 components, half of them runes) with each checker cold and after one component changed, with nothing changed, and the compiler pass alone. The baseline lives in `.ostia/baselines/`, which isn't committed: save one on your machine before you change anything.
+The workloads (`ostia.config.ts`) generate code in process, and run the corpus (`bench/corpus.ts`, 400 components, half of them runes) with each checker cold and after one component changed, with nothing changed, the compiler pass alone, and cold with a SvelteKit vite.config (`bench/corpus-vite`), run from its folder. The baseline lives in `.ostia/baselines/`, which isn't committed: save one on your machine before you change anything.
 
 On a real project, `eval/ab.ts` compares two builds, runs interleaved:
 
@@ -106,12 +106,12 @@ A shared machine is noisy: other processes put the load average past the core co
 
 A performance change is a `perf:` commit with a before-and-after table in its message, and only lands when it wins well beyond the noise. These were measured and didn't pay, so try them again only with new evidence:
 
-| Idea                                                   | Why it didn't pay                                                                                            |
-| :----------------------------------------------------- | :----------------------------------------------------------------------------------------------------------- |
-| The compiler pass on worker threads                    | All of carbon-components-svelte compiles in 0.8 s on one thread, and the checker already has the other cores |
-| One compiler thread with a capped heap                 | Our process's peak fell 60 MB, the run's didn't: the checker's peak overlaps ours                            |
-| A `.noindex` output folder, against Spotlight on macOS | No measurable effect                                                                                         |
-| A simpler `$$check.component`                          | Instantiations unchanged: the cost is checking each component's props                                        |
+| Idea                                                   | Why it didn't pay                                                                 |
+| :----------------------------------------------------- | :-------------------------------------------------------------------------------- |
+| The compiler pass split across two or more workers     | No faster than one worker beside the checker, and about 40 MB more per worker     |
+| One compiler thread with a capped heap                 | Our process's peak fell 60 MB, the run's didn't: the checker's peak overlaps ours |
+| A `.noindex` output folder, against Spotlight on macOS | No measurable effect                                                              |
+| A simpler `$$check.component`                          | Instantiations unchanged: the cost is checking each component's props             |
 
 ## Releasing
 

@@ -36,11 +36,13 @@ export default defineConfig({
   edges: {
     "tests/baseline.test.ts": "src/cli.ts",
     "tests/compile-cache.test.ts": "src/cli.ts",
+    // The compiler's pass runs this on a worker thread.
+    "src/compiler.ts": "src/compile-worker.ts",
     "tests/parity.test.ts": "src/cli.ts",
     // Builds and packs the package, then checks the fixtures with it.
     "scripts/test-package.ts": "scripts/build.ts",
     "scripts/build.ts": [
-      "src/{index,cli}.ts",
+      "src/{index,cli,compile-worker}.ts",
       "src/types.ts",
       "src/shims/**",
       "package.json",
@@ -54,6 +56,10 @@ export default defineConfig({
     "tests/compile-cache.test.ts": [
       "tests/fixtures/Warnings.svelte",
       "tests/fixtures/tsconfig.json",
+    ],
+    "tests/compiler.test.ts": [
+      "tests/fixtures-preprocess/**",
+      "tests/fixtures-kit/vite.config.ts",
     ],
     "tests/parity.test.ts": [fixtures, "tests/fixtures-*/**"],
     "tests/typecheck.test.ts": [fixtures, "tests/fixtures-preprocess/**"],
