@@ -187,21 +187,29 @@ function isJson(value: unknown): boolean {
   );
 }
 
+/** Each preprocessor's name and the hooks it has. */
+function readersOf(preprocess: Preprocessor[] = []): ConfigShape["preprocess"] {
+  return preprocess.map((p) => ({
+    name: typeof p.name === "string" ? p.name : "",
+    hooks: HOOKS.filter((hook) => typeof p[hook] === "function"),
+  }));
+}
+
 function shapeOf(config: SvelteConfig): ConfigShape | undefined {
   if (!isJson(config.compilerOptions)) return;
   return {
-    preprocess: (config.preprocess ?? []).map((p) => ({
-      name: typeof p.name === "string" ? p.name : "",
-      hooks: HOOKS.filter((hook) => typeof p[hook] === "function"),
-    })),
+    preprocess: readersOf(config.preprocess),
     preprocessed: Boolean(config.preprocess),
     compilerOptions: config.compilerOptions,
   };
 }
 
 /** Whether no preprocessor that can change code reads any of `source`. */
-function untouched(source: string, shape: ConfigShape): boolean {
-  return shape.preprocess.every(
+function untouched(
+  source: string,
+  readers: ConfigShape["preprocess"],
+): boolean {
+  return readers.every(
     (p) =>
       UNCHANGING.has(p.name) ||
       p.hooks.every((hook) => hook !== "markup" && !TAG[hook].test(source)),
@@ -233,7 +241,11 @@ export async function compileAll(
   request: CompileRequest,
 ): Promise<CompileResult> {
   const { shape, svelteDir } = request;
-  if (shape && request.components.every((c) => untouched(c.source, shape)))
+  if (
+    shape &&
+    request.components.every((c) => untouched(c.source, shape.preprocess))
+  ) {
+    warmed.delete(configKey(request));
     return {
       shape,
       results: await Promise.all(
@@ -248,12 +260,25 @@ export async function compileAll(
         ),
       ),
     };
-  const config = await svelteConfigOf(request.configDir, request.configFile);
+  }
+  const config = await loadConfig(request);
+  // A component no preprocessor can change compiles as it is: Svelte's
+  // `preprocess` would hand none of it to a hook, and parse it for nothing.
+  const readers = readersOf(config.preprocess);
+  const unprocessed = { compilerOptions: config.compilerOptions };
   return {
     shape: shapeOf(config),
     results: await Promise.all(
       request.components.map(({ source, filename }) =>
-        preprocessedDiagnostics(source, filename, svelteDir, config),
+        untouched(source, readers)
+          ? preprocessedDiagnostics(
+              source,
+              filename,
+              svelteDir,
+              unprocessed,
+              Boolean(config.preprocess),
+            )
+          : preprocessedDiagnostics(source, filename, svelteDir, config),
       ),
     ),
   };
@@ -326,6 +351,56 @@ export function compileOffThread(
     running.ref();
     running.postMessage({ id, request });
   });
+}
+
+/** What finds a project's compiler and config, without components. */
+export type CompilerSource = Pick<
+  CompileRequest,
+  "svelteDir" | "configDir" | "configFile"
+>;
+
+/**
+ * Loads the compiler and the config, the config kept for the compile that
+ * follows in this thread, which then neither waits for it nor loads it a
+ * second time, which through Vite costs CPU again.
+ */
+export async function warmCompiler(source: CompilerSource): Promise<void> {
+  compilerOf(source.svelteDir);
+  const config = svelteConfigOf(source.configDir, source.configFile);
+  warmed.set(configKey(source), config);
+  await config;
+}
+
+/**
+ * Configs `warmCompiler` loaded, each for the one compile that follows it:
+ * a later run loads its own, as the config may have changed.
+ */
+const warmed = new Map<string, Promise<SvelteConfig>>();
+const configKey = (source: CompilerSource) =>
+  `${source.configDir}\0${source.configFile ?? ""}`;
+
+function loadConfig(source: CompilerSource): Promise<SvelteConfig> {
+  const key = configKey(source);
+  const config = warmed.get(key);
+  warmed.delete(key);
+  return config ?? svelteConfigOf(source.configDir, source.configFile);
+}
+
+/**
+ * Starts the worker loading the compiler and the config while this thread
+ * finds and reads the components, for a run that will compile many: the
+ * compile request that follows then doesn't wait for them. The worker
+ * stays unreferenced for it, so a run that ends first doesn't wait.
+ */
+export function warmOffThread(source: CompilerSource): void {
+  if (configNeedsChdir(source.configDir, source.configFile)) return;
+  try {
+    worker ??= startWorker();
+  } catch {
+    return;
+  }
+  if (pending.size === 0) worker.unref();
+  worker.postMessage({ warm: source });
 }
 
 const TEXT_TYPE = /^text\//;
