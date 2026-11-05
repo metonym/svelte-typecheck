@@ -9,6 +9,16 @@
   beside it, where it returned the last run's result. Outside the
   tsconfig's `include`, it wasn't one of the files the run watched.
 
+**Performance**
+
+- An incremental run compiles a changed component without loading the
+  Svelte config, which through Vite can take half a second, when no
+  preprocessor that can change code reads it: none of its preprocessors'
+  hooks for markup, or for a `<script>` or `<style>` it has. The config's
+  preprocessors (by name and hook) and compiler options are kept from the
+  run that loaded it. SvelteKit's own preprocessor only warns, so it
+  never needs the config; a function in the compiler options always does.
+
 ## 0.1.8 — 2026-11-04
 
 **Performance**
