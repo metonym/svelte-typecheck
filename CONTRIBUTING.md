@@ -115,9 +115,10 @@ A performance change is a `perf:` commit with a before-and-after table in its me
 
 ## Releasing
 
-1. Move the `## Unreleased` entries in `CHANGELOG.md` under the new version.
-2. Bump `version` in `package.json` and commit as `vX.Y.Z`.
-3. Tag the commit (`git tag -s vX.Y.Z`) and push the tag. `release.yml` tests the packed package and publishes `dist/` to npm with provenance; it needs the `NPM_AUTH_TOKEN` secret.
+1. In `CHANGELOG.md`, rename `## Unreleased` to `## X.Y.Z — YYYY-MM-DD`, grouping entries under **Features**, **Fixes**, **Performance** or **Internal**.
+2. Bump `version` in `package.json` and commit as `vX.Y.Z` on master.
+3. Tag it with `git tag -s -m vX.Y.Z vX.Y.Z`, then push master and the tag: `git push origin master vX.Y.Z`. The tag starts `release.yml`, which tests the packed package, publishes `dist/` to npm with provenance, and creates the GitHub release with the version's CHANGELOG section as its notes. Publishing needs the `NPM_AUTH_TOKEN` secret.
+4. Check that `npm view svelte-typecheck version` shows the new version. It can take a few minutes to appear.
 
 ## Before you finish
 
