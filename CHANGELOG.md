@@ -13,6 +13,12 @@
   `<script>` or `<style>` it has. On carbon-components-svelte (1,276
   components, `vite-preprocess` with a style hook only), cold runs are
   12% faster with `bun check` and 7% faster with tsrs.
+- Diagnostics are put in TypeScript's program order while the checker
+  runs, rather than after it: reading each program file's imports took
+  95 to 180 ms of a run on carbon-components-svelte, all of it after the
+  checker finished. And without `allowJs`, the project's TS files are
+  read all at once to find their imports of JS components, rather than
+  one at a time, and that text isn't read again to order them.
 
 **Fixes**
 

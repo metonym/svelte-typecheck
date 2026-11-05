@@ -211,15 +211,15 @@ const JS_EXTENSION = /\.([cm]?)js(x?)$/;
  * Files in TypeScript's program order: roots as it lists a folder (files
  * before subfolders, by name), each after the files it imports: its static
  * imports, then its `import()`s and import types, as TypeScript collects them.
+ * Roots can be added later, after those visited, as more files turn up.
  */
 function programOrder(
-  roots: string[],
   specifiersOf: (path: string) => string[],
   resolveImport: (from: string, specifier: string) => string | undefined,
-  /** Each file's imports, filled in as it's read. */
-  imports: Map<string, Set<string>> = new Map(),
-): Map<string, number> {
+) {
   const order = new Map<string, number>();
+  /** Each file's imports, filled in as it's read. */
+  const imports = new Map<string, Set<string>>();
   let next = 0;
   const visit = (path: string) => {
     if (order.has(path)) return;
@@ -232,8 +232,13 @@ function programOrder(
     }
     order.set(path, next++);
   };
-  for (const root of roots) visit(root);
-  return order;
+  return {
+    order,
+    imports,
+    add(roots: string[]) {
+      for (const root of roots) visit(root);
+    },
+  };
 }
 
 /**
@@ -563,6 +568,11 @@ export async function typecheck(
       : undefined;
   // Unhandled until awaited, after the checker: a rejection is the run's.
   compilingOffThread?.catch(() => {});
+  // When it finished, for the run's timings, as this thread may be busy then.
+  const compiledOffThreadAt = compilingOffThread?.then(
+    () => performance.now(),
+    () => undefined,
+  );
 
   const outputs = new Map<
     string,
@@ -619,7 +629,7 @@ export async function typecheck(
    * Without `allowJs`, a JS component is an untyped JS module to its
    * importers, as svelte-check has it: each import of one from TypeScript.
    */
-  const untypedImports = (() => {
+  const untypedImports = await (async () => {
     if (!(sources.has("js") && project.tsconfig && !project.allowJs)) return [];
     const untyped = new Set(
       files.filter(
@@ -634,14 +644,21 @@ export async function typecheck(
     );
     // An import of the package's own name, which `paths` didn't find.
     const resolveSelf = importResolver([], project.selfExports);
-    const tsSources = [
-      ...files.filter((_, i) => TS_SCRIPT.test(texts[i] ?? "")),
-      ...listedFiles.filter((path) => TS_MODULE.test(path)),
-    ];
-    return tsSources.flatMap((path) =>
+    const tsComponents = new Map(
+      files.flatMap((path, i) => {
+        const text = texts[i] ?? "";
+        return TS_SCRIPT.test(text) ? [[path, text] as const] : [];
+      }),
+    );
+    const tsModules = listedFiles.filter((path) => TS_MODULE.test(path));
+    await fileFacts.read(tsModules);
+    return [...tsComponents.keys(), ...tsModules].flatMap((path) =>
       fileFacts
-        .of(path, "svelteImports", (content) =>
-          svelteImportsOf(content, path.endsWith(".svelte")),
+        .of(
+          path,
+          "svelteImports",
+          (content) => svelteImportsOf(content, path.endsWith(".svelte")),
+          tsComponents.get(path),
         )
         .flatMap((i) => {
           const target =
@@ -995,6 +1012,37 @@ export async function typecheck(
           command.shell,
         ).then((output) => ({ output, at: performance.now() }))
       : Promise.resolve({ output: "", at: emitted });
+  // In TypeScript's program order, as svelte-check lists them: a file's
+  // imports before it; in a file, the compiler's before the checker's.
+  // The generated code: as this run wrote it, or read back from disk
+  // rather than generated again.
+  const generatedOf = new Map(
+    [...outputs].map(([genPath, gen]) => [gen.svelte, genPath]),
+  );
+  const ordering = programOrder(
+    // Generated code, whose imports include SvelteKit's `./$types`.
+    (file) => {
+      const path = generatedOf.get(file) ?? file;
+      return fileFacts.of(
+        path,
+        "specifiers",
+        (code) =>
+          [
+            ...code.matchAll(STATIC_IMPORT),
+            ...code.matchAll(DYNAMIC_IMPORT),
+          ].map((m) => m[1] ?? ""),
+        generated.get(path),
+      );
+    },
+    importResolver([root, ...project.rootDirs], project.paths),
+  );
+  // Every file TypeScript lists, in its order, not only those with errors:
+  // an error-free `index.ts` that imports components puts them in its
+  // import order. Ordered while the checker and the worker work, as what
+  // they report doesn't change it; after a compile on this thread.
+  const listedSet = new Set(listedFiles);
+  if (compilingOffThread) ordering.add(listedFiles);
+
   const compiled: Diagnostic[] = [];
   const perFile: CompilerDiagnostic[][] = [];
   if (sources.has("svelte")) {
@@ -1034,7 +1082,8 @@ export async function typecheck(
         source: "svelte",
       });
     }
-  const compiledAt = performance.now();
+  const compiledAt = (await compiledOffThreadAt) ?? performance.now();
+  ordering.add(listedFiles);
   const { output: text, at: checked } = await checking;
 
   const raw = parseDiagnostics(text);
@@ -1293,43 +1342,13 @@ export async function typecheck(
   const reported = errorsOnly
     ? diagnostics.filter((d) => d.severity === "error")
     : diagnostics;
-  // In TypeScript's program order, as svelte-check lists them: a file's
-  // imports before it; in a file, the compiler's before the checker's.
-  // The generated code: as this run wrote it, or read back from disk
-  // rather than generated again.
-  const generatedOf = new Map(
-    [...outputs].map(([genPath, gen]) => [gen.svelte, genPath]),
+  // A reported file outside the listed ones comes after them.
+  ordering.add(
+    [...new Set(reported.map((d) => d.file))]
+      .filter((file) => !listedSet.has(file))
+      .sort(byFolder),
   );
-  // Every file TypeScript lists, in its order, not only those with errors:
-  // an error-free `index.ts` that imports components puts them in its
-  // import order. A reported file outside them comes last.
-  const listed = listedFiles;
-  const listedSet = new Set(listed);
-  const imports = new Map<string, Set<string>>();
-  const order = programOrder(
-    [
-      ...listed,
-      ...[...new Set(reported.map((d) => d.file))]
-        .filter((file) => !listedSet.has(file))
-        .sort(byFolder),
-    ],
-    // Generated code, whose imports include SvelteKit's `./$types`.
-    (file) => {
-      const path = generatedOf.get(file) ?? file;
-      return fileFacts.of(
-        path,
-        "specifiers",
-        (code) =>
-          [
-            ...code.matchAll(STATIC_IMPORT),
-            ...code.matchAll(DYNAMIC_IMPORT),
-          ].map((m) => m[1] ?? ""),
-        generated.get(path),
-      );
-    },
-    importResolver([root, ...project.rootDirs], project.paths),
-    imports,
-  );
+  const { order, imports } = ordering;
   // Only some files' diagnostics: those, and the files that import them,
   // whose errors a change to them can cause.
   let skipped = 0;
@@ -1478,6 +1497,18 @@ async function factsCache(path: string, enabled: boolean) {
         .catch(() => ({}))
     : {};
   const used: Record<string, Facts> = {};
+  /** Each file's stat, once a run. */
+  const stats = new Map<string, string>();
+  const statOf = (file: string) => {
+    let stat = stats.get(file);
+    if (stat === undefined) {
+      stat = statsOf([file])[0] ?? "";
+      stats.set(file, stat);
+    }
+    return stat;
+  };
+  /** Texts `read` read, until `of` has what it needs from them. */
+  const texts = new Map<string, string>();
   return {
     of<K extends "specifiers" | "svelteImports">(
       file: string,
@@ -1486,12 +1517,30 @@ async function factsCache(path: string, enabled: boolean) {
       /** The file's text, when it's known without reading it. */
       text?: string,
     ): NonNullable<Facts[K]> {
-      const stat = statsOf([file])[0] ?? "";
+      const stat = statOf(file);
       let facts = used[file] ?? entries[file];
       if (facts?.stat !== stat) facts = { stat };
       used[file] = facts;
-      facts[kind] ??= compute(text ?? readFileSync(file, "utf-8"));
+      facts[kind] ??= compute(
+        text ?? texts.get(file) ?? readFileSync(file, "utf-8"),
+      );
+      if (facts.specifiers && facts.svelteImports) texts.delete(file);
       return facts[kind] as NonNullable<Facts[K]>;
+    },
+    /**
+     * Reads the files whose facts aren't kept, all at once, for `of`: one
+     * at a time, a run's first read of a project's TS files can take a
+     * few hundred milliseconds.
+     */
+    async read(files: string[]): Promise<void> {
+      await Promise.all(
+        files.map(async (file) => {
+          const facts = used[file] ?? entries[file];
+          if (facts?.stat === statOf(file) && facts.svelteImports) return;
+          const text = await readFile(file, "utf-8").catch(() => undefined);
+          if (text !== undefined) texts.set(file, text);
+        }),
+      );
     },
     save: () =>
       writeFile(path, JSON.stringify({ format: CACHE_FORMAT, entries: used })),
