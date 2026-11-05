@@ -1474,10 +1474,12 @@ async function factsCache(path: string, enabled: boolean) {
 }
 
 /**
- * The declarations TypeScript reads in place of a JS file an import names,
- * so a change to them, or their creation, is a change to the run.
+ * The declarations TypeScript reads in place of a JS file or a component
+ * an import names (`X.svelte.d.ts`, which a build can write beside it), so
+ * a change to them, or their creation, is a change to the run.
  */
 function declarationsBeside(path: string): string[] {
+  if (path.endsWith(".svelte")) return [`${path}.d.ts`];
   return JS_EXTENSION.test(path) ? [path.replace(JS_EXTENSION, ".d.$1ts")] : [];
 }
 
