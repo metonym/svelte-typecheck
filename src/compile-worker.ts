@@ -1,23 +1,29 @@
-// The compiler's pass on a worker thread: `compileOffThread`'s other side,
-// and `warmOffThread`'s, which has it load the compiler and config early.
+// The compiler's pass on a worker thread: the other side of
+// `compileOffThread` and `compileFilesOffThread`.
 import { parentPort } from "node:worker_threads";
 import {
   compileAll,
+  compileFiles,
+  type CompileFilesRequest,
   type CompileRequest,
-  type CompilerSource,
-  warmCompiler,
 } from "./compiler.ts";
 
 parentPort?.on(
   "message",
   async (
-    message: { id: number; request: CompileRequest } | { warm: CompilerSource },
+    message:
+      | { id: number; request: CompileRequest }
+      | { id: number; files: CompileFilesRequest },
   ) => {
-    // A failure here is the compile request's to report, as it loads again.
-    if ("warm" in message) return warmCompiler(message.warm).catch(() => {});
-    const { id, request } = message;
+    const { id } = message;
     try {
-      parentPort?.postMessage({ id, result: await compileAll(request) });
+      parentPort?.postMessage({
+        id,
+        result:
+          "files" in message
+            ? await compileFiles(message.files)
+            : await compileAll(message.request),
+      });
     } catch (error) {
       parentPort?.postMessage({
         id,

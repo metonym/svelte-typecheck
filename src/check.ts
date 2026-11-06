@@ -16,11 +16,13 @@ import { version as TOOL_VERSION } from "../package.json";
 import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
 import {
   compileAll,
+  compileFilesOffThread,
+  compileKey,
   compileOffThread,
   type CompileRequest,
+  type CompileResult,
   type ConfigShape,
   svelteDirOf,
-  warmOffThread,
 } from "./compiler.ts";
 import { configFingerprint } from "./config.ts";
 import type { emit } from "./emit.ts";
@@ -450,16 +452,25 @@ export async function typecheck(
   const configFile = options.config
     ? resolve(workspace, options.config)
     : undefined;
-  // A run with no compiler results kept compiles every component on the
-  // worker: it loads the compiler and config (through Vite, up to half a
-  // second) while this thread reads and generates.
-  if (
+  // A run with no compiler results kept compiles every component, on the
+  // worker from here: it reads them, and loads the compiler and the config
+  // (through Vite, up to half a second), while this thread reads them too
+  // and generates code.
+  const compilingEarly =
     sources.has("svelte") &&
     sources.has("js") &&
     project.components.length >= OFF_THREAD_AT &&
     !(incremental && existsSync(join(outDir, COMPILE_CACHE)))
-  )
-    warmOffThread({ svelteDir, configDir, configFile });
+      ? compileFilesOffThread({
+          svelteDir,
+          configDir,
+          configFile,
+          files: project.components.map((path) => ({
+            path,
+            filename: relative(cwd, path),
+          })),
+        })
+      : undefined;
   // An incremental run keeps the last run's code and rewrites what changed.
   const previous = incremental
     ? await readFile(join(outDir, MANIFEST), "utf-8")
@@ -548,7 +559,7 @@ export async function typecheck(
         .catch(() => undefined)) ?? { fingerprint, entries: {} })
     : { fingerprint, entries: {} };
   const keys = files.map((path, i) =>
-    hash(`${relative(cwd, path)}\0${texts[i] ?? ""}`),
+    compileKey(relative(cwd, path), texts[i] ?? ""),
   );
   const missing = sources.has("svelte")
     ? files
@@ -567,12 +578,33 @@ export async function typecheck(
       filename: relative(cwd, files[i] ?? ""),
     })),
   };
+  /**
+   * The worker's early compile, with a component edited since the worker
+   * read it compiled again as read here, which its key is.
+   */
+  const withEdits = async (early: CompileResult & { keys: string[] }) => {
+    const edited = missing.filter((i) => early.keys[i] !== keys[i]);
+    if (edited.length === 0) return early;
+    const request = {
+      ...compileRequest,
+      components: edited.map((i) => ({
+        source: texts[i] ?? "",
+        filename: relative(cwd, files[i] ?? ""),
+      })),
+    };
+    const again =
+      (await compileOffThread(request)) ?? (await compileAll(request));
+    const results = [...early.results];
+    for (const [n, i] of edited.entries()) results[i] = again.results[n] ?? [];
+    return { ...early, results };
+  };
   // Worth a worker's start only with as much code to generate beside it;
   // with none to generate or checker to wait for, nothing runs beside it.
-  const compilingOffThread =
-    missing.length >= OFF_THREAD_AT && sources.has("js")
-      ? compileOffThread(compileRequest)
-      : undefined;
+  let compilingOffThread: Promise<CompileResult> | undefined;
+  if (compilingEarly && missing.length === files.length)
+    compilingOffThread = compilingEarly.wait().then(withEdits);
+  else if (missing.length >= OFF_THREAD_AT && sources.has("js"))
+    compilingOffThread = compileOffThread(compileRequest);
   // Unhandled until awaited, after the checker: a rejection is the run's.
   compilingOffThread?.catch(() => {});
   // When it finished, for the run's timings, as this thread may be busy then.
