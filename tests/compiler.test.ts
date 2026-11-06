@@ -9,6 +9,7 @@ import {
   compileOffThread,
   compilerDiagnostics,
   svelteDirOf,
+  withEdits,
 } from "../src/compiler.ts";
 import { configNeedsChdir } from "../src/config.ts";
 
@@ -240,5 +241,39 @@ describe("configNeedsChdir", () => {
     } finally {
       process.chdir(cwd);
     }
+  });
+});
+
+describe("withEdits", () => {
+  const warning = (code: string) => [
+    { severity: "warning" as const, code, message: "", line: 1, column: 1 },
+  ];
+  const early = {
+    keys: ["a", "b", "c"],
+    results: [warning("one"), warning("two"), warning("three")],
+  };
+
+  it("keeps the worker's results when it read what the run read", async () => {
+    let asked = false;
+    const result = await withEdits(early, ["a", "b", "c"], async () => {
+      asked = true;
+      return [];
+    });
+    expect(asked).toBe(false);
+    expect(result.results).toEqual(early.results);
+  });
+
+  it("compiles again each component edited since the worker read it", async () => {
+    const asked: number[][] = [];
+    const result = await withEdits(early, ["a", "B", "C"], async (edited) => {
+      asked.push(edited);
+      return [warning("two again"), warning("three again")];
+    });
+    expect(asked).toEqual([[1, 2]]);
+    expect(result.results).toEqual([
+      warning("one"),
+      warning("two again"),
+      warning("three again"),
+    ]);
   });
 });

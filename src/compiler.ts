@@ -419,14 +419,35 @@ export async function compileFiles(
 export function compileFilesOffThread(request: CompileFilesRequest):
   | {
       wait: () => Promise<CompileFilesResult>;
+      /** When it started, for the run's timings. */
+      at: number;
     }
   | undefined {
   if (configNeedsChdir(request.configDir, request.configFile)) return;
+  const at = performance.now();
   try {
-    return post({ files: request }, () => compileFiles(request));
+    return { ...post({ files: request }, () => compileFiles(request)), at };
   } catch {
     return;
   }
+}
+
+/**
+ * `early`, a compile of every component as the worker read them, with each
+ * one edited since compiled again as the run read it: those whose key, as
+ * the run read them (`keys`), isn't the worker's. Both are by component.
+ */
+export async function withEdits(
+  early: CompileFilesResult,
+  keys: string[],
+  compileAgain: (edited: number[]) => Promise<CompilerDiagnostic[][]>,
+): Promise<CompileResult> {
+  const edited = keys.flatMap((key, i) => (early.keys[i] === key ? [] : [i]));
+  if (edited.length === 0) return early;
+  const again = await compileAgain(edited);
+  const results = [...early.results];
+  for (const [n, i] of edited.entries()) results[i] = again[n] ?? [];
+  return { ...early, results };
 }
 
 const TEXT_TYPE = /^text\//;
