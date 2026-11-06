@@ -19,6 +19,9 @@
   checker finished. And without `allowJs`, the project's TS files are
   read all at once to find their imports of JS components, rather than
   one at a time, and that text isn't read again to order them.
+- `--no-incremental` moves the last run's output folder aside and deletes
+  it while the run goes on, rather than first: on
+  carbon-components-svelte, deleting it took 100 to 150 ms.
 
 **Fixes**
 

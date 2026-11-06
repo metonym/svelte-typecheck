@@ -1,7 +1,14 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  readdir,
+  readFile,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { lexComponent, lexImportsExports } from "sveast/lexer";
@@ -459,7 +466,7 @@ export async function typecheck(
         .then((text) => new Set(JSON.parse(text) as string[]))
         .catch(() => new Set<string>())
     : new Set<string>();
-  if (!incremental) await rm(outDir, { recursive: true, force: true });
+  if (!incremental) await clearOutDir(outDir);
   const files = project.components;
   const listedFiles = project.tsconfig
     ? programFiles(project)
@@ -1555,6 +1562,28 @@ async function factsCache(path: string, enabled: boolean) {
 function declarationsBeside(path: string): string[] {
   if (path.endsWith(".svelte")) return [`${path}.d.ts`];
   return JS_EXTENSION.test(path) ? [path.replace(JS_EXTENSION, ".d.$1ts")] : [];
+}
+
+/**
+ * Empties `outDir` for a run that keeps nothing from the last: moved
+ * aside, to a dot folder no glob enters, and deleted while the run goes
+ * on, where deleting it first took a tenth of a second on a large
+ * project. One an earlier run left, as a stopped one can, goes too.
+ */
+async function clearOutDir(outDir: string): Promise<void> {
+  const parent = dirname(outDir);
+  const prefix = `.${basename(outDir)}.old-`;
+  try {
+    await rename(outDir, join(parent, `${prefix}${process.pid}-${Date.now()}`));
+  } catch (error) {
+    // Nothing to clear, or it can't move (Windows, while a file's open).
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+      await rm(outDir, { recursive: true, force: true });
+    return;
+  }
+  for (const name of await readdir(parent).catch(() => []))
+    if (name.startsWith(prefix))
+      rm(join(parent, name), { recursive: true, force: true }).catch(() => {});
 }
 
 /** Each file's size and modification time, or that it's missing. */
