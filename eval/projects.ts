@@ -15,7 +15,10 @@ export interface Project {
   args?: string[];
   /** Files written in `dir` before the check, such as a config that turns `checkJs` on. */
   files?: Record<string, string>;
-  /** Commands that generate what the check reads, run from `dir` with the project's package manager. */
+  /**
+   * Commands that generate what the check reads, run from `dir` by the
+   * project's package manager: `["exec", "svelte-kit", "sync"]`.
+   */
   setup?: string[][];
   /** The folder, in `dir`, whose components get planted errors; none, no second pass. */
   mutate?: string;
@@ -52,7 +55,7 @@ export const PROJECTS: Project[] = [
         compilerOptions: { checkJs: true },
       }),
     },
-    setup: [["svelte-kit", "sync"]],
+    setup: [["exec", "svelte-kit", "sync"]],
     mutate: "src",
   },
   {
@@ -62,34 +65,20 @@ export const PROJECTS: Project[] = [
     commit: "d093bd0edcc0ef555b408e86a4948a8434b1b03f",
     dir: "packages/bits-ui",
     args: ["--tsconfig", "./tsconfig.json"],
-    setup: [["svelte-kit", "sync"]],
+    setup: [["exec", "svelte-kit", "sync"]],
     mutate: "src",
-    known: [
-      {
-        pass: "with errors planted",
-        only: "svelte-check",
-        line: 'ERROR "src/lib/bits/button/components/button.svelte" 19:34 "Property \'__nope\' does not exist on type \'\\"button\\" | \\"reset\\" | \\"submit\\"\'.\\n  Property \'__nope\' does not exist on type \'\\"button\\"\'."',
-        why: "A union's members in another order: docs/svelte-check.md.",
-      },
-      {
-        pass: "with errors planted",
-        only: "svelte-typecheck",
-        line: 'ERROR "src/lib/bits/button/components/button.svelte" 19:34 "Property \'__nope\' does not exist on type \'\\"button\\" | \\"submit\\" | \\"reset\\"\'.\\n  Property \'__nope\' does not exist on type \'\\"button\\"\'."',
-        why: "A union's members in another order: docs/svelte-check.md.",
-      },
-    ],
   },
   {
-    // 1,276 JS components with JSDoc, and no `allowJs`: each is untyped to
-    // its importers, which its type tests read. It checks with
-    // svelte-typecheck, so svelte-check is added for the comparison.
-    // Without `checkJs`, errors planted in its components show nothing,
-    // so it has no second pass.
+    // 1,276 JS components with JSDoc, typed by the `.svelte.d.ts` files
+    // sveld generates, which aren't committed. As its CI checks it: types
+    // generated, then its type tests. It checks with svelte-typecheck, so
+    // svelte-check is added for the comparison. Its components have no
+    // `checkJs`, so errors are planted in its tests' components.
     name: "carbon",
     repo: "carbon-design-system/carbon-components-svelte",
     commit: "c0467ed3bd762dffa6bba1722197e10f61df05da",
-    args: ["--tsconfig", "tsconfig.json"],
-    pending:
-      "both tools report about 2,960 errors at this commit, and 33 and 43 of their lines differ: union order, and names imported from its untyped components, such as `ComboBoxItem`, which svelte-check prints by name and svelte-typecheck as `any`",
+    args: ["--workspace", "tests"],
+    setup: [["run", "build:docs", "--no-strict"]],
+    mutate: "tests",
   },
 ];

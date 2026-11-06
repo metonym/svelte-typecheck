@@ -81,3 +81,52 @@ export function onlyIn({ expected, actual }: Comparison): {
   );
   return { svelteCheck, svelteTypecheck };
 }
+
+/** The `'…'` quoted types in a machine-output line, and the text around them. */
+function quoted(line: string): { types: string[]; text: string } {
+  const types: string[] = [];
+  const text = line.replace(/'((?:[^'\\]|\\.)*)'/g, (_, type: string) => {
+    types.push(type);
+    return "''";
+  });
+  return { types, text };
+}
+
+/** A union's members, without the parentheses one can print with: `(string & {})`. */
+const memberList = (type: string) =>
+  type.split(" | ").map((m) => m.replace(/^\((.*)\)$/, "$1"));
+const members = (type: string) => memberList(type).sort().join(" | ");
+
+/**
+ * Whether two lines say the same at the same place but for the order of
+ * a union's members, which TypeScript prints in the order it first met
+ * them (docs/svelte-check.md): `'"a" | "b"'` and `'"b" | "a"'`, and an
+ * elaboration on the union's first member, which then differs too.
+ */
+export function onlyUnionOrder(a: string, b: string): boolean {
+  if (a === b) return false;
+  // The same error, elaborated on another member of a union whose name is
+  // all the line prints (`type 'BreakpointSize'`): only after the first line.
+  const [headA = "", ...restA] = a.split("\\n");
+  const [headB = "", ...restB] = b.split("\\n");
+  if (
+    headA === headB &&
+    restA.length > 0 &&
+    quoted(restA.join("\\n")).text === quoted(restB.join("\\n")).text
+  )
+    return true;
+  const x = quoted(a);
+  const y = quoted(b);
+  if (x.text !== y.text || x.types.length !== y.types.length) return false;
+  const unions = x.types.filter((t) => t.includes(" | "));
+  if (unions.length === 0) return false;
+  return x.types.every((t, i) => {
+    const u = y.types[i] ?? "";
+    if (t === u || members(t) === members(u)) return true;
+    // One member of a union in the same line, each tool its first.
+    return unions.some((union) => {
+      const set = memberList(union);
+      return set.includes(t) && set.includes(u);
+    });
+  });
+}
