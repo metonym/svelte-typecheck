@@ -73,6 +73,9 @@ svelte-typecheck --baseline errors.json --strict-baseline
 # Check again on every change
 svelte-typecheck --watch
 
+# Run on a process kept alive between runs, for agents and hooks
+svelte-typecheck --daemon
+
 # Ignore the cache from earlier runs
 svelte-typecheck --no-incremental
 ```

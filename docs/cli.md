@@ -36,3 +36,32 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 | `--baseline <file>`   | Report only diagnostics the baseline doesn't have; see [Beyond svelte-check](svelte-check.md#beyond-svelte-check)                                              |
 | `--update-baseline`   | Write the run's diagnostics to `--baseline`'s file                                                                                                             |
 | `--strict-baseline`   | Exit 1 when diagnostics in the baseline are fixed, until `--update-baseline` drops them, so the baseline only goes down                                        |
+| `--daemon`            | Run on a daemon kept alive for the folder; see [The daemon](#the-daemon)                                                                                       |
+| `--no-daemon`         | Run here, whatever `SVELTE_TYPECHECK_DAEMON` says                                                                                                              |
+
+## The daemon
+
+Each run starts a runtime, loads and optimizes svelte-typecheck, loads the Svelte compiler and config, and reads its caches. With `--daemon`, a process kept alive for the folder does all of that once, and each run is handed to it. It's for tools that check again and again: an agent after each edit, a pre-commit hook, scripts that run several checks. For a terminal you're watching, `--watch` already keeps a process alive.
+
+```sh
+svelte-typecheck --daemon --changed     # started on the first run, reused after
+export SVELTE_TYPECHECK_DAEMON=1        # or for every run, without the flag
+```
+
+On carbon-components-svelte (1,276 components), a run after one component changes is about 15 to 24% faster with tsrs, tsgo and `bun check`, and one with nothing changed about 10%. The checker still starts fresh each run.
+
+A run on the daemon prints what it would print here, with its own arguments, environment and terminal: under Claude Code, machine output, as here. A daemon:
+
+- serves one folder, built from one install of svelte-typecheck, and its runs one at a time.
+- starts again when its config (`svelte.config.*`, `vite.config.*`), the lockfile or the installed Svelte changes, as it keeps them loaded.
+- runs the check here instead when it can't start or fails partway; its output is printed once the run ends, so nothing is printed twice.
+- exits after 10 idle minutes (`SVELTE_TYPECHECK_DAEMON_IDLE` in seconds).
+- isn't used on CI (`CI` set), with `--watch` or with `--no-daemon`.
+
+```sh
+svelte-typecheck status   # whether one runs for this folder, and its log
+svelte-typecheck start    # start one ahead of the first run
+svelte-typecheck stop
+```
+
+Its socket and log are in a folder of the user's own (`$XDG_RUNTIME_DIR` or the temp folder), or a named pipe on Windows.

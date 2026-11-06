@@ -31,7 +31,7 @@ The SvelteKit fixture needs SvelteKit's generated files; its parity test runs `s
 5. **Map.** Each checker error maps back to its source; errors in purely generated code are dropped, and svelte-check's rewrites and filters apply (store misuse, non-bindable `bind:`, `$:` labels and more).
 6. **Order.** Diagnostics come out in TypeScript's program order, a file's imports before it, as svelte-check prints them. The listed files are ordered while the checker runs (`programOrder`), and only reported files outside them after it. What's read from each file for this is kept by its `stat` (`files.json`).
 
-`src/main.ts` is the CLI (svelte-check's options, plus `--checker`, `--baseline` and `--changed`), `src/format.ts` its four output formats, `src/watch.ts` `--watch`, `src/baseline.ts` baselines and `src/git.ts` the changed files. `src/cli.ts` is the bin.
+`src/main.ts` is the CLI (svelte-check's options, plus `--checker`, `--baseline` and `--changed`), `src/format.ts` its four output formats, `src/watch.ts` `--watch`, `src/daemon.ts` `--daemon`'s client and server, `src/baseline.ts` baselines and `src/git.ts` the changed files. `src/cli.ts` is the bin: it hands a run to a daemon, loading only the client, or runs `src/main.ts`.
 
 ## Rules every change must keep
 

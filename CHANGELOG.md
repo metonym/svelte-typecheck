@@ -2,6 +2,18 @@
 
 ## Unreleased
 
+**Features**
+
+- `--daemon` runs on a process kept alive for the folder, started on the
+  first such run, so a run doesn't start a runtime, load svelte-typecheck,
+  the compiler and the config, and read its caches each time. For agents
+  and hooks that check again and again: on carbon-components-svelte, a
+  run after one change is 15 to 24% faster. `SVELTE_TYPECHECK_DAEMON=1`
+  turns it on for every run, and `svelte-typecheck start`, `stop` and
+  `status` manage it. It starts again when the config, the lockfile or
+  Svelte changes, runs the check here if it fails, exits after 10 idle
+  minutes, and isn't used on CI.
+
 **Performance**
 
 - tsgo, tsrs and TypeScript 7's `tsc` start as their native binary,
