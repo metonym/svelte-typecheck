@@ -4,6 +4,11 @@
 
 **Performance**
 
+- tsgo, tsrs and TypeScript 7's `tsc` start as their native binary,
+  found with each package's own lookup, rather than through their Node
+  launcher, which started a runtime only to start the binary. A run that
+  checks is about 40 to 50 ms faster, and on Bun, where the launcher
+  waited on the binary, there's no idle process beside the checker.
 - The generated code leaves out what can't report anything: the
   `createElement` call for an element whose attributes write nothing
   (none, static `data-` ones, a slot's name), the names of elements and

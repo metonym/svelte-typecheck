@@ -1,7 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { typecheck } from "../src/check.ts";
-import { checkerCommand, onPath } from "../src/checker.ts";
+import { checkerCommand, nativeCommand, onPath } from "../src/checker.ts";
 
 const root = join(import.meta.dir, "..");
 
@@ -19,6 +20,31 @@ describe("checkerCommand", () => {
     expect(checkerCommand("tsc", join(root, "tests/fixtures"))?.version).toBe(
       checkerCommand("tsc", root)?.version,
     );
+  });
+});
+
+describe("nativeCommand", () => {
+  it.each(["tsgo", "tsrs"] as const)(
+    "starts %s's native binary, not its launcher",
+    async (checker) => {
+      const command = checkerCommand(checker, root);
+      if (!command) throw new Error(`${checker} isn't installed`);
+      const native = await nativeCommand(command);
+      expect(native.prefix).toEqual([]);
+      expect(native.command).not.toBe(process.execPath);
+      expect(native.version).toBe(command.version);
+      // The binary the launcher would start, which runs.
+      const run = spawnSync(native.command, ["--version"], {
+        encoding: "utf-8",
+      });
+      expect(run.stdout).toContain("Version");
+    },
+  );
+
+  it("keeps the launcher of a package without a native binary", async () => {
+    const tsc = checkerCommand("tsc", root);
+    if (!tsc) throw new Error("typescript isn't installed");
+    expect(await nativeCommand(tsc)).toEqual(tsc);
   });
 });
 
