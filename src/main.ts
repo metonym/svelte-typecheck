@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { relative, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { applyBaseline, createBaseline } from "./baseline.ts";
 import { EmitError, typecheck } from "./check.ts";
@@ -11,6 +11,7 @@ import {
   writer,
 } from "./format.ts";
 import { changedFiles } from "./git.ts";
+import { outsideOf, projectOf } from "./project.ts";
 import type {
   Baseline,
   Checker,
@@ -200,6 +201,15 @@ export async function main(argv: string[]): Promise<0 | 1> {
       out.note(
         `${result.skipped} more in files the changes don't reach, not shown`,
       );
+    // Only where the note prints: finding them costs a git call.
+    if (
+      !format.startsWith("machine") &&
+      result.tsconfig &&
+      !options.components
+    ) {
+      const note = outsideNote(result.workspace, result.tsconfig);
+      if (note) out.note(note);
+    }
     out.completion(summary, watching);
     return summary.errors > 0 ||
       result.failed.length > 0 ||
@@ -218,6 +228,24 @@ export async function main(argv: string[]): Promise<0 | 1> {
   } catch (error) {
     return report(error as Error, false);
   }
+}
+
+const OUTSIDE_SHOWN = 3;
+
+/**
+ * That components under the workspace aren't in the tsconfig's project, so
+ * weren't checked, naming the first few; svelte-check passes them silently.
+ */
+function outsideNote(workspace: string, tsconfig: string): string | undefined {
+  const outside = outsideOf(projectOf({ workspace, tsconfig }), workspace);
+  if (outside.length === 0) return;
+  const one = outside.length === 1;
+  const names = outside
+    .slice(0, OUTSIDE_SHOWN)
+    .map((path) => relative(workspace, path));
+  if (outside.length > OUTSIDE_SHOWN)
+    names.push(`and ${outside.length - OUTSIDE_SHOWN} more`);
+  return `${outside.length} ${one ? "component" : "components"} in the workspace ${one ? "isn't" : "aren't"} in ${relative(workspace, tsconfig)}'s "include" and ${one ? "wasn't" : "weren't"} checked: ${names.join(", ")}`;
 }
 
 /** svelte-check's default: human-verbose, or machine in Claude Code. */

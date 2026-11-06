@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Features**
+
+- The human output notes components under the workspace that the
+  tsconfig doesn't include, which weren't checked, so a typo in one
+  (`e2e/`, `stories/`) no longer passes without a word. Those its
+  `exclude` names and those git ignores, such as svelte-package's `dist`,
+  aren't counted. The machine output is unchanged, to match svelte-check's.
+
 ## 0.1.9 — 2026-11-05
 
 **Fixes**

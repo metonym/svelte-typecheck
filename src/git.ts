@@ -28,3 +28,18 @@ export function changedFiles(cwd: string, since?: string): string[] {
   ];
   return [...new Set(lines.filter(Boolean).map((line) => join(top, line)))];
 }
+
+/**
+ * Which of `paths` (relative to `cwd`, `/`-separated) git ignores; none
+ * outside a repository or without git.
+ */
+export function ignoredFiles(cwd: string, paths: string[]): Set<string> {
+  const result = spawnSync("git", ["check-ignore", "-z", "--stdin"], {
+    cwd,
+    encoding: "utf-8",
+    input: paths.join("\0"),
+  });
+  // 1 is none ignored; anything else but 0 is no repository, or no git.
+  if (result.status !== 0) return new Set();
+  return new Set(result.stdout.split("\0").filter(Boolean));
+}

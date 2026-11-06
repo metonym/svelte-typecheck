@@ -39,6 +39,8 @@ export default defineConfig({
     // The compiler's pass runs this on a worker thread.
     "src/compiler.ts": "src/compile-worker.ts",
     "tests/parity.test.ts": "src/cli.ts",
+    // Its temp workspaces are its own; it reads no fixture.
+    "tests/outside.test.ts": "src/cli.ts",
     // Builds and packs the package, then checks the fixtures with it.
     "scripts/test-package.ts": "scripts/build.ts",
     "scripts/build.ts": [

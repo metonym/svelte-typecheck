@@ -4,12 +4,15 @@
 // - cold: nothing kept from the last run (`--no-incremental`);
 // - changed: one component edited since the last run;
 // - unchanged: nothing changed since the last run, so it's replayed;
+// - cli: unchanged, through the CLI with its human output, which reads
+//   more than the API returns (the components outside the tsconfig);
 // - compile: the compiler pass alone, cold;
 // - vite: cold, on the corpus with a SvelteKit vite.config, from its folder;
 // - vite-changed: there, one component edited since the last run.
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { typecheck } from "../src/check.ts";
+import { main } from "../src/main.ts";
 import type { Checker, TypecheckOptions } from "../src/types.ts";
 import { corpus, viteCorpus } from "./corpus.ts";
 
@@ -17,6 +20,7 @@ const MODES = [
   "cold",
   "changed",
   "unchanged",
+  "cli",
   "compile",
   "vite",
   "vite-changed",
@@ -40,6 +44,20 @@ if (mode.endsWith("changed")) {
   const page = join(workspace, "Page0.svelte");
   const source = (await readFile(page, "utf-8")).replace(/<!-- \d+ -->\n$/, "");
   await writeFile(page, `${source}<!-- ${Date.now()} -->\n`);
+}
+if (mode === "cli") {
+  const code = await main([
+    "--workspace",
+    workspace,
+    "--checker",
+    checker,
+    "--out-dir",
+    outDir,
+    "--output",
+    "human",
+  ]);
+  if (code !== 0) throw new Error("bench corpus has errors");
+  process.exit(0);
 }
 const options: TypecheckOptions = {
   workspace,

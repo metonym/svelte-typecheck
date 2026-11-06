@@ -9,6 +9,7 @@ import {
   resolve,
   sep,
 } from "node:path";
+import { ignoredFiles } from "./git.ts";
 import { glob, matcher } from "./glob.ts";
 
 const LINE_COMMENT = /\/\/[^\n]*/g;
@@ -506,6 +507,26 @@ export function scriptsOf(
     }
   }
   return [...found].sort();
+}
+
+/**
+ * The components under the workspace that a tsconfig's project leaves out,
+ * which a run doesn't check: not those its `exclude` names, which it means
+ * to leave out, nor those git ignores, such as svelte-package's `dist`.
+ * Git runs only when there are some, as its start costs more than the walk.
+ */
+export function outsideOf(project: Project, workspace: string): string[] {
+  const checked = new Set(project.components);
+  const isExcluded = absoluteMatcher(project.exclude);
+  const outside = glob(workspace, ["**/*.svelte"]).filter((rel) => {
+    const path = join(workspace, rel);
+    return !checked.has(path) && !isExcluded(path);
+  });
+  if (outside.length === 0) return [];
+  const ignored = ignoredFiles(workspace, outside);
+  return outside
+    .filter((rel) => !ignored.has(rel))
+    .map((rel) => join(workspace, rel));
 }
 
 /** A path relative to `from`, `./`-prefixed when it doesn't climb, for tsconfig fields. */

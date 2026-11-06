@@ -22,6 +22,8 @@ export default defineConfig({
     ...CHECKERS.map((checker) => run("changed", checker)),
     // Nothing changed: the last result, whichever the checker.
     run("unchanged", "tsrs"),
+    // The same, through the CLI's human output.
+    run("cli", "tsrs"),
     // The Svelte compiler's pass alone.
     run("compile", "tsrs"),
     // With the config loaded through Vite, as for a SvelteKit project.
