@@ -5,5 +5,5 @@ dist
 bench/corpus
 bench/corpus-vite
 .ostia
-tests/.tmp
+tests/projects/*/.tmp
 .svelte-kit

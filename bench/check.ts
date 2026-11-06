@@ -42,6 +42,9 @@ if (mode.endsWith("changed")) {
   await writeFile(page, `${source}<!-- ${Date.now()} -->\n`);
 }
 const options: TypecheckOptions = {
+  // From bench/, whose package.json installs Svelte and the checkers, or
+  // the Vite corpus's own folder.
+  cwd: vite ? workspace : import.meta.dirname,
   workspace,
   checker,
   outDir,

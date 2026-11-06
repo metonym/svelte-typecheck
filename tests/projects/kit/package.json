@@ -1,0 +1,16 @@
+{
+  "name": "project-kit",
+  "private": true,
+  "type": "module",
+  "imports": {
+    "#lib/*": "./src/lib/*"
+  },
+  "devDependencies": {
+    "@sveltejs/kit": "catalog:",
+    "magic-string": "^1.4.5",
+    "svelte": "catalog:",
+    "svelte-check": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

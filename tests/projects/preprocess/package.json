@@ -1,0 +1,11 @@
+{
+  "name": "project-preprocess",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "magic-string": "^1.4.5",
+    "svelte": "catalog:",
+    "svelte-check": "catalog:",
+    "typescript": "catalog:"
+  }
+}

@@ -10,6 +10,9 @@ import { typecheck } from "../src/check.ts";
 import type { Checker } from "../src/types.ts";
 
 const root = join(import.meta.dir, "..");
+/** The Svelte 5 project the tests run from, as a user runs from theirs. */
+const svelte5 = join(root, "tests/projects/svelte5");
+const basic = join(svelte5, "basic");
 
 // One planted error per kind, where svelte-check --tsgo reported each.
 // Clean.svelte has none.
@@ -33,8 +36,8 @@ describe("typecheck", () => {
     "reports what svelte-check reports for the fixtures, with %s",
     async (checker) => {
       const result = await typecheck({
-        cwd: root,
-        workspace: "tests/fixtures",
+        cwd: svelte5,
+        workspace: "basic",
         checker,
         outDir: `node_modules/.cache/svelte-typecheck/test-${checker}`,
       });
@@ -43,8 +46,7 @@ describe("typecheck", () => {
         result.diagnostics
           .filter((d) => d.source !== "svelte")
           .map(
-            (d) =>
-              `${relative(join(root, "tests/fixtures"), d.file)}:${d.line}:${d.column} ${d.code}`,
+            (d) => `${relative(basic, d.file)}:${d.line}:${d.column} ${d.code}`,
           ),
       ).toEqual(EXPECTED);
       expect(result.dropped).toEqual([]);
@@ -58,16 +60,16 @@ describe("typecheck", () => {
   it.each<Checker>(["tsgo", "tsc"])(
     "reads %s's paths when $PWD names the folder through a symlink",
     async (checker) => {
-      const link = join(root, "tests/.tmp/pwd-link");
-      mkdirSync(join(root, "tests/.tmp"), { recursive: true });
+      const link = join(svelte5, ".tmp/pwd-link");
+      mkdirSync(join(svelte5, ".tmp"), { recursive: true });
       rmSync(link, { force: true });
-      symlinkSync(root, link);
+      symlinkSync(svelte5, link);
       const pwd = process.env.PWD;
       process.env.PWD = link;
       try {
         const result = await typecheck({
-          cwd: root,
-          workspace: "tests/fixtures",
+          cwd: svelte5,
+          workspace: "basic",
           checker,
           incremental: false,
           outDir: `node_modules/.cache/svelte-typecheck/test-pwd-${checker}`,
@@ -77,7 +79,7 @@ describe("typecheck", () => {
             .filter((d) => d.source !== "svelte")
             .map(
               (d) =>
-                `${relative(join(root, "tests/fixtures"), d.file)}:${d.line}:${d.column} ${d.code}`,
+                `${relative(basic, d.file)}:${d.line}:${d.column} ${d.code}`,
             ),
         ).toEqual(EXPECTED);
       } finally {
@@ -89,17 +91,16 @@ describe("typecheck", () => {
 
   it("reports them on Svelte 3, with its element types from the shims", async () => {
     const result = await typecheck({
-      cwd: root,
-      workspace: "tests/fixtures",
-      svelte: "node_modules/svelte3",
+      cwd: svelte5,
+      workspace: "basic",
+      svelte: "../svelte3/node_modules/svelte",
       outDir: "node_modules/.cache/svelte-typecheck/test-svelte3",
     });
     expect(
       result.diagnostics
         .filter((d) => d.source !== "svelte")
         .map(
-          (d) =>
-            `${relative(join(root, "tests/fixtures"), d.file)}:${d.line}:${d.column} ${d.code}`,
+          (d) => `${relative(basic, d.file)}:${d.line}:${d.column} ${d.code}`,
         ),
     ).toEqual(EXPECTED);
   }, 30_000);
@@ -107,8 +108,8 @@ describe("typecheck", () => {
   describe("compiler diagnostics", () => {
     const check = (options: Parameters<typeof typecheck>[0] = {}) =>
       typecheck({
-        cwd: root,
-        workspace: "tests/fixtures",
+        cwd: svelte5,
+        workspace: "basic",
         outDir: "node_modules/.cache/svelte-typecheck/test-compiler",
         ...options,
       });
@@ -117,7 +118,7 @@ describe("typecheck", () => {
       const { diagnostics } = await check({ diagnosticSources: ["svelte"] });
       expect(diagnostics).toEqual([
         {
-          file: join(root, "tests/fixtures/Warnings.svelte"),
+          file: join(basic, "Warnings.svelte"),
           line: 5,
           column: 1,
           endLine: 5,
@@ -133,7 +134,7 @@ describe("typecheck", () => {
 
     it("generates no code for the compiler's diagnostics alone", async () => {
       const outDir = "node_modules/.cache/svelte-typecheck/test-compiler-only";
-      rmSync(join(root, outDir), { recursive: true, force: true });
+      rmSync(join(svelte5, outDir), { recursive: true, force: true });
       const { diagnostics } = await check({
         diagnosticSources: ["svelte"],
         outDir,
@@ -141,8 +142,8 @@ describe("typecheck", () => {
       expect(diagnostics.map((d) => d.code)).toEqual([
         "a11y_missing_attribute",
       ]);
-      expect(existsSync(join(root, outDir, "svelte"))).toBe(false);
-      expect(existsSync(join(root, outDir, "tsconfig.json"))).toBe(false);
+      expect(existsSync(join(svelte5, outDir, "svelte"))).toBe(false);
+      expect(existsSync(join(svelte5, outDir, "tsconfig.json"))).toBe(false);
     });
 
     it("ignores a warning, or makes it an error, by code", async () => {
@@ -170,7 +171,7 @@ describe("typecheck", () => {
     ])("uses the project's own compiler (%s)", async (svelte, code) => {
       const { diagnostics } = await check({
         diagnosticSources: ["svelte"],
-        svelte: `node_modules/${svelte}`,
+        svelte: `../${svelte}/node_modules/svelte`,
       });
       expect(diagnostics.map((d) => d.code)).toContain(code);
     });
@@ -178,7 +179,7 @@ describe("typecheck", () => {
 
   it("reports the project's TS and JS errors with declarations off", async () => {
     // A library's components, typed by their own `.svelte.d.ts`.
-    const dir = join(root, "tests/.tmp/no-declarations");
+    const dir = join(svelte5, ".tmp/no-declarations");
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     writeFileSync(
@@ -222,7 +223,7 @@ describe("typecheck", () => {
   it.each<Checker>(["bun", "tsrs", "tsgo", "tsc"])(
     "checks a project whose tsconfig declares content mappers, with %s",
     async (checker) => {
-      const dir = join(root, `tests/.tmp/content-mappers-${checker}`);
+      const dir = join(svelte5, `.tmp/content-mappers-${checker}`);
       rmSync(dir, { recursive: true, force: true });
       mkdirSync(dir, { recursive: true });
       writeFileSync(
@@ -253,7 +254,7 @@ describe("typecheck", () => {
   );
 
   it("reads a JSDoc cast in a template expression, as svelte-check does", async () => {
-    const dir = join(root, "tests/.tmp/template-cast");
+    const dir = join(svelte5, ".tmp/template-cast");
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     writeFileSync(
@@ -278,8 +279,7 @@ describe("typecheck", () => {
 
   it("runs svelte.config's preprocessors first, positions mapped back", async () => {
     const { diagnostics } = await typecheck({
-      cwd: root,
-      workspace: "tests/fixtures-preprocess",
+      cwd: join(root, "tests/projects/preprocess"),
       outDir: "node_modules/.cache/svelte-typecheck/test-preprocess",
     });
     // Where svelte-check reports it; the stripped block moved it up 5 lines,

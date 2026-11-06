@@ -21,7 +21,11 @@ const tsconfig = process.env.AB_TSCONFIG ?? "tsconfig.json";
 const svelte = dirname(
   realpathSync(join(project, "node_modules/svelte/package.json")),
 );
-const tsgo = join(import.meta.dirname, "../node_modules/.bin/tsgo");
+// TypeScript 7's tsc, which eval/package.json installs: tsgo.
+const tsgo = join(
+  import.meta.dirname,
+  "node_modules/@typescript/native/bin/tsc",
+);
 const MEASURES = ["Types", "Instantiations", "Symbols", "Memory used"];
 
 /** The generated components' size, in bytes. */
@@ -48,8 +52,9 @@ function measure(dist: string, outDir: string) {
     /COMPLETED \d+ FILES (\d+ ERRORS \d+ WARNINGS)/.exec(run.stdout)?.[1] ??
     run.stdout.slice(-200);
   const counts = spawnSync(
-    tsgo,
+    "node",
     [
+      tsgo,
       ...["-p", join(outDir, "tsconfig.json"), "--pretty", "false"],
       ...["--incremental", "false", "--checkers", "1", "--extendedDiagnostics"],
     ],

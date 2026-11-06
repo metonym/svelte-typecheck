@@ -16,7 +16,7 @@ if (!project) throw new Error("usage: bun eval/diff.ts <project> [options]");
 const own = join(project, "node_modules/svelte-check/bin/svelte-check");
 const svelteCheck = existsSync(own)
   ? own
-  : join(ROOT, "node_modules/svelte-check/bin/svelte-check");
+  : join(import.meta.dirname, "node_modules/svelte-check/bin/svelte-check");
 
 /** Machine output without timestamps, and the file count, which differs by design. */
 const lines = (command: string[]) =>

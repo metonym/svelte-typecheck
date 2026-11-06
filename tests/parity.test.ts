@@ -1,17 +1,23 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 
 const root = join(import.meta.dir, "..");
-// A package's own bin on Node: `node_modules/.bin` holds shell shims on Windows.
-const SVELTE_CHECK = [
-  "node",
-  join(root, "node_modules/svelte-check/bin/svelte-check"),
-];
-const SVELTE_KIT = [
-  "node",
-  join(root, "node_modules/@sveltejs/kit/svelte-kit.js"),
-];
+const svelte5 = join(root, "tests/projects/svelte5");
+
+/**
+ * A package's own bin on Node, the one the project at `cwd` installs, as
+ * its scripts would run it: `node_modules/.bin` holds shell shims on Windows.
+ */
+function binOf(cwd: string, pkg: string, file: string): string[] {
+  for (let dir = cwd; ; dir = dirname(dir)) {
+    const path = join(dir, "node_modules", pkg, file);
+    if (existsSync(path)) return ["node", path];
+    if (dirname(dir) === dir) throw new Error(`no ${pkg} for ${cwd}`);
+  }
+}
+const svelteCheckBin = (cwd: string) =>
+  binOf(cwd, "svelte-check", "bin/svelte-check");
 const TIMESTAMP = /^\d+ /;
 
 /** A CLI's machine output without timestamps or the file count. */
@@ -32,7 +38,7 @@ function machine(command: string[], cwd: string): string[] {
 }
 
 const svelteCheck = (args: string[], cwd: string) =>
-  machine([...SVELTE_CHECK, "--output", "machine", ...args], cwd);
+  machine([...svelteCheckBin(cwd), "--output", "machine", ...args], cwd);
 const ours = (args: string[], cwd: string) =>
   machine(
     [
@@ -64,59 +70,60 @@ describe("svelte-check parity, machine output", () => {
   ])(
     "matches svelte-check with %s",
     (_, args) => {
-      const cwd = join(root, "tests/fixtures");
+      const cwd = join(svelte5, "basic");
       expect(ours(args, cwd)).toEqual(svelteCheck(args, cwd));
     },
     60_000,
   );
 
   it("matches svelte-check with $$Props, $$Events, $$Slots, strictEvents and animate:", () => {
-    const cwd = join(root, "tests/fixtures-typed");
+    const cwd = join(svelte5, "typed");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
   it("matches svelte-check with generic components", () => {
-    const cwd = join(root, "tests/fixtures-generic");
+    const cwd = join(svelte5, "generic");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
   it("matches svelte-check with runes, snippets, attachments and function bindings", () => {
-    const cwd = join(root, "tests/fixtures-runes");
+    const cwd = join(svelte5, "runes");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
   it("matches svelte-check in a SvelteKit project", () => {
-    const cwd = join(root, "tests/fixtures-kit");
+    const cwd = join(root, "tests/projects/kit");
     // SvelteKit writes `./$types` and the tsconfig the project extends.
-    spawnSync(SVELTE_KIT[0] ?? "", [...SVELTE_KIT.slice(1), "sync"], { cwd });
+    const [node = "", kit = ""] = binOf(cwd, "@sveltejs/kit", "svelte-kit.js");
+    spawnSync(node, [kit, "sync"], { cwd });
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
   it("matches svelte-check on markup that doesn't parse, TypeScript in JS, no allowJs and a scss style", () => {
-    const cwd = join(root, "tests/fixtures-edge");
+    const cwd = join(svelte5, "edge");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
   // Each helper the generated code calls, failing, and a TS file that
   // uses components wrongly: every name the shims' types print.
   it("matches svelte-check where a message prints the shims' types", () => {
-    const cwd = join(root, "tests/fixtures-helpers");
+    const cwd = join(svelte5, "helpers");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
   // Without `allowJs`, an import of a JS component has no declaration.
   it("matches svelte-check on imports of a JS component without allowJs", () => {
-    const cwd = join(root, "tests/fixtures-untyped");
+    const cwd = join(svelte5, "untyped");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
   it("matches svelte-check's message rewrites and filters", () => {
-    const cwd = join(root, "tests/fixtures-filters");
+    const cwd = join(svelte5, "filters");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
   it("warns, as svelte-check does, of a tsconfig with no components", () => {
-    const cwd = join(root, "tests/.tmp/no-components");
+    const cwd = join(svelte5, ".tmp/no-components");
     mkdirSync(join(cwd, "src"), { recursive: true });
     writeFileSync(
       join(cwd, "tsconfig.json"),
@@ -147,7 +154,7 @@ describe("svelte-check parity, machine output", () => {
   ])(
     "fails, as svelte-check does, on %s",
     (_, name, tsconfig) => {
-      const cwd = join(root, "tests/.tmp", name);
+      const cwd = join(svelte5, ".tmp", name);
       mkdirSync(join(cwd, "src"), { recursive: true });
       mkdirSync(join(cwd, "config"), { recursive: true });
       writeFileSync(join(cwd, "tsconfig.json"), JSON.stringify(tsconfig));
@@ -166,7 +173,7 @@ describe("svelte-check parity, machine output", () => {
   );
 
   it("leaves an element's attributes unchecked with an action, as svelte-check does", () => {
-    const cwd = join(root, "tests/.tmp/action-attributes");
+    const cwd = join(svelte5, ".tmp/action-attributes");
     mkdirSync(cwd, { recursive: true });
     writeFileSync(
       join(cwd, "jsconfig.json"),
@@ -202,7 +209,7 @@ describe("svelte-check parity, machine output", () => {
   }, 60_000);
 
   describe("`svelte:element`", () => {
-    const cwd = join(root, "tests/.tmp/svelte-element");
+    const cwd = join(svelte5, ".tmp/svelte-element");
     const component = (markup: string) => {
       mkdirSync(cwd, { recursive: true });
       writeFileSync(
@@ -263,7 +270,7 @@ describe("svelte-check parity, machine output", () => {
   });
 
   it("matches svelte-check with preprocessors", () => {
-    const cwd = join(root, "tests/fixtures-preprocess");
+    const cwd = join(root, "tests/projects/preprocess");
     // svelte-check's css source (not supported) flags the custom style.
     const args = ["--diagnostic-sources", "js,svelte"];
     expect(ours(args, cwd)).toEqual(svelteCheck(args, cwd));
@@ -271,7 +278,7 @@ describe("svelte-check parity, machine output", () => {
 });
 
 describe("svelte-check parity, other formats", () => {
-  const cwd = join(root, "tests/fixtures");
+  const cwd = join(svelte5, "basic");
   /** A run's output with the tool's name and timestamps as svelte-check's. */
   const output = (command: string[], format: string) =>
     spawnSync(
@@ -291,7 +298,7 @@ describe("svelte-check parity, other formats", () => {
     "matches svelte-check's %s output",
     (format) => {
       expect(output([process.execPath, join(root, "src/cli.ts")], format)).toBe(
-        output(SVELTE_CHECK, format),
+        output(svelteCheckBin(cwd), format),
       );
     },
     60_000,

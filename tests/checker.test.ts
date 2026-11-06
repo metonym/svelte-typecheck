@@ -6,10 +6,12 @@ import { typecheck } from "../src/check.ts";
 import { checkerCommand, nativeCommand, onPath } from "../src/checker.ts";
 
 const root = join(import.meta.dir, "..");
+/** The project with every checker installed. */
+const svelte5 = join(root, "tests/projects/svelte5");
 
 describe("checkerCommand", () => {
   it("runs the project's TypeScript launcher on the current runtime", () => {
-    const tsc = checkerCommand("tsc", root);
+    const tsc = checkerCommand("tsc", svelte5);
     expect(tsc?.command).toBe(process.execPath);
     expect(tsc?.prefix[0]).toEndWith(
       join("node_modules", "typescript", "bin", "tsc"),
@@ -85,8 +87,8 @@ describe("checkerCommand", () => {
   });
 
   it("finds a package installed above the project", () => {
-    expect(checkerCommand("tsc", join(root, "tests/fixtures"))?.version).toBe(
-      checkerCommand("tsc", root)?.version,
+    expect(checkerCommand("tsc", join(svelte5, "basic"))?.version).toBe(
+      checkerCommand("tsc", svelte5)?.version,
     );
   });
 });
@@ -95,7 +97,7 @@ describe("nativeCommand", () => {
   it.each(["tsgo", "tsrs"] as const)(
     "starts %s's native binary, not its launcher",
     async (checker) => {
-      const command = checkerCommand(checker, root);
+      const command = checkerCommand(checker, svelte5);
       if (!command) throw new Error(`${checker} isn't installed`);
       const native = await nativeCommand(command);
       expect(native.prefix).toEqual([]);
@@ -110,7 +112,7 @@ describe("nativeCommand", () => {
   );
 
   it("keeps the launcher of a package without a native binary", async () => {
-    const tsc = checkerCommand("tsc", root);
+    const tsc = checkerCommand("tsc", svelte5);
     if (!tsc) throw new Error("typescript isn't installed");
     expect(await nativeCommand(tsc)).toEqual(tsc);
   });
@@ -118,7 +120,7 @@ describe("nativeCommand", () => {
 
 describe("onPath", () => {
   it("finds a Windows command by PATHEXT's extensions", () => {
-    const dir = join(root, "tests/.tmp/path");
+    const dir = join(svelte5, ".tmp/path");
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "fake-checker.cmd"), "");
     const { PATH, PATHEXT } = process.env;
@@ -139,7 +141,7 @@ describe("onPath", () => {
 describe("typecheck", () => {
   it("finds the checker from the workspace up, not the current folder", async () => {
     // A workspace with its own `typescript`, whose `tsc` reports nothing.
-    const dir = join(root, "tests/.tmp/own-typescript");
+    const dir = join(svelte5, ".tmp/own-typescript");
     const pkg = join(dir, "node_modules/typescript");
     mkdirSync(join(pkg, "bin"), { recursive: true });
     writeFileSync(
@@ -153,7 +155,7 @@ describe("typecheck", () => {
     writeFileSync(join(pkg, "bin/tsc"), "#!/usr/bin/env node\n");
     writeFileSync(join(dir, "tsconfig.json"), "{}");
     const result = await typecheck({
-      cwd: root,
+      cwd: svelte5,
       workspace: dir,
       outDir: "node_modules/.cache/svelte-typecheck/test-own-typescript",
       checker: "tsc",
@@ -163,10 +165,30 @@ describe("typecheck", () => {
 
   it("defaults to the project's TypeScript", async () => {
     const result = await typecheck({
-      cwd: root,
-      workspace: "tests/fixtures",
+      cwd: svelte5,
+      workspace: "basic",
       outDir: "node_modules/.cache/svelte-typecheck/test-default",
     });
     expect(result.checker).toBe("tsc");
   }, 30_000);
+
+  // TypeScript 7 as the project's own `typescript`, with no alias or
+  // preview build beside it: what `tsc` runs, and what tsgo falls back to.
+  it.each(["tsc", "tsgo"] as const)(
+    "checks with a project's TypeScript 7 as %s",
+    async (checker) => {
+      const ts7 = join(root, "tests/projects/ts7");
+      const result = await typecheck({
+        cwd: ts7,
+        checker,
+        incremental: false,
+        diagnosticSources: ["js"],
+      });
+      expect(result.checkerVersion).toStartWith("7.");
+      expect(
+        result.diagnostics.map((d) => `${d.line}:${d.column} ${d.code}`),
+      ).toEqual(["3:9 TS2322"]);
+    },
+    30_000,
+  );
 });

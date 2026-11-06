@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-const FIXTURES = join(import.meta.dirname, "../tests/fixtures");
+const FIXTURES = join(import.meta.dirname, "../tests/projects/svelte5/basic");
 const CORPUS = join(import.meta.dirname, "corpus");
 /** Pairs of each kind: 2 kinds × 2 components × SIZE. */
 const SIZE = 100;

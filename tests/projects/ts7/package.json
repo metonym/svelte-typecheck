@@ -1,0 +1,9 @@
+{
+  "name": "project-ts7",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "svelte": "catalog:",
+    "typescript": "^7.0.2"
+  }
+}

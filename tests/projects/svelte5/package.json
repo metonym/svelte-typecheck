@@ -1,0 +1,12 @@
+{
+  "name": "project-svelte5",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@typescript/native": "catalog:",
+    "svelte": "catalog:",
+    "svelte-check": "catalog:",
+    "tsrs": "catalog:",
+    "typescript": "catalog:"
+  }
+}

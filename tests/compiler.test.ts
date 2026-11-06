@@ -14,12 +14,15 @@ import {
 import { configNeedsChdir } from "../src/config.ts";
 
 const root = join(import.meta.dir, "..");
+/** The project whose Svelte the compiler runs, as a run from its folder. */
+const project = join(root, "tests/projects/svelte5");
 
 describe("compilerDiagnostics", () => {
   it("reports an a11y warning where it is", () => {
     const [warning] = compilerDiagnostics(
       '<div>\n  <img src="a.png">\n</div>\n',
       "Img.svelte",
+      { cwd: project },
     );
     expect(warning).toMatchObject({
       severity: "warning",
@@ -32,13 +35,16 @@ describe("compilerDiagnostics", () => {
   it("honors `svelte-ignore`", () => {
     const source =
       '<!-- svelte-ignore a11y_missing_attribute -->\n<img src="a.png">\n';
-    expect(compilerDiagnostics(source, "Img.svelte")).toEqual([]);
+    expect(compilerDiagnostics(source, "Img.svelte", { cwd: project })).toEqual(
+      [],
+    );
   });
 
   it("reports invalid markup as an error", () => {
     const [error] = compilerDiagnostics(
       '<div a="1" a="2"></div>\n',
       "Dup.svelte",
+      { cwd: project },
     );
     expect(error).toMatchObject({
       severity: "error",
@@ -49,9 +55,9 @@ describe("compilerDiagnostics", () => {
 
 describe("compileOffThread", () => {
   it("compiles on a worker as here, after the config's preprocessors", async () => {
-    const configDir = join(root, "tests/fixtures-preprocess");
+    const configDir = join(root, "tests/projects/preprocess");
     const request = {
-      svelteDir: svelteDirOf(root),
+      svelteDir: svelteDirOf(project),
       configDir,
       components: [
         {
@@ -71,7 +77,7 @@ describe("compileOffThread", () => {
   }, 30_000);
 
   it("loads the config on the worker, not here", async () => {
-    const configDir = join(root, "tests/.tmp/compile-worker");
+    const configDir = join(root, "tests/projects/svelte5/.tmp/compile-worker");
     await rm(configDir, { recursive: true, force: true });
     await mkdir(configDir, { recursive: true });
     // Records the thread that loads it.
@@ -80,7 +86,7 @@ describe("compileOffThread", () => {
       'import { writeFileSync } from "node:fs";\nimport { isMainThread } from "node:worker_threads";\nwriteFileSync(new URL("./thread", import.meta.url), isMainThread ? "main" : "worker");\nexport default {};\n',
     );
     const compiled = await compileOffThread({
-      svelteDir: svelteDirOf(root),
+      svelteDir: svelteDirOf(project),
       configDir,
       components: [{ source: '<img src="a.png">\n', filename: "Img.svelte" }],
     });
@@ -91,15 +97,15 @@ describe("compileOffThread", () => {
   }, 30_000);
 
   it("leaves a vite.config outside the cwd to this thread", () => {
-    const configDir = join(root, "tests/fixtures-kit");
+    const configDir = join(root, "tests/projects/kit");
     expect(process.cwd()).not.toBe(configDir);
     expect(configNeedsChdir(configDir)).toBe(true);
-    expect(configNeedsChdir(join(root, "tests/fixtures-preprocess"))).toBe(
+    expect(configNeedsChdir(join(root, "tests/projects/preprocess"))).toBe(
       false,
     );
     expect(
       compileOffThread({
-        svelteDir: svelteDirOf(root),
+        svelteDir: svelteDirOf(project),
         configDir,
         components: [],
       }),
@@ -112,7 +118,7 @@ describe("compileAll with a config's shape", () => {
   let dir = "";
   const component = { source: '<img src="a.png">\n', filename: "Img.svelte" };
   const config = async (name: string, text: string) => {
-    dir = join(root, "tests/.tmp/compile-shape", name);
+    dir = join(root, "tests/projects/svelte5/.tmp/compile-shape", name);
     await rm(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });
     await writeFile(join(dir, "svelte.config.js"), text);
@@ -124,7 +130,7 @@ describe("compileAll with a config's shape", () => {
       "export default { compilerOptions: { warningFilter: () => false } };\n",
     );
     const { results, shape } = await compileAll({
-      svelteDir: svelteDirOf(root),
+      svelteDir: svelteDirOf(project),
       configDir: dir,
       components: [component],
     });
@@ -139,7 +145,7 @@ describe("compileAll with a config's shape", () => {
       'export default { preprocess: [{ markup: ({ content }) => ({ code: content.replace(/<img[^>]*>/, "") }) }] };\n',
     );
     const request = {
-      svelteDir: svelteDirOf(root),
+      svelteDir: svelteDirOf(project),
       configDir: dir,
       components: [component],
     };
@@ -152,7 +158,7 @@ describe("compileAll with a config's shape", () => {
 
 describe("compileAll without the hooks a component doesn't reach", () => {
   it("hands a preprocessor only the components with a tag it reads", async () => {
-    const dir = join(root, "tests/.tmp/compile-untouched");
+    const dir = join(root, "tests/projects/svelte5/.tmp/compile-untouched");
     await rm(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });
     // Counts the styles it's handed, on this thread's global.
@@ -162,7 +168,7 @@ describe("compileAll without the hooks a component doesn't reach", () => {
     );
     const img = '<img src="a.png">\n';
     // And counts the components Svelte's `preprocess` is called on.
-    const compiler = createRequire(join(svelteDirOf(root), "package.json"))(
+    const compiler = createRequire(join(svelteDirOf(project), "package.json"))(
       "svelte/compiler",
     ) as { preprocess: (...args: unknown[]) => Promise<unknown> };
     const preprocess = compiler.preprocess;
@@ -172,7 +178,7 @@ describe("compileAll without the hooks a component doesn't reach", () => {
       return preprocess(...args);
     };
     const { results } = await compileAll({
-      svelteDir: svelteDirOf(root),
+      svelteDir: svelteDirOf(project),
       configDir: dir,
       components: [
         { source: img, filename: "Plain.svelte" },
@@ -194,7 +200,7 @@ describe("compileAll without the hooks a component doesn't reach", () => {
 
 describe("compileFilesOffThread", () => {
   it("compiles the files it reads on the worker, as here", async () => {
-    const configDir = join(root, "tests/.tmp/compile-files");
+    const configDir = join(root, "tests/projects/svelte5/.tmp/compile-files");
     await rm(configDir, { recursive: true, force: true });
     await mkdir(configDir, { recursive: true });
     // Records the thread that loads it.
@@ -205,7 +211,7 @@ describe("compileFilesOffThread", () => {
     const source = '<img src="a.png">\n';
     await writeFile(join(configDir, "Img.svelte"), source);
     const request = {
-      svelteDir: svelteDirOf(root),
+      svelteDir: svelteDirOf(project),
       configDir,
       files: [{ path: join(configDir, "Img.svelte"), filename: "Img.svelte" }],
     };
@@ -230,11 +236,11 @@ describe("compileFilesOffThread", () => {
 
 describe("configNeedsChdir", () => {
   it("knows the cwd through a symlink", async () => {
-    const link = join(root, "tests/.tmp/kit-link");
+    const link = join(root, "tests/projects/svelte5/.tmp/kit-link");
     await rm(link, { force: true });
-    await symlink(join(root, "tests/fixtures-kit"), link);
+    await symlink(join(root, "tests/projects/kit"), link);
     const cwd = process.cwd();
-    process.chdir(join(root, "tests/fixtures-kit"));
+    process.chdir(join(root, "tests/projects/kit"));
     try {
       expect(configNeedsChdir(link)).toBe(false);
       expect(configNeedsChdir(link, join(link, "vite.config.ts"))).toBe(false);

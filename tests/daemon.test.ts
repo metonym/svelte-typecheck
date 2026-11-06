@@ -7,17 +7,18 @@ import { SERVE, wantsDaemon } from "../src/daemon.ts";
 const root = join(import.meta.dir, "..");
 const cli = join(root, "src/cli.ts");
 /** This file's own daemons: their sockets and logs, apart from the user's. */
-const dir = join(root, "tests/.tmp/daemon");
+const dir = join(root, "tests/projects/svelte5/.tmp/daemon");
 const TIMESTAMP = /^\d+ /;
 
 /** A copy of the fixtures with errors and warnings, inside the repo so imports resolve. */
 async function project(name: string): Promise<string> {
-  const cwd = join(root, "tests/.tmp/daemon-projects", name);
+  const cwd = join(root, "tests/projects/svelte5/.tmp/daemon-projects", name);
   await rm(cwd, { recursive: true, force: true });
   await mkdir(cwd, { recursive: true });
   await Promise.all(
     ["Child.svelte", "Errors.svelte", "Warnings.svelte", "tsconfig.json"].map(
-      (file) => cp(join(root, "tests/fixtures", file), join(cwd, file)),
+      (file) =>
+        cp(join(root, "tests/projects/svelte5/basic", file), join(cwd, file)),
     ),
   );
   return cwd;
@@ -79,7 +80,9 @@ afterAll(async () => {
     "together",
     "idle",
   ])
-    run(join(root, "tests/.tmp/daemon-projects", name), ["stop"]);
+    run(join(root, "tests/projects/svelte5/.tmp/daemon-projects", name), [
+      "stop",
+    ]);
   await rm(dir, { recursive: true, force: true });
 });
 
@@ -171,7 +174,7 @@ describe("--daemon", () => {
   it("runs here when no daemon can start", async () => {
     const cwd = await project("fallback");
     // A file where its folder would be.
-    const blocked = join(root, "tests/.tmp/daemon-blocked");
+    const blocked = join(root, "tests/projects/svelte5/.tmp/daemon-blocked");
     await writeFile(blocked, "");
     const here = run(cwd, CHECK);
     const daemon = run(cwd, ["--daemon", ...CHECK], {
