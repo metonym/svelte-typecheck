@@ -82,7 +82,16 @@ To test config loading, run the CLI in a process of its own: within one process,
 
 ## Checking real projects
 
-The fixtures don't cover everything. `eval/` checks svelte-typecheck against svelte-check on a real project:
+The fixtures don't cover everything. `eval/parity.ts` checks svelte-typecheck against svelte-check on the real projects in `eval/projects.ts`, each at a pinned commit, as it is and with errors planted, and fails on any line only one of them prints, or on the same lines in another order. CI runs it (`parity.yml`) on a pull request that changes `src/`, `eval/` or the dependencies.
+
+```sh
+bun eval/parity.ts            # every project but those marked pending
+bun eval/parity.ts carbon     # one, pending or not
+```
+
+It clones each project to `eval/.projects/`, installs it with its own package manager (the version its `package.json` names, through npx), adds svelte-check where the project has none, writes the files the entry lists (a config that turns `checkJs` on, say) and runs its setup, such as `svelte-kit sync`. A difference kept on purpose goes in the entry's `known`, for the pass it shows in, with why, and in [docs/svelte-check.md](docs/svelte-check.md#differences-from-svelte-check); a known line that stops differing fails the run, so the list stays true. A project with differences nobody has fixed yet is `pending`, with the reason, and left out of a run that names no project. To add a project, pin a commit whose lockfile installs, and plant errors in a folder whose components are checked: planted errors in a JS component without `checkJs` show nothing.
+
+On any other project, by hand:
 
 ```sh
 bun eval/diff.ts <project> --tsconfig tsconfig.json   # the two tools' output, line by line

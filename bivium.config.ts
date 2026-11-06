@@ -32,6 +32,7 @@ export default defineConfig({
     "eval/**",
     "ostia.config.ts",
     ".github/workflows/release.yml",
+    ".github/workflows/parity.yml",
   ],
   // Inputs that aren't imports: the CLI a test runs as a user would, the
   // fixtures it checks or copies to a temp workspace. A key that names one
