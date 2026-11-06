@@ -34,6 +34,15 @@ const JSDOC_LINE_START = /^\s*\/?\*+\s?/;
 const JSDOC_END = /\s*\*\/\s*$/;
 const USES_ALL_PROPS = /\$\$(restProps|props)\b/;
 const WHITESPACE = /\s/;
+/**
+ * A legacy component's own names, each declared only where the source
+ * uses it: otherwise a symbol the checker makes for every component.
+ */
+const LEGACY_NAMES: [RegExp, string][] = [
+  [/\$\$props(?![\w$])/, "let $$props = $$check.props();"],
+  [/\$\$restProps(?![\w$])/, "let $$restProps = $$check.props();"],
+  [/\$\$slots(?![\w$])/, "let $$slots = $$check.any(0);"],
+];
 
 /** Attributes svelte2tsx passes as numbers when their text is numeric. */
 const TYPING_INTERFACES = new Set(["$$Props", "$$Events", "$$Slots"]);
@@ -516,6 +525,12 @@ export function emit(
   };
 
   // --- Markup.
+  /** A value with no expression in it: `a`, `a="b"`. */
+  const isStatic = (value: Node) =>
+    value === true ||
+    (Array.isArray(value) ? value : [value]).every(
+      (p: Node) => p.type === "Text",
+    );
   const attrValue = (value: Node) => {
     if (value === true) return out.raw("true");
     const parts = Array.isArray(value) ? value : [value];
@@ -524,7 +539,7 @@ export function emit(
         .raw("(")
         .copy(parts[0].expression.start, parts[0].expression.end)
         .raw(")");
-    if (parts.every((p: Node) => p.type === "Text"))
+    if (isStatic(value))
       return out.from(parts[0]?.start ?? 0, () =>
         out.raw(JSON.stringify(parts.map((p: Node) => p.data).join(""))),
       );
@@ -597,9 +612,17 @@ export function emit(
       ? value.expression
       : undefined;
   };
+  /**
+   * An element's attribute that writes nothing: a slot's name, and a
+   * `data-` attribute with no expression, as any value goes.
+   */
+  const writesNothing = (a: Node, inComponent: boolean) =>
+    a.type === "Attribute" &&
+    ((inComponent && a.name === "slot") ||
+      (a.name.startsWith("data-") && isStatic(a.value)));
   const elementAttribute = (a: Node, inComponent: boolean) => {
+    if (writesNothing(a, inComponent)) return;
     if (a.type === "Attribute") {
-      if (inComponent && a.name === "slot") return;
       const shorthand = shorthandOf(a);
       if (shorthand) {
         out.copy(shorthand.start, shorthand.end).raw(",");
@@ -681,6 +704,7 @@ export function emit(
     inComponent: boolean,
   ) => {
     const id = `$$_el${uid++}`;
+    const attributes: Node[] = node.attributes ?? [];
     const boundary = node.type === "SvelteBoundary";
     // An error about the whole attributes object points at the tag name's
     // last letter, as svelte2tsx maps it, or after `<svelte:element this>`'s
@@ -696,7 +720,7 @@ export function emit(
     // Actions go first: what they return can add to the element's attributes.
     out.raw("{");
     const actions: string[] = [];
-    for (const a of node.attributes ?? []) {
+    for (const a of attributes) {
       if (a.type !== "UseDirective") continue;
       const action = `$$_action${uid++}`;
       actions.push(action);
@@ -704,42 +728,58 @@ export function emit(
       directiveCall(a, tagText);
       out.raw(");");
     }
-    out.raw(`const ${id} = `);
-    // svelte2tsx maps the element to its name, but `<svelte:element>` to
-    // its `<`.
-    out.from(
-      node.type === "SvelteElement" ? node.start : node.start + 1,
-      () => {
-        out.raw("svelteHTML.createElement(");
-        tag();
-        out.raw(", ");
-        if (actions.length > 0)
-          out.raw(`$$check.attributes(${actions.join(",")}), `);
-        out.from(objectAt, () => out.raw("{"));
-        for (const a of node.attributes ?? []) {
-          const k = attributeKey(a);
-          if (k !== null && seen.has(k)) repeats.push(a);
-          else {
-            if (k !== null) seen.add(k);
-            elementAttribute(a, inComponent);
+    // An element whose attributes write nothing checks `{}` against
+    // attributes that are all optional: nothing to report, while the call
+    // has the checker build that tag's attribute types, some 800
+    // instantiations. A custom element (`my-el`) keeps it, as its declared
+    // attributes can be required.
+    const checksNothing =
+      node.type === "RegularElement" &&
+      !node.name.includes("-") &&
+      attributes.every((a) => writesNothing(a, inComponent));
+    if (!checksNothing) {
+      // Named only for `bind:this`, which assigns it: a name nothing reads is
+      // a symbol for nothing.
+      if (
+        attributes.some((a) => a.type === "BindDirective" && a.name === "this")
+      )
+        out.raw(`const ${id} = `);
+      // svelte2tsx maps the element to its name, but `<svelte:element>` to
+      // its `<`.
+      out.from(
+        node.type === "SvelteElement" ? node.start : node.start + 1,
+        () => {
+          out.raw("svelteHTML.createElement(");
+          tag();
+          out.raw(", ");
+          if (actions.length > 0)
+            out.raw(`$$check.attributes(${actions.join(",")}), `);
+          out.from(objectAt, () => out.raw("{"));
+          for (const a of attributes) {
+            const k = attributeKey(a);
+            if (k !== null && seen.has(k)) repeats.push(a);
+            else {
+              if (k !== null) seen.add(k);
+              elementAttribute(a, inComponent);
+            }
           }
-        }
-        // `<svelte:boundary>`'s snippets are its props.
-        if (boundary)
-          for (const c of node.fragment.nodes)
-            if (c.type === "SnippetBlock") snippetProp(c);
-        out.raw("})");
-      },
-    );
-    out.raw(";");
-    for (const a of repeats)
-      out.from(objectAt, () => {
-        out.raw("svelteHTML.createElement(");
-        tag();
-        out.raw(", {");
-        elementAttribute(a, inComponent);
-        out.raw("});");
-      });
+          // `<svelte:boundary>`'s snippets are its props.
+          if (boundary)
+            for (const c of node.fragment.nodes)
+              if (c.type === "SnippetBlock") snippetProp(c);
+          out.raw("})");
+        },
+      );
+      out.raw(";");
+      for (const a of repeats)
+        out.from(objectAt, () => {
+          out.raw("svelteHTML.createElement(");
+          tag();
+          out.raw(", {");
+          elementAttribute(a, inComponent);
+          out.raw("});");
+        });
+    }
     directives(node, id, tagText);
     fragment(node.fragment, !boundary);
     out.raw("}\n");
@@ -791,6 +831,7 @@ export function emit(
 
   const component = (node: Node, ctor: () => void, inComponent = false) => {
     const id = `$$_c${uid++}`;
+    const attributes: Node[] = node.attributes ?? [];
     const children: Node[] = node.fragment?.nodes ?? [];
     const snippets = children.filter((c) => c.type === "SnippetBlock");
     const named = children.filter(
@@ -805,12 +846,23 @@ export function emit(
     out.raw(`{ const ${id}C = $$check.component(`);
     ctor();
     out.raw("); ");
+    // The instance is named only for what reads it below: `bind:this`, a
+    // Svelte 5 `bind:`'s check, an `on:` handler, and slots' `let:` and
+    // names.
+    const namesInstance =
+      named.length > 0 ||
+      attributes.some(
+        (a) =>
+          a.type === "LetDirective" ||
+          (a.type === "BindDirective" && (a.name === "this" || svelte >= 5)) ||
+          (a.type === "OnDirective" && a.expression),
+      );
     out.from(node.start + 1, () => {
-      out.raw(`const ${id} = new ${id}C({ target: $$check.any(), props: {`);
+      if (namesInstance) out.raw(`const ${id} = `);
+      out.raw(`new ${id}C({ target: $$check.target, props: {`);
       // Svelte 5 passes slot content as a `children` snippet.
-      if (hasDefault && svelte >= 5)
-        out.raw("children:() => { return $$check.any(0); },");
-      for (const a of node.attributes ?? []) {
+      if (hasDefault && svelte >= 5) out.raw("children:$$check.children,");
+      for (const a of attributes) {
         if (a.type === "Attribute") {
           if (inComponent && a.name === "slot") continue;
           const shorthand = shorthandOf(a);
@@ -831,7 +883,7 @@ export function emit(
       for (const s of snippets) snippetProp(s);
       out.raw("} });");
     });
-    for (const a of node.attributes ?? []) {
+    for (const a of attributes) {
       if (a.type === "BindDirective") {
         if (a.name === "this")
           out.copy(a.expression.start, a.expression.end).raw(` = ${id};`);
@@ -1135,10 +1187,15 @@ export function emit(
   for (const n of rootSnippets) if (moduleSnippets.has(n)) snippet(n);
   out.raw(templateDoc);
   const async = topLevelAwait ? "async " : "";
+  const legacyLets = runes
+    ? ""
+    : LEGACY_NAMES.flatMap(([used, declaration]) =>
+        used.test(source) ? [`${declaration} `] : [],
+      ).join("");
   out.raw(
     runes
       ? `${async}function $$render${generics}() { `
-      : `${async}function $$render${generics}() { let $$props = $$check.props(); let $$restProps = $$check.props(); let $$slots = $$check.any(0); ${typed.has("$$Slots") ? "const $$slot = $$check.slots<$$Slots>(); " : ""}`,
+      : `${async}function $$render${generics}() { ${legacyLets}${typed.has("$$Slots") ? "const $$slot = $$check.slots<$$Slots>(); " : ""}`,
   );
   for (const name of storeAtStart) declareStore(name);
   out.raw("\n");

@@ -83,6 +83,14 @@ declare namespace $$check {
   function any(...checked: any[]): any;
   /** Nothing, after checking what it's given: a `data-` attribute. */
   function none(...checked: any[]): {};
+  /**
+   * Slot content, as Svelte 5 passes it: svelte2tsx's `() => any` arrow,
+   * one type for every use, so each component's `children` is compared
+   * with it once.
+   */
+  const children: () => any;
+  /** A component's `target`, which is never checked. */
+  const target: any;
   /** `$$props` and `$$restProps`. */
   function props(): { [index: string]: any };
   /** `$: x = value` declares `x` with the value's type. */

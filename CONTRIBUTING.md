@@ -100,18 +100,28 @@ bun eval/ab.ts /tmp/before /tmp/after <project> cold-tsrs
 AB_CHANGE=<project>/src/Button.svelte bun eval/ab.ts /tmp/before /tmp/after <project> changed-tsgo
 ```
 
+For a change to the generated code, `eval/work.ts` compares what each build hands the checker: the generated code's size, and tsgo's types, instantiations, symbols and memory with one checker, which are the same on every run however loaded the machine is.
+
+```sh
+bun eval/work.ts /tmp/before /tmp/after <project>
+```
+
 A shared machine is noisy: other processes put the load average past the core count, and wall time can vary 50% between identical runs. Run an A/A comparison (the same build on both sides) first to see the noise, and read CPU time (user and sys, the checker's included) beside wall time: it stays within a few percent under load. Report the load average with any number.
 
 ### Performance changes
 
 A performance change is a `perf:` commit with a before-and-after table in its message, and only lands when it wins well beyond the noise. These were measured and didn't pay, so try them again only with new evidence:
 
-| Idea                                                   | Why it didn't pay                                                                 |
-| :----------------------------------------------------- | :-------------------------------------------------------------------------------- |
-| The compiler pass split across two or more workers     | No faster than one worker beside the checker, and about 40 MB more per worker     |
-| One compiler thread with a capped heap                 | Our process's peak fell 60 MB, the run's didn't: the checker's peak overlaps ours |
-| A `.noindex` output folder, against Spotlight on macOS | No measurable effect                                                              |
-| A simpler `$$check.component`                          | Instantiations unchanged: the cost is checking each component's props             |
+| Idea                                                                                                | Why it didn't pay                                                                                           |
+| :-------------------------------------------------------------------------------------------------- | :---------------------------------------------------------------------------------------------------------- |
+| The compiler pass split across two or more workers                                                  | No faster than one worker beside the checker, and about 40 MB more per worker                               |
+| One compiler thread with a capped heap                                                              | Our process's peak fell 60 MB, the run's didn't: the checker's peak overlaps ours                           |
+| A `.noindex` output folder, against Spotlight on macOS                                              | No measurable effect                                                                                        |
+| A simpler `$$check.component`                                                                       | Instantiations unchanged: the cost is checking each component's props                                       |
+| Generating code on two or more worker threads                                                       | No faster with two, slower with three or four: each spends 100 to 150 ms starting and loading the generator |
+| Skipping library checks (`skipDefaultLibCheck`, or `skipLibCheck` with no `.d.ts` of the project's) | svelte-check reports errors in `lib.*.d.ts` and `node_modules` declarations unless the project sets one     |
+| A checker kept running (`tsgo --watch`, `tsrs --watch`)                                             | tsgo rechecks an edit no faster than a fresh run, and tsrs didn't react to one                              |
+| tsgo's `--checkers` other than its 4                                                                | 2 is about 15% slower for 10% less memory, 8 slower with more                                               |
 
 ## Releasing
 

@@ -4,6 +4,14 @@
 
 **Performance**
 
+- The generated code leaves out what can't report anything: the
+  `createElement` call for an element whose attributes write nothing
+  (none, static `data-` ones, a slot's name), the names of elements and
+  component instances nothing reads, `$$props`, `$$restProps` and
+  `$$slots` where a legacy component doesn't use them, and static
+  `data-` attributes. On carbon-components-svelte it's 10% smaller, and
+  the checker builds 1 to 4% fewer types, instantiations and symbols
+  (tsgo, tsrs and `bun check`), with about 1.8% less memory.
 - A run that compiles every component, such as the first or one with
   `--no-incremental`, starts compiling them on the worker as soon as it
   has found them: the worker reads them, and loads the compiler and the
