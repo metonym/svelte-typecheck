@@ -6,11 +6,23 @@ import type { Checker } from "./types.ts";
 /** In the order picked when none is named: the project's own TypeScript first. */
 export const CHECKERS: Checker[] = ["tsc", "tsgo", "tsrs", "bun"];
 
-/** The package and bin that provide each checker. */
-const PACKAGES: Record<Exclude<Checker, "bun">, [string, string]> = {
-  tsc: ["typescript", "tsc"],
-  tsgo: ["@typescript/native-preview", "tsgo"],
-  tsrs: ["tsrs", "tsrs"],
+/** A package that provides a checker, its bin, and the least major version that counts. */
+type Provider = [name: string, bin: string, major?: number];
+
+/**
+ * The packages that provide each checker, in the order they're looked for.
+ * tsgo is TypeScript 7, under the alias svelte-check's `--tsgo` looks for
+ * first (`@typescript/native@npm:typescript@7`, beside a `typescript@6`),
+ * then the preview build, then the project's own `typescript` if it's 7.
+ */
+const PACKAGES: Record<Exclude<Checker, "bun">, Provider[]> = {
+  tsc: [["typescript", "tsc"]],
+  tsgo: [
+    ["@typescript/native", "tsc", 7],
+    ["@typescript/native-preview", "tsgo"],
+    ["typescript", "tsc", 7],
+  ],
+  tsrs: [["tsrs", "tsrs"]],
 };
 const NODE_SHEBANG = /^#!.*\bnode\b/;
 
@@ -75,25 +87,26 @@ export function checkerCommand(
       ? { command: bun, prefix: [], version: process.versions.bun }
       : undefined;
   }
-  const [name, bin] = PACKAGES[checker];
-  const dir = packageDir(name, cwd);
-  if (dir) {
+  for (const [name, bin, major] of PACKAGES[checker]) {
+    const dir = packageDir(name, cwd);
+    if (!dir) continue;
     const pkg = JSON.parse(
       readFileSync(join(dir, "package.json"), "utf-8"),
     ) as {
       version?: string;
       bin?: string | Record<string, string>;
     };
+    if (major !== undefined && !(Number.parseInt(pkg.version ?? "") >= major))
+      continue;
     const relative = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[bin];
-    if (relative) {
-      const path = join(dir, relative);
-      const head = readFileSync(path, "utf-8").slice(0, 100);
-      return NODE_SHEBANG.test(head)
-        ? { command: process.execPath, prefix: [path], version: pkg.version }
-        : { command: path, prefix: [], version: pkg.version };
-    }
+    if (!relative) continue;
+    const path = join(dir, relative);
+    const head = readFileSync(path, "utf-8").slice(0, 100);
+    return NODE_SHEBANG.test(head)
+      ? { command: process.execPath, prefix: [path], version: pkg.version }
+      : { command: path, prefix: [], version: pkg.version };
   }
-  const found = onPath(bin);
+  const found = onPath(checker);
   if (!found) return;
   return WINDOWS_SHIM.test(found)
     ? { command: found, prefix: [], shell: true }

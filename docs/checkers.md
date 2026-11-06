@@ -2,12 +2,12 @@
 
 svelte-typecheck doesn't bundle or import TypeScript. It writes the generated code and a tsconfig to disk and runs a checker on them as a separate process, so any of these works, at whatever version your project installs:
 
-| `--checker` | Install                                       | Runs                                         | Notes                                                                                               |
-| :---------- | :-------------------------------------------- | :------------------------------------------- | :-------------------------------------------------------------------------------------------------- |
-| `tsc`       | `typescript`                                  | `tsc -p <generated tsconfig> --pretty false` | The default. TypeScript 7's `tsc` is native; with 6, JS files' JSDoc reads as svelte-check reads it |
-| `tsgo`      | `@typescript/native-preview`                  | `tsgo -p … --pretty false`                   | TypeScript 7's preview build. `--tsgo` (svelte-check's flag) picks it too                           |
-| `tsrs`      | [`tsrs`](https://github.com/oxc-project/tsrs) | `tsrs -p … --pretty false`                   | oxc's Rust port of TypeScript 7                                                                     |
-| `bun`       | [Bun](https://bun.sh) 1.4                     | `bun check -p … --no-pretty --all`           | Bun's own TypeScript; no build cache, so it checks the whole program after a change                 |
+| `--checker` | Install                                                                                     | Runs                                               | Notes                                                                                                                                   |
+| :---------- | :------------------------------------------------------------------------------------------ | :------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
+| `tsc`       | `typescript`                                                                                | `tsc -p <generated tsconfig> --pretty false`       | The default. TypeScript 7's `tsc` is native; with 6, JS files' JSDoc reads as svelte-check reads it                                     |
+| `tsgo`      | TypeScript 7: `@typescript/native` (an alias), `@typescript/native-preview` or `typescript` | `tsc -p … --pretty false` (`tsgo` for the preview) | The first of these installed; `typescript` only if it's 7. svelte-check's `--tsgo` looks for the first two. `--tsgo` picks this checker |
+| `tsrs`      | [`tsrs`](https://github.com/oxc-project/tsrs)                                               | `tsrs -p … --pretty false`                         | oxc's Rust port of TypeScript 7                                                                                                         |
+| `bun`       | [Bun](https://bun.sh) 1.4                                                                   | `bun check -p … --no-pretty --all`                 | Bun's own TypeScript; no build cache, so it checks the whole program after a change                                                     |
 
 ```sh
 svelte-typecheck                    # your project's typescript: tsc
