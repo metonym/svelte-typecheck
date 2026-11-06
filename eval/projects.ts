@@ -90,6 +90,6 @@ export const PROJECTS: Project[] = [
     commit: "c0467ed3bd762dffa6bba1722197e10f61df05da",
     args: ["--tsconfig", "tsconfig.json"],
     pending:
-      "both tools report about 2,960 errors at this commit, and 33 and 43 of their lines differ: union order, and types such as `ComboBoxItem`, from a JS component without `allowJs`, that are `any` here where svelte-check names them",
+      "both tools report about 2,960 errors at this commit, and 33 and 43 of their lines differ: union order, and names imported from its untyped components, such as `ComboBoxItem`, which svelte-check prints by name and svelte-typecheck as `any`",
   },
 ];
