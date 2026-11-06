@@ -13,7 +13,12 @@ import { createRequire } from "node:module";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { lexComponent, lexImportsExports } from "sveast/lexer";
 import { version as TOOL_VERSION } from "../package.json";
-import { checkerArgs, checkerCommand, CHECKERS } from "./checker.ts";
+import {
+  checkerArgs,
+  checkerCommand,
+  CHECKERS,
+  nativeCommand,
+} from "./checker.ts";
 import {
   compileAll,
   compileFilesOffThread,
@@ -450,6 +455,8 @@ export async function typecheck(
   // From the workspace up: a monorepo package's own install, then a
   // hoisted one, wherever the run starts.
   const command = checker && checkerCommand(checker, workspace);
+  // Found while this thread generates code, for when the checker starts.
+  const native = command ? nativeCommand(command) : undefined;
   // The compiler's diagnostics alone run no checker, so need none.
   if (sources.has("js") && !(checker && command))
     throw new Error(
@@ -1054,13 +1061,15 @@ export async function typecheck(
   const emitted = performance.now();
 
   // The compiler pass runs while the checker's process works.
+  const launch =
+    checker && native && sources.has("js") ? await native : undefined;
   const checking =
-    checker && command && sources.has("js")
+    checker && launch
       ? run(
-          command.command,
-          [...command.prefix, ...checkerArgs(checker, tsconfig)],
+          launch.command,
+          [...launch.prefix, ...checkerArgs(checker, tsconfig)],
           cwd,
-          command.shell,
+          launch.shell,
         ).then((output) => ({ output, at: performance.now() }))
       : Promise.resolve({ output: "", at: emitted });
   // In TypeScript's program order, as svelte-check lists them: a file's
