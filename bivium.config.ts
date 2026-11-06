@@ -75,6 +75,8 @@ export default defineConfig({
       fixtures,
       "tests/projects/{preprocess/**,svelte3/package.json,svelte4/package.json}",
     ],
+    // Generated projects in the Svelte 5 project's `.tmp/`.
+    "tests/scale.test.ts": "tests/projects/svelte5/package.json",
     "tests/watch.test.ts": fixtures,
     "scripts/test-package.ts": fixtures,
   },
@@ -83,7 +85,7 @@ export default defineConfig({
   external: ["svelte"],
   // Tools CI runs on its own: a bump that only reaches them selects nothing.
   inert: ["knip", "ostia"],
-  // svelte-typecheck reads its user's project; the glob test, only the temp
-  // directory it writes.
-  hermetic: ["src/**", "tests/glob.test.ts"],
+  // svelte-typecheck reads its user's project; the glob test and the
+  // project generator, only the temp directories they write.
+  hermetic: ["src/**", "tests/glob.test.ts", "tests/generate.ts"],
 });
