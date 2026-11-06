@@ -4,6 +4,11 @@
 
 **Fixes**
 
+- A prop declared as a `let` and exported by name, as in
+  `let className: string | undefined = undefined; export { className as class };`,
+  takes any value a parent passes, as an `export let` prop does. It kept
+  the type of its default, so the markup missed errors svelte-check
+  reports on it.
 - A JS component that doesn't parse, in a project without `allowJs`, is
   an untyped module to its importers, as svelte-check has it, as it is
   when it parses. Each import of it reported "File '…' is not a module",
