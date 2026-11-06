@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { typecheck } from "../src/check.ts";
 import type { TypecheckResult } from "../src/types.ts";
@@ -206,4 +206,42 @@ describe("the project's own build info", () => {
     expect(existsSync(join(dir, "own.tsbuildinfo"))).toBe(false);
     expect(existsSync(join(outDir, "tsbuildinfo"))).toBe(true);
   }, 30_000);
+});
+
+describe("not incremental", () => {
+  it("starts from an empty output folder, and leaves no old one behind", async () => {
+    const dir = await workspace("not-incremental");
+    // Enough components that the worker compiles them as soon as they're found.
+    const child = await readFile(join(dir, "Child.svelte"), "utf-8");
+    await Promise.all(
+      Array.from({ length: 16 }, (_, i) =>
+        writeFile(join(dir, `Extra${i}.svelte`), child),
+      ),
+    );
+    const parent = join(root, "node_modules/.cache/svelte-typecheck");
+    const outDir = join(parent, "test-not-incremental");
+    await rm(outDir, { recursive: true, force: true });
+    // The last run's output, and a folder a stopped run left aside.
+    await mkdir(outDir, { recursive: true });
+    await writeFile(join(outDir, "stale.ts"), "");
+    const left = join(parent, ".test-not-incremental.old-1-1");
+    await mkdir(left, { recursive: true });
+    const result = await typecheck({
+      cwd: root,
+      workspace: dir,
+      outDir,
+      incremental: false,
+    });
+    expect(result.components).toBe(18);
+    expect(result.diagnostics).toEqual([]);
+    expect(existsSync(join(outDir, "stale.ts"))).toBe(false);
+    expect(
+      (await readdir(parent)).filter((name) =>
+        name.startsWith(".test-not-incremental.old-"),
+      ),
+    ).toEqual([]);
+    // Each from when it started, so none is negative.
+    for (const ms of Object.values(result.timings))
+      expect(ms).toBeGreaterThanOrEqual(0);
+  }, 60_000);
 });

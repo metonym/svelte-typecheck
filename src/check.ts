@@ -23,6 +23,7 @@ import {
   type CompileResult,
   type ConfigShape,
   svelteDirOf,
+  withEdits,
 } from "./compiler.ts";
 import { configFingerprint } from "./config.ts";
 import type { emit } from "./emit.ts";
@@ -456,6 +457,8 @@ export async function typecheck(
   // worker from here: it reads them, and loads the compiler and the config
   // (through Vite, up to half a second), while this thread reads them too
   // and generates code.
+  /** When the compiler's pass started, on the worker; on this thread, once code is generated. */
+  let compileStartedAt: number | undefined;
   const compilingEarly =
     sources.has("svelte") &&
     sources.has("js") &&
@@ -477,7 +480,7 @@ export async function typecheck(
         .then((text) => new Set(JSON.parse(text) as string[]))
         .catch(() => new Set<string>())
     : new Set<string>();
-  if (!incremental) await clearOutDir(outDir);
+  const cleared = incremental ? undefined : await clearOutDir(outDir);
   const files = project.components;
   const listedFiles = project.tsconfig
     ? programFiles(project)
@@ -578,33 +581,31 @@ export async function typecheck(
       filename: relative(cwd, files[i] ?? ""),
     })),
   };
-  /**
-   * The worker's early compile, with a component edited since the worker
-   * read it compiled again as read here, which its key is.
-   */
-  const withEdits = async (early: CompileResult & { keys: string[] }) => {
-    const edited = missing.filter((i) => early.keys[i] !== keys[i]);
-    if (edited.length === 0) return early;
-    const request = {
-      ...compileRequest,
-      components: edited.map((i) => ({
-        source: texts[i] ?? "",
-        filename: relative(cwd, files[i] ?? ""),
-      })),
-    };
-    const again =
-      (await compileOffThread(request)) ?? (await compileAll(request));
-    const results = [...early.results];
-    for (const [n, i] of edited.entries()) results[i] = again.results[n] ?? [];
-    return { ...early, results };
-  };
   // Worth a worker's start only with as much code to generate beside it;
   // with none to generate or checker to wait for, nothing runs beside it.
   let compilingOffThread: Promise<CompileResult> | undefined;
-  if (compilingEarly && missing.length === files.length)
-    compilingOffThread = compilingEarly.wait().then(withEdits);
-  else if (missing.length >= OFF_THREAD_AT && sources.has("js"))
+  // Every component missing: `missing[n]` is `n`, so the worker's results,
+  // by file, are by missing component too.
+  if (compilingEarly && missing.length === files.length) {
+    compileStartedAt = compilingEarly.at;
+    compilingOffThread = compilingEarly.wait().then((early) =>
+      withEdits(early, keys, async (edited) => {
+        const request = {
+          ...compileRequest,
+          components: edited.map((i) => ({
+            source: texts[i] ?? "",
+            filename: relative(cwd, files[i] ?? ""),
+          })),
+        };
+        return (
+          (await compileOffThread(request)) ?? (await compileAll(request))
+        ).results;
+      }),
+    );
+  } else if (missing.length >= OFF_THREAD_AT && sources.has("js")) {
+    compileStartedAt = performance.now();
     compilingOffThread = compileOffThread(compileRequest);
+  }
   // Unhandled until awaited, after the checker: a rejection is the run's.
   compilingOffThread?.catch(() => {});
   // When it finished, for the run's timings, as this thread may be busy then.
@@ -1424,7 +1425,8 @@ export async function typecheck(
     timings: {
       emit: emitted - started,
       check: checked - emitted,
-      compile: compiledAt - emitted,
+      // Not from `emitted`: on the worker, it can start well before.
+      compile: compiledAt - (compileStartedAt ?? emitted),
     },
   };
   const inputs = [...order.keys()]
@@ -1441,6 +1443,8 @@ export async function typecheck(
         result,
       } satisfies ResultCache),
     );
+  // Nothing of the run's left running once it returns.
+  await cleared?.deleted;
   return result;
 }
 
@@ -1601,8 +1605,11 @@ function declarationsBeside(path: string): string[] {
  * aside, to a dot folder no glob enters, and deleted while the run goes
  * on, where deleting it first took a tenth of a second on a large
  * project. One an earlier run left, as a stopped one can, goes too.
+ * `deleted` is that deletion, which the run waits for before it returns.
  */
-async function clearOutDir(outDir: string): Promise<void> {
+async function clearOutDir(
+  outDir: string,
+): Promise<{ deleted: Promise<unknown> }> {
   const parent = dirname(outDir);
   const prefix = `.${basename(outDir)}.old-`;
   try {
@@ -1611,11 +1618,20 @@ async function clearOutDir(outDir: string): Promise<void> {
     // Nothing to clear, or it can't move (Windows, while a file's open).
     if ((error as NodeJS.ErrnoException).code !== "ENOENT")
       await rm(outDir, { recursive: true, force: true });
-    return;
+    return { deleted: Promise.resolve() };
   }
-  for (const name of await readdir(parent).catch(() => []))
-    if (name.startsWith(prefix))
-      rm(join(parent, name), { recursive: true, force: true }).catch(() => {});
+  const names = await readdir(parent).catch(() => []);
+  return {
+    deleted: Promise.all(
+      names
+        .filter((name) => name.startsWith(prefix))
+        .map((name) =>
+          rm(join(parent, name), { recursive: true, force: true }).catch(
+            () => {},
+          ),
+        ),
+    ),
+  };
 }
 
 /** Each file's size and modification time, or that it's missing. */
