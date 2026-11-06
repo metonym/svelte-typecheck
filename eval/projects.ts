@@ -76,7 +76,7 @@ export const PROJECTS: Project[] = [
     // `checkJs`, so errors are planted in its tests' components.
     name: "carbon",
     repo: "carbon-design-system/carbon-components-svelte",
-    commit: "c0467ed3bd762dffa6bba1722197e10f61df05da",
+    commit: "052a207bc4a7ec0aa393b461aa517dfa30588844",
     args: ["--workspace", "tests"],
     setup: [["run", "build:docs", "--no-strict"]],
     mutate: "tests",
