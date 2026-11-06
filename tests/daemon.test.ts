@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
-import { wantsDaemon } from "../src/daemon.ts";
+import { SERVE, wantsDaemon } from "../src/daemon.ts";
 
 const root = join(import.meta.dir, "..");
 const cli = join(root, "src/cli.ts");
@@ -72,6 +72,7 @@ const pidOf = (cwd: string) =>
 afterAll(async () => {
   for (const name of [
     "output",
+    "env-only",
     "env",
     "config",
     "fallback",
@@ -93,6 +94,10 @@ describe("wantsDaemon", () => {
     expect(wantsDaemon(["--no-daemon"], { SVELTE_TYPECHECK_DAEMON: "1" })).toBe(
       false,
     );
+    // A daemon itself, which would otherwise start another.
+    expect(
+      wantsDaemon([SERVE, "socket"], { SVELTE_TYPECHECK_DAEMON: "1" }),
+    ).toBe(false);
   });
 });
 
@@ -110,6 +115,31 @@ describe("--daemon", () => {
     }
     expect(run(cwd, ["status"]).stdout).toContain("2 runs");
   }, 120_000);
+
+  it.skipIf(process.platform === "win32")(
+    "starts one daemon when SVELTE_TYPECHECK_DAEMON turns it on",
+    async () => {
+      const cwd = await project("env-only");
+      const env = { SVELTE_TYPECHECK_DAEMON: "1" };
+      const here = run(cwd, ["--no-daemon", ...CHECK]);
+      for (const _ of [1, 2]) {
+        const daemon = run(cwd, CHECK, env);
+        expect(daemon.code).toBe(here.code);
+        expect(lines(daemon.stdout)).toEqual(lines(here.stdout));
+      }
+      const status = run(cwd, ["status"]).stdout;
+      expect(status).toContain("2 runs");
+      // The daemons on this project's socket: one, not one started by another.
+      const socket = /log (\S+)\.log\)/.exec(status)?.[1] ?? "";
+      const daemons = spawnSync("ps", ["-A", "-o", "command="], {
+        encoding: "utf-8",
+      })
+        .stdout.split("\n")
+        .filter((line) => line.includes(SERVE) && line.includes(socket));
+      expect(daemons).toHaveLength(1);
+    },
+    120_000,
+  );
 
   it("runs with each run's environment, not the one that started it", async () => {
     const cwd = await project("env");

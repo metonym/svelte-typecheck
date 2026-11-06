@@ -29,6 +29,8 @@ const IDLE = "SVELTE_TYPECHECK_DAEMON_IDLE";
 /** The folder of the daemons' sockets and logs, for tests. */
 const DIR = "SVELTE_TYPECHECK_DAEMON_DIR";
 const DEFAULT_IDLE_SECONDS = 600;
+/** A daemon's own argument, before its socket. */
+export const SERVE = "--serve-daemon";
 /** How long a client waits for a daemon it started to listen. */
 const START_MS = 10_000;
 const LOCKFILES = [
@@ -72,12 +74,14 @@ const truthy = (value: string | undefined) =>
 /**
  * Whether a run goes to a daemon: `--daemon` or `SVELTE_TYPECHECK_DAEMON`,
  * but not with `--no-daemon`, `--watch` (a process kept alive already) or
- * on CI, where a machine runs once and a daemon would only linger.
+ * on CI, where a machine runs once and a daemon would only linger. Never
+ * for a daemon itself, which would start another, and that one another.
  */
 export function wantsDaemon(
   argv: string[],
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
+  if (argv[0] === SERVE) return false;
   if (argv.includes("--no-daemon") || argv.includes("--watch")) return false;
   if (truthy(env.CI)) return false;
   return argv.includes("--daemon") || truthy(env[ENABLE]);
@@ -181,9 +185,13 @@ const pause = () => new Promise((wait) => setTimeout(wait, 20));
 
 /** Starts a daemon on `socket` and waits until it answers. */
 async function start(socket: string): Promise<Status> {
-  spawn(process.execPath, [process.argv[1] ?? "", "--serve-daemon", socket], {
+  // Without what turns the daemon on: a daemon never hands its runs on.
+  const env = { ...process.env };
+  delete env[ENABLE];
+  spawn(process.execPath, [process.argv[1] ?? "", SERVE, socket], {
     cwd: process.cwd(),
     detached: true,
+    env,
     stdio: "ignore",
   }).unref();
   const until = Date.now() + START_MS;

@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- With `SVELTE_TYPECHECK_DAEMON=1`, a run no longer starts daemons
+  without end: the daemon it started inherited the variable, took itself
+  for a run to hand to a daemon, and started another, which did the
+  same. A daemon now never hands its runs on, and starts without the
+  variable. `--daemon` alone wasn't affected.
+
 ## 0.1.10 — 2026-11-05
 
 **Features**

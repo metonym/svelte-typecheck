@@ -3,7 +3,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { applyBaseline, createBaseline } from "./baseline.ts";
 import { EmitError, typecheck } from "./check.ts";
-import { serveDaemon } from "./daemon.ts";
+import { SERVE, serveDaemon } from "./daemon.ts";
 import {
   colors,
   OUTPUT_FORMATS,
@@ -87,7 +87,7 @@ Exits 1 on an error, or a warning with --fail-on-warnings.`;
 /** Runs the CLI and returns its exit code. */
 export async function main(argv: string[]): Promise<0 | 1> {
   // A daemon `cli.ts` started for `--daemon`, serving runs.
-  if (argv[0] === "--serve-daemon" && argv[1]) {
+  if (argv[0] === SERVE && argv[1]) {
     await serveDaemon(argv[1], main);
     return new Promise(() => {});
   }
