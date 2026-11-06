@@ -1,5 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Checker } from "./types.ts";
 
 /** In the order picked when none is named: the project's own TypeScript first. */
@@ -97,6 +98,32 @@ export function checkerCommand(
   return WINDOWS_SHIM.test(found)
     ? { command: found, prefix: [], shell: true }
     : { command: found, prefix: [] };
+}
+
+/**
+ * The native binary a checker's Node launcher would start, found with the
+ * package's own lookup (`lib/getExePath.js`, which tsgo, TypeScript 7's
+ * `tsc` and tsrs ship, with their platform packages and overrides), so a
+ * run doesn't start a runtime only for it to start the binary: 15 to 35
+ * ms, and under Bun, whose launcher waits on the binary, a process kept
+ * for the whole check. The launcher, when there's no such lookup or it
+ * fails.
+ */
+export async function nativeCommand(
+  command: CheckerCommand,
+): Promise<CheckerCommand> {
+  const [launcher, ...rest] = command.prefix;
+  if (!launcher || rest.length > 0) return command;
+  const lookup = join(dirname(launcher), "..", "lib", "getExePath.js");
+  if (!existsSync(lookup)) return command;
+  try {
+    const { default: getExePath } = (await import(
+      pathToFileURL(lookup).href
+    )) as { default: () => string };
+    return { ...command, command: getExePath(), prefix: [] };
+  } catch {
+    return command;
+  }
 }
 
 /** The arguments that check a project and print errors as `tsc` does. */
