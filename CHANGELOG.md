@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- `--checker tsgo` (and `--tsgo`) finds TypeScript 7 where svelte-check's
+  `--tsgo` does: `@typescript/native`, an alias such as
+  `@typescript/native@npm:typescript@7` installed beside `typescript@6`,
+  then `@typescript/native-preview`. It also uses the project's own
+  `typescript` when that's 7. It looked only for
+  `@typescript/native-preview`, which stopped at a 7.0 preview, so
+  TypeScript 7.0 and 7.1 releases weren't found.
+
 ## 0.1.11 — 2026-11-05
 
 **Fixes**

@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { typecheck } from "../src/check.ts";
 import { checkerCommand, nativeCommand, onPath } from "../src/checker.ts";
@@ -14,6 +15,73 @@ describe("checkerCommand", () => {
       join("node_modules", "typescript", "bin", "tsc"),
     );
     expect(tsc?.version).toMatch(/^\d+\.\d+\.\d+/);
+  });
+
+  describe("tsgo", () => {
+    /** A project with these packages, each with a `bin`. */
+    const projectWith = (
+      name: string,
+      packages: [dir: string, version: string, bin: string][],
+    ) => {
+      // Outside the repo, whose own packages a lookup from inside would find.
+      const dir = join(tmpdir(), "svelte-typecheck-tsgo", name);
+      rmSync(dir, { recursive: true, force: true });
+      for (const [pkg, version, bin] of packages) {
+        const pkgDir = join(dir, "node_modules", pkg);
+        mkdirSync(join(pkgDir, "bin"), { recursive: true });
+        writeFileSync(
+          join(pkgDir, "package.json"),
+          JSON.stringify({
+            name: pkg.startsWith("@typescript/native-preview")
+              ? pkg
+              : "typescript",
+            version,
+            bin: { [bin]: `./bin/${bin}` },
+          }),
+        );
+        writeFileSync(join(pkgDir, "bin", bin), "#!/usr/bin/env node\n");
+      }
+      return dir;
+    };
+    const found = (dir: string) => {
+      const command = checkerCommand("tsgo", dir);
+      return [command?.prefix[0]?.slice(dir.length + 1), command?.version];
+    };
+
+    it("prefers TypeScript 7 under svelte-check's alias, @typescript/native", () => {
+      const dir = projectWith("alias", [
+        ["typescript", "6.0.3", "tsc"],
+        ["@typescript/native", "7.1.0", "tsc"],
+        ["@typescript/native-preview", "7.0.0-dev.20260707.2", "tsgo"],
+      ]);
+      expect(found(dir)).toEqual([
+        join("node_modules/@typescript/native/bin/tsc"),
+        "7.1.0",
+      ]);
+    });
+
+    it("then the preview build, then the project's typescript if it's 7", () => {
+      const preview = projectWith("preview", [
+        ["typescript", "7.1.0", "tsc"],
+        ["@typescript/native-preview", "7.0.0-dev.20260707.2", "tsgo"],
+      ]);
+      expect(found(preview)[1]).toBe("7.0.0-dev.20260707.2");
+      const typescript7 = projectWith("typescript7", [
+        ["typescript", "7.1.0", "tsc"],
+      ]);
+      expect(found(typescript7)).toEqual([
+        join("node_modules/typescript/bin/tsc"),
+        "7.1.0",
+      ]);
+    });
+
+    it("isn't TypeScript 6", () => {
+      const dir = projectWith("typescript6", [
+        ["typescript", "6.0.3", "tsc"],
+        ["@typescript/native", "6.0.3", "tsc"],
+      ]);
+      expect(checkerCommand("tsgo", dir)?.version).not.toBe("6.0.3");
+    });
   });
 
   it("finds a package installed above the project", () => {
