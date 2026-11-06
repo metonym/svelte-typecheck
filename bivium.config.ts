@@ -17,11 +17,12 @@ export default defineConfig({
       root: "scripts/test-package.ts",
     },
   },
-  roots: ["src", "tests", "scripts", "package.json", "tsconfig.json"],
-  // Docs, the benchmark and eval, and config for tools and workflows that
-  // run none of these suites.
+  // `docs`, as a test reads How it works.
+  roots: ["src", "tests", "scripts", "docs", "package.json", "tsconfig.json"],
+  // The README, CHANGELOG and CONTRIBUTING, the benchmark and eval, and
+  // config for tools and workflows that run none of these suites.
   ignore: [
-    "**/*.md",
+    "*.md",
     "LICENSE",
     ".gitignore",
     "knip.json",
@@ -57,6 +58,8 @@ export default defineConfig({
       "tests/fixtures/Warnings.svelte",
       "tests/fixtures/tsconfig.json",
     ],
+    // The samples in How it works, generated again and compared.
+    "tests/docs.test.ts": "docs/architecture.md",
     "tests/compiler.test.ts": [
       "tests/fixtures-preprocess/**",
       "tests/fixtures-kit/vite.config.ts",
