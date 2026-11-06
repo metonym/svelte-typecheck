@@ -61,10 +61,11 @@ function run(dist: string, outDir: string): Promise<Sample> {
       // From the project, as its scripts run, so its vite.config is in
       // the working directory.
       cwd: project,
-      // This repo's checkers too, for a project that has only some.
+      // eval's checkers too (tsrs, and TypeScript 7's tsc), for a project
+      // that has only some.
       env: {
         ...process.env,
-        PATH: `${join(import.meta.dirname, "../node_modules/.bin")}${delimiter}${process.env.PATH ?? ""}`,
+        PATH: `${join(import.meta.dirname, "node_modules/.bin")}${delimiter}${process.env.PATH ?? ""}`,
       },
       detached: true,
       stdio: ["ignore", "pipe", "pipe"],

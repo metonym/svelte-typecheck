@@ -15,7 +15,7 @@ const STRING_OR_COMMENT =
   /"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`(?:[^`\\]|\\.)*`|\/\/.*|\/\*[\s\S]*?\*\//g;
 /** `/// <reference>` and `// @ts-nocheck`, which mean something. */
 const DIRECTIVE = /^\/\/(?:\/|\s*@ts-)/;
-const STRIP_FIELDS = ["devDependencies", "scripts"];
+const STRIP_FIELDS = ["devDependencies", "scripts", "workspaces"];
 
 function fail(message: string): never {
   console.error(message);

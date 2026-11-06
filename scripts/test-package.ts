@@ -103,7 +103,9 @@ try {
 
   // A project with the fixtures, svelte and TypeScript 6 for `tsc`.
   const project = join(dir, "project");
-  cpSync(join(root, "tests/fixtures"), project, { recursive: true });
+  cpSync(join(root, "tests/projects/svelte5/basic"), project, {
+    recursive: true,
+  });
   write(project, {
     "package.json": JSON.stringify({
       name: "project",

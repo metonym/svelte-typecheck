@@ -6,16 +6,18 @@ import type { TypecheckResult } from "../src/types.ts";
 import { watch } from "../src/watch.ts";
 
 const root = join(import.meta.dir, "..");
+/** The Svelte 5 project the runs start from. */
+const svelte5 = join(root, "tests/projects/svelte5");
 const BROKEN = `<script lang="ts">\n  const n: number = "one";\n</script>\n`;
 
 /** A copy of the clean fixtures, inside the repo so imports resolve. */
 async function workspace(name: string): Promise<string> {
-  const dir = join(root, "tests/.tmp", name);
+  const dir = join(svelte5, ".tmp", name);
   await rm(dir, { recursive: true, force: true });
   await mkdir(dir, { recursive: true });
   await Promise.all(
     ["Child.svelte", "Clean.svelte", "tsconfig.json"].map((file) =>
-      cp(join(root, "tests/fixtures", file), join(dir, file)),
+      cp(join(svelte5, "basic", file), join(dir, file)),
     ),
   );
   return dir;
@@ -29,7 +31,7 @@ describe("incremental", () => {
       "node_modules/.cache/svelte-typecheck/test-incremental",
     );
     await rm(outDir, { recursive: true, force: true });
-    const run = () => typecheck({ cwd: root, workspace: dir, outDir });
+    const run = () => typecheck({ cwd: svelte5, workspace: dir, outDir });
     expect((await run()).diagnostics).toEqual([]);
     // The checker's own cache, for the next run.
     expect(existsSync(join(outDir, "tsbuildinfo"))).toBe(true);
@@ -49,7 +51,7 @@ describe("incremental, with a component unchanged", () => {
       "node_modules/.cache/svelte-typecheck/test-incremental-import",
     );
     await rm(outDir, { recursive: true, force: true });
-    const run = () => typecheck({ cwd: root, workspace: dir, outDir });
+    const run = () => typecheck({ cwd: svelte5, workspace: dir, outDir });
     expect((await run()).diagnostics).toEqual([]);
     // Clean.svelte passes `count={double}`, a number; it's now a string.
     const child = join(dir, "Child.svelte");
@@ -86,7 +88,7 @@ describe("watch", () => {
       });
     const stop = watch(
       {
-        cwd: root,
+        cwd: svelte5,
         workspace: dir,
         outDir: join(root, "node_modules/.cache/svelte-typecheck/test-watch"),
       },
@@ -116,7 +118,7 @@ describe("incremental, with nothing changed", () => {
       "node_modules/.cache/svelte-typecheck/test-replay",
     );
     await rm(outDir, { recursive: true, force: true });
-    const run = () => typecheck({ cwd: root, workspace: dir, outDir });
+    const run = () => typecheck({ cwd: svelte5, workspace: dir, outDir });
     expect((await run()).timings.check).toBeGreaterThan(0);
     // Replayed: nothing generated or checked.
     const replayed = await run();
@@ -126,7 +128,7 @@ describe("incremental, with nothing changed", () => {
     await writeFile(join(dir, "extra.ts"), 'export const n: number = "one";\n');
     expect((await run()).diagnostics.map((d) => d.code)).toEqual(["TS2322"]);
     // So is a file outside the tsconfig's `include` that a component imports.
-    const outside = join(root, "tests/.tmp/replay-outside.ts");
+    const outside = join(svelte5, ".tmp/replay-outside.ts");
     await writeFile(outside, "export const label = 1;\n");
     await writeFile(
       join(dir, "extra.ts"),
@@ -136,8 +138,8 @@ describe("incremental, with nothing changed", () => {
     await writeFile(outside, 'export const label = "one";\n');
     expect((await run()).diagnostics.map((d) => d.code)).toEqual(["TS2322"]);
     // And the declarations TypeScript reads for an import of a JS file.
-    const js = join(root, "tests/.tmp/replay-outside-js.js");
-    const dts = join(root, "tests/.tmp/replay-outside-js.d.ts");
+    const js = join(svelte5, ".tmp/replay-outside-js.js");
+    const dts = join(svelte5, ".tmp/replay-outside-js.d.ts");
     await writeFile(js, "export const count = 1;\n");
     await writeFile(dts, "export const count: number;\n");
     await writeFile(
@@ -165,7 +167,7 @@ describe("incremental, with nothing changed", () => {
       join(dir, "tsconfig.json"),
       JSON.stringify({ ...tsconfig, include: ["*.svelte"] }),
     );
-    const run = () => typecheck({ cwd: root, workspace: dir, outDir });
+    const run = () => typecheck({ cwd: svelte5, workspace: dir, outDir });
     expect((await run()).diagnostics).toEqual([]);
     // What an import of Child.svelte finds in place of its code, as a
     // build that writes declarations beside the components leaves them.
@@ -200,9 +202,14 @@ describe("the project's own build info", () => {
       root,
       "node_modules/.cache/svelte-typecheck/test-own-build-info",
     );
-    await typecheck({ cwd: root, workspace: dir, outDir, incremental: false });
+    await typecheck({
+      cwd: svelte5,
+      workspace: dir,
+      outDir,
+      incremental: false,
+    });
     expect(existsSync(join(dir, "own.tsbuildinfo"))).toBe(false);
-    await typecheck({ cwd: root, workspace: dir, outDir });
+    await typecheck({ cwd: svelte5, workspace: dir, outDir });
     expect(existsSync(join(dir, "own.tsbuildinfo"))).toBe(false);
     expect(existsSync(join(outDir, "tsbuildinfo"))).toBe(true);
   }, 30_000);
@@ -227,7 +234,7 @@ describe("not incremental", () => {
     const left = join(parent, ".test-not-incremental.old-1-1");
     await mkdir(left, { recursive: true });
     const result = await typecheck({
-      cwd: root,
+      cwd: svelte5,
       workspace: dir,
       outDir,
       incremental: false,

@@ -1,0 +1,10 @@
+{
+  "name": "eval",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@typescript/native": "catalog:",
+    "svelte-check": "catalog:",
+    "tsrs": "catalog:"
+  }
+}

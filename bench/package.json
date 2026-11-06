@@ -1,0 +1,13 @@
+{
+  "name": "bench",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "@sveltejs/kit": "catalog:",
+    "@typescript/native": "catalog:",
+    "svelte": "catalog:",
+    "tsrs": "catalog:",
+    "typescript": "catalog:",
+    "vite": "catalog:"
+  }
+}

@@ -1,8 +1,0 @@
-{
-  "name": "fixtures-kit",
-  "private": true,
-  "type": "module",
-  "imports": {
-    "#lib/*": "./src/lib/*"
-  }
-}

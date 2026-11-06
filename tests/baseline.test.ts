@@ -3,7 +3,7 @@ import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 const root = join(import.meta.dir, "..");
-const dir = join(root, "tests/.tmp/baseline");
+const dir = join(root, "tests/projects/svelte5/.tmp/baseline");
 
 const cli = (...args: string[]) =>
   spawnSync(
@@ -15,7 +15,9 @@ const cli = (...args: string[]) =>
 describe("--baseline", () => {
   it("reports only what's new since the baseline, through edits that move lines", () => {
     rmSync(dir, { recursive: true, force: true });
-    cpSync(join(root, "tests/fixtures"), dir, { recursive: true });
+    cpSync(join(root, "tests/projects/svelte5/basic"), dir, {
+      recursive: true,
+    });
     const written = cli("--baseline", "baseline.json", "--update-baseline");
     expect(written.status).toBe(0);
     const baseline = JSON.parse(

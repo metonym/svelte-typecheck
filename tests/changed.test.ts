@@ -9,10 +9,10 @@ const root = join(import.meta.dir, "..");
 describe("only", () => {
   it("reports a file's diagnostics and its importers', not the rest", async () => {
     const result = await typecheck({
-      cwd: root,
-      workspace: "tests/fixtures",
+      cwd: join(root, "tests/projects/svelte5"),
+      workspace: "basic",
       outDir: "node_modules/.cache/svelte-typecheck/test-only",
-      only: ["tests/fixtures/Child.svelte"],
+      only: ["basic/Child.svelte"],
     });
     const files = new Set(result.diagnostics.map((d) => basename(d.file)));
     // Errors.svelte and render.ts import Child.svelte; Warnings.svelte doesn't.
@@ -23,7 +23,7 @@ describe("only", () => {
 
 describe("changedFiles", () => {
   it("lists changed and untracked files, and a branch's commits with a ref", () => {
-    const dir = join(root, "tests/.tmp/git");
+    const dir = join(root, "tests/projects/svelte5/.tmp/git");
     rmSync(dir, { recursive: true, force: true });
     mkdirSync(dir, { recursive: true });
     const git = (...args: string[]) =>

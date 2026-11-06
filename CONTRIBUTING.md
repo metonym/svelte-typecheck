@@ -18,7 +18,9 @@ bun run test:package   # build, pack, install, and use it as a consumer would
 bun src/cli.ts         # the CLI from source, in the current folder
 ```
 
-The SvelteKit fixture needs SvelteKit's generated files; its parity test runs `svelte-kit sync` first, and so can you: `bunx svelte-kit sync` in `tests/fixtures-kit`.
+The repo is a Bun workspace. The root `package.json` installs only what the source and its tools need: sveast, which the build bundles, `bun-types`, bivium, knip and ostia. Each test project, `bench/` and `eval/` is a workspace package that installs its own Svelte and checkers, so a test sees what a user's project would and nothing hoisted from the root. Versions they share are pinned once, in the root's `workspaces.catalog`, and taken with `"catalog:"`.
+
+The SvelteKit project needs SvelteKit's generated files; its parity test runs `svelte-kit sync` first, and so can you: `bunx svelte-kit sync` in `tests/projects/kit`.
 
 ## How it works
 
@@ -56,12 +58,22 @@ The SvelteKit fixture needs SvelteKit's generated files; its parity test runs `s
 | `tests/compile-cache.test.ts`                  | The compiler pass's cache, and the config left unloaded, across processes                                                                                                                                                            |
 | `tests/baseline.test.ts`                       | `--baseline` through edits that move lines, new and fixed diagnostics                                                                                                                                                                |
 | `tests/changed.test.ts`                        | `only` and its importers, and git's changed files                                                                                                                                                                                    |
-| `tests/checker.test.ts`                        | Finding a checker, `PATHEXT` on Windows, the default                                                                                                                                                                                 |
+| `tests/checker.test.ts`                        | Finding a checker, `PATHEXT` on Windows, the default, a project's own TypeScript 7                                                                                                                                                   |
 | `tests/compiler.test.ts`, `tests/glob.test.ts` | `compilerDiagnostics`, the glob walker                                                                                                                                                                                               |
 | `tests/api.test.ts`                            | The exports, and their signatures against `src/types.ts`                                                                                                                                                                             |
 | `scripts/test-package.ts`                      | `bun run test:package`: the packed tarball installs, imports only builtins and Svelte's compiler, checks the fixtures from Node and Bun, runs the compiler's diagnostics with no checker installed, and its `index.d.ts` type-checks |
 
-Each `tests/fixtures-*` folder is a small project for one area: `fixtures` (the basics), `-typed` (`$$Props`, `$$Events`, `$$Slots`), `-generic`, `-filters` (svelte-check's rewrites), `-preprocess`, `-runes`, `-kit` (SvelteKit 3) and `-edge` (markup that doesn't parse, TypeScript in JS, no `allowJs`). A behavior fix needs a test that fails before the fix and passes after; for a parity fix, that's usually a line in a fixture.
+Each folder in `tests/projects/` is a project with its own `package.json`, and a test runs from it as a user runs from theirs: Svelte comes from the working folder, and a checker from the workspace up.
+
+| Project              | Installs                                                                                         | For                                                                                                                                                                                                                                                                                                                      |
+| :------------------- | :----------------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `svelte5`            | Svelte 5, TypeScript 6 as `typescript`, TypeScript 7 as `@typescript/native`, tsrs, svelte-check | The fixtures, one folder each: `basic`, `typed` (`$$Props`, `$$Events`, `$$Slots`), `generic`, `filters` (svelte-check's rewrites), `runes`, `helpers`, `untyped` and `edge` (markup that doesn't parse, TypeScript in JS, no `allowJs`). A test that writes a temp project puts it in `.tmp/` here, where these resolve |
+| `kit`                | SvelteKit 3, Vite                                                                                | A SvelteKit project                                                                                                                                                                                                                                                                                                      |
+| `preprocess`         | magic-string                                                                                     | A svelte.config with preprocessors                                                                                                                                                                                                                                                                                       |
+| `svelte3`, `svelte4` | That Svelte, as `svelte`                                                                         | The `svelte` option, pointed at an older compiler                                                                                                                                                                                                                                                                        |
+| `ts7`                | TypeScript 7 as `typescript`                                                                     | `tsc` and tsgo with a project's own TypeScript 7                                                                                                                                                                                                                                                                         |
+
+A new variant, such as another version of a dependency, is a new folder with a `package.json`, added to bivium's `reads` for the tests that use it. A behavior fix needs a test that fails before the fix and passes after; for a parity fix, that's usually a line in a fixture.
 
 A pull request runs only the tests its changes can reach, which [bivium](https://github.com/metonym/bivium) finds from `bivium.config.ts`. A new test that reads a fixture or runs the CLI says so there; `bunx bivium check` lists a fixture no test reads, and a test that reads the disk without saying what.
 
@@ -79,7 +91,7 @@ bun eval/diff.ts <project> --tsconfig tsconfig.json   # and again, with them
 
 Never trust a run with 0 errors on its own: plant some first. bits-ui (runes, TypeScript), realworld (SvelteKit 2, JS, with `checkJs` on) and carbon-components-svelte's root (JS components, no `allowJs`) each found bugs the fixtures didn't. Two things to watch:
 
-- `diff.ts` uses the project's own svelte-check where it has one: another install loads a second copy of Svelte's types, which reports false snippet errors.
+- `diff.ts` uses the project's own svelte-check where it has one, and `eval/`'s otherwise: another install loads a second copy of Svelte's types, which reports false snippet errors.
 - Compare on the project's own TypeScript: TypeScript 6's defaults report errors 5.9 doesn't (bits-ui has 231).
 
 ## Benchmarks
@@ -100,6 +112,8 @@ bun run build && cp -R dist /tmp/after
 bun eval/ab.ts /tmp/before /tmp/after <project> cold-tsrs
 AB_CHANGE=<project>/src/Button.svelte bun eval/ab.ts /tmp/before /tmp/after <project> changed-tsgo
 ```
+
+`ab.ts` adds `eval/`'s tsrs and TypeScript 7 `tsc` to `PATH`, for a project that installs neither. tsgo is found in the project only: for `changed-tsgo` on a project without TypeScript 7, install it there as `@typescript/native@npm:typescript@7`.
 
 For a change to the generated code, `eval/work.ts` compares what each build hands the checker: the generated code's size, and tsgo's types, instantiations, symbols and memory with one checker, which are the same on every run however loaded the machine is.
 

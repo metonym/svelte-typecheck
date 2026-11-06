@@ -1,6 +1,8 @@
 import { defineConfig } from "bivium";
 
-const fixtures = "tests/fixtures/**";
+// The test projects: each a folder with its own package.json, whose
+// dependencies a test sees as a user's project would.
+const fixtures = "tests/projects/svelte5/{package.json,basic/**}";
 
 export default defineConfig({
   suites: {
@@ -55,22 +57,30 @@ export default defineConfig({
     "tests/baseline.test.ts": fixtures,
     "tests/changed.test.ts": fixtures,
     "tests/daemon.test.ts": fixtures,
-    "tests/checker.test.ts": fixtures,
+    "tests/checker.test.ts": [fixtures, "tests/projects/ts7/**"],
     "tests/compile-cache.test.ts": [
-      "tests/fixtures/Warnings.svelte",
-      "tests/fixtures/tsconfig.json",
+      "tests/projects/svelte5/package.json",
+      "tests/projects/svelte5/basic/Warnings.svelte",
+      "tests/projects/svelte5/basic/tsconfig.json",
     ],
     // The samples in How it works, generated again and compared.
     "tests/docs.test.ts": "docs/architecture.md",
     "tests/compiler.test.ts": [
-      "tests/fixtures-preprocess/**",
-      "tests/fixtures-kit/vite.config.ts",
+      "tests/projects/svelte5/package.json",
+      "tests/projects/preprocess/**",
+      "tests/projects/kit/{package.json,vite.config.ts}",
     ],
-    "tests/parity.test.ts": [fixtures, "tests/fixtures-*/**"],
-    "tests/typecheck.test.ts": [fixtures, "tests/fixtures-preprocess/**"],
+    "tests/parity.test.ts": "tests/projects/**",
+    "tests/typecheck.test.ts": [
+      fixtures,
+      "tests/projects/{preprocess/**,svelte3/package.json,svelte4/package.json}",
+    ],
     "tests/watch.test.ts": fixtures,
     "scripts/test-package.ts": fixtures,
   },
+  // The shims' types import the user's Svelte, which the root doesn't
+  // install: the test projects do.
+  external: ["svelte"],
   // Tools CI runs on its own: a bump that only reaches them selects nothing.
   inert: ["knip", "ostia"],
   // svelte-typecheck reads its user's project; the glob test, only the temp

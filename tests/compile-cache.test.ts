@@ -8,12 +8,12 @@ const WARNING = /^\d+ WARNING /gm;
 
 describe("the compiler pass's cache", () => {
   it("skips the config and the compiler for unchanged components", async () => {
-    const dir = join(root, "tests/.tmp/compile-cache");
+    const dir = join(root, "tests/projects/svelte5/.tmp/compile-cache");
     await rm(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });
     await Promise.all(
       ["Warnings.svelte", "tsconfig.json"].map((file) =>
-        cp(join(root, "tests/fixtures", file), join(dir, file)),
+        cp(join(root, "tests/projects/svelte5/basic", file), join(dir, file)),
       ),
     );
     // Leaves a marker each time a run loads it.
@@ -56,12 +56,12 @@ describe("the compiler pass's cache", () => {
   }, 60_000);
 
   it("leaves the config unloaded for a changed component no preprocessor that changes code reads", async () => {
-    const dir = join(root, "tests/.tmp/compile-cache-shape");
+    const dir = join(root, "tests/projects/svelte5/.tmp/compile-cache-shape");
     await rm(dir, { recursive: true, force: true });
     await mkdir(dir, { recursive: true });
     await Promise.all(
       ["Warnings.svelte", "tsconfig.json"].map((file) =>
-        cp(join(root, "tests/fixtures", file), join(dir, file)),
+        cp(join(root, "tests/projects/svelte5/basic", file), join(dir, file)),
       ),
     );
     // A style preprocessor that strips `#!custom`, and SvelteKit's, which

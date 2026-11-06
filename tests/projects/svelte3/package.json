@@ -1,0 +1,8 @@
+{
+  "name": "project-svelte3",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "svelte": "^3.59.2"
+  }
+}

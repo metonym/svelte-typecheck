@@ -1,31 +1,32 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
-  "entry": [
-    "src/{index,cli,compile-worker}.ts",
-    "scripts/*.ts",
-    "bench/*.bench.ts",
-    "bench/check.ts",
-    "eval/*.ts",
-    "ostia.config.ts",
-    "bivium.config.ts"
-  ],
-  "project": [
-    "src/**/*.ts",
-    "tests/**/*.ts",
-    "scripts/**/*.ts",
-    "bench/**/*.ts",
-    "eval/**/*.ts"
-  ],
-  "ignore": ["tests/fixtures*/**"],
-  "ignoreDependencies": [
-    "@sveltejs/kit",
-    "@typescript/native",
-    "magic-string",
-    "svelte",
-    "svelte-check",
-    "svelte3",
-    "svelte4",
-    "tsrs",
-    "vite"
-  ]
+  "workspaces": {
+    ".": {
+      "entry": [
+        "src/{index,cli,compile-worker}.ts",
+        "scripts/*.ts",
+        "ostia.config.ts",
+        "bivium.config.ts"
+      ],
+      "project": ["src/**/*.ts", "tests/*.ts", "scripts/**/*.ts"],
+      "ignoreDependencies": ["bun-types"]
+    },
+    "bench": {
+      "entry": ["*.bench.ts", "check.ts"],
+      "project": ["*.ts"],
+      "ignoreDependencies": [
+        "@sveltejs/kit",
+        "@typescript/native",
+        "svelte",
+        "tsrs",
+        "vite"
+      ]
+    },
+    "eval": {
+      "entry": ["*.ts"],
+      "project": ["*.ts"],
+      "ignoreDependencies": ["@typescript/native", "svelte-check", "tsrs"]
+    }
+  },
+  "ignoreWorkspaces": ["tests/projects/*"]
 }
