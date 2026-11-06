@@ -842,6 +842,10 @@ export async function typecheck(
           code: "-1",
           message: e.message,
         });
+        parseErrors.push(...effects.diagnostics);
+        // Without `allowJs`, a JS component is an untyped JS module to its
+        // importers whether it parses or not, as svelte-check has it.
+        if (!isTs && !project.allowJs) continue;
         // As svelte2tsx's output then, a module only if a script imports or
         // exports something.
         const lexed = lexComponent(texts[i] ?? "");
@@ -855,7 +859,6 @@ export async function typecheck(
         const stub = isModule ? "export {};\n" : "";
         put(join(genFrom, `++${name}.svelte.${isTs ? "ts" : "js"}`), stub);
         if (declarations) put(join(genFrom, `${name}.d.svelte.ts`), stub);
-        parseErrors.push(...effects.diagnostics);
         continue;
       }
       const locate = createLocator(texts[i] ?? "");
@@ -1366,9 +1369,18 @@ export async function typecheck(
         message: `Could not find a declaration file for module '${i.specifier}'. '${asTypeScriptPath(i.target)}' implicitly has an 'any' type.`,
       });
     }
-    // First in its file, as TypeScript reports an import's error before
-    // those of the code after it.
-    diagnostics.unshift(...untypedErrors);
+    // Where TypeScript reports it: after the errors before the import in
+    // its file (another import's, say), and before those after it.
+    for (const error of untypedErrors) {
+      const after = diagnostics.findIndex(
+        (d) =>
+          d.file === error.file &&
+          d.source !== "svelte" &&
+          (d.line > error.line ||
+            (d.line === error.line && d.column > error.column)),
+      );
+      diagnostics.splice(after === -1 ? diagnostics.length : after, 0, error);
+    }
     // An `@ts-expect-error` that TS7016 would have used isn't unused, as
     // TypeScript reports it here, where nothing reads the import.
     if (expected.size > 0) {

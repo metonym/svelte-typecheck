@@ -4,6 +4,14 @@
 
 **Fixes**
 
+- A JS component that doesn't parse, in a project without `allowJs`, is
+  an untyped module to its importers, as svelte-check has it, as it is
+  when it parses. Each import of it reported "File '…' is not a module",
+  or "has no default export", which svelte-check doesn't.
+- The "Could not find a declaration file" error on an import of an
+  untyped JS component comes where TypeScript reports it, after the
+  errors on the lines above it, such as another import's. It came first
+  in its file.
 - `--checker tsgo` (and `--tsgo`) finds TypeScript 7 where svelte-check's
   `--tsgo` does: `@typescript/native`, an alias such as
   `@typescript/native@npm:typescript@7` installed beside `typescript@6`,
