@@ -4,6 +4,7 @@ dist
 *.tgz
 bench/corpus
 bench/corpus-vite
+bench/scale
 .ostia
 tests/projects/*/.tmp
 .svelte-kit

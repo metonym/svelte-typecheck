@@ -12,7 +12,7 @@
       "ignoreDependencies": ["bun-types"]
     },
     "bench": {
-      "entry": ["*.bench.ts", "check.ts"],
+      "entry": ["*.bench.ts", "check.ts", "scale.ts"],
       "project": ["*.ts"],
       "ignoreDependencies": [
         "@sveltejs/kit",
