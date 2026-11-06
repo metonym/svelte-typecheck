@@ -119,6 +119,17 @@ interface CompileCache {
   shapeKey?: string;
 }
 const hash = (text: string) => createHash("sha1").update(text).digest("hex");
+/**
+ * What every cache is kept by, besides its own inputs: the version, or run
+ * from source, a hash of the source, as a change to it keeps the version.
+ */
+const TOOL_KEY = import.meta.url.endsWith(".ts")
+  ? hash(
+      glob(import.meta.dirname, ["**/*.ts"])
+        .map((rel) => readFileSync(join(import.meta.dirname, rel), "utf-8"))
+        .join("\0"),
+    )
+  : TOOL_VERSION;
 /** Components to compile before the compiler's pass moves to a worker. */
 const OFF_THREAD_AT = 16;
 /** The files the last incremental run wrote. */
@@ -499,7 +510,7 @@ export async function typecheck(
   const runKey = incremental
     ? hash(
         JSON.stringify([
-          TOOL_VERSION,
+          TOOL_KEY,
           CACHE_FORMAT,
           version,
           checker,
@@ -549,7 +560,7 @@ export async function typecheck(
   const cachePath = join(outDir, COMPILE_CACHE);
   const fingerprint = hash(
     JSON.stringify([
-      TOOL_VERSION,
+      TOOL_KEY,
       CACHE_FORMAT,
       version,
       configFingerprint(configDir, configFile),
@@ -720,7 +731,7 @@ export async function typecheck(
     const emitCachePath = join(outDir, EMIT_CACHE);
     const emitFingerprint = hash(
       JSON.stringify([
-        TOOL_VERSION,
+        TOOL_KEY,
         CACHE_FORMAT,
         svelteMajor,
         project.checkJs,
