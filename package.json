@@ -35,20 +35,20 @@
   },
   "devDependencies": {
     "@sveltejs/kit": "^3.1.1",
-    "@typescript/native-preview": "^7.0.0-dev.20260707.2",
+    "@typescript/native": "npm:typescript@^7.0.2",
     "bivium": "^0.4.0",
     "bun-types": "1.4.4",
-    "knip": "^6.43.0",
+    "knip": "^6.44.1",
     "magic-string": "^1.4.5",
     "ostia": "^0.2.12",
-    "sveast": "^0.9.6",
+    "sveast": "^0.9.7",
     "svelte": "^5.57.3",
     "svelte-check": "4.7.8",
     "svelte3": "npm:svelte@^3.59.2",
     "svelte4": "npm:svelte@^4.2.20",
-    "tsrs": "0.20.1-ts7.1.0-beta",
+    "tsrs": "0.22.0-ts7.1.0-beta",
     "typescript": "^6.0.3",
-    "vite": "^8.3.5"
+    "vite": "^8.3.6"
   },
   "repository": {
     "type": "git",
