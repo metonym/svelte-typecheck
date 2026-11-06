@@ -19,7 +19,7 @@
   "ignore": ["tests/fixtures*/**"],
   "ignoreDependencies": [
     "@sveltejs/kit",
-    "@typescript/native-preview",
+    "@typescript/native",
     "magic-string",
     "svelte",
     "svelte-check",
