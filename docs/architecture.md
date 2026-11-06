@@ -17,6 +17,7 @@
 | Svelte's compiler alongside the checker, not after it, from as soon as the components are found                                                                                       | The slower of the two sets the time, not their sum    |
 | Svelte's `preprocess` only for a component a preprocessor reads                                                                                                                       | 160 to 200 ms less compiling, with `vite-preprocess`  |
 | The program's order worked out while the checker runs                                                                                                                                 | 95 to 180 ms off the end of each run                  |
+| No generated code that can't report anything: an attribute-less element's call, unread names, unused `$$props`                                                                        | 10% less generated code, 1 to 4% less checker work    |
 | Only what changed: components regenerated and recompiled, without loading the config when no preprocessor reads them, the checker's build cache, the last result when nothing changed | 0.72 s after one change (tsrs), 0.09 s with none      |
 
 ## The generated code
@@ -64,7 +65,7 @@ function $$render() {
 
   async () => {
     {
-      const $$_el0 = svelteHTML.createElement("button", {
+      svelteHTML.createElement("button", {
         onclick: () => count++,
         disabled: count > 3,
       });
@@ -72,7 +73,6 @@ function $$render() {
     }
     for (let item of $$check.each(items)) {
       {
-        const $$_el1 = svelteHTML.createElement("p", {});
         item.toUpperCase();
       }
     }
@@ -137,7 +137,8 @@ const Counter__SvelteComponent_ = __sveltets_2_fn_component($$render());
 The two have the same structure, and that is deliberate. The checker sees the same program svelte-check's language service sees, so it reports the same errors with the same messages.
 
 - `$props()`'s type annotation is pulled out as `$$ComponentProps`, so the component's type can name it. svelte2tsx moves it above `$$render`. svelte-typecheck leaves it where the script declared it, inside `$$render`.
-- Each element is a `svelteHTML.createElement(tag, attributes)` call. `svelteHTML` comes from Svelte's own `svelte-html.d.ts`, which maps each tag to its attribute types, so `disabled={count > 3}` is checked against `HTMLButtonAttributes`. svelte-typecheck names the result `$$_el0` so that `bind:this={el}` can be written as `el = $$_el0`, which checks that `el` can hold that element type.
+- Each element is a `svelteHTML.createElement(tag, attributes)` call. `svelteHTML` comes from Svelte's own `svelte-html.d.ts`, which maps each tag to its attribute types, so `disabled={count > 3}` is checked against `HTMLButtonAttributes`. svelte2tsx writes the call for every element. svelte-typecheck leaves it out for an element whose attributes write nothing, such as the `<p>` here, or one with only static `data-` attributes: `{}` can't fail against attributes that are all optional, and the call would have the checker build that tag's attribute types, about 800 instantiations a tag. A custom element (`<my-el>`) keeps it, as its declared attributes can be required.
+- svelte-typecheck names an element (`const $$_el0 = …`) only for `bind:this={el}`, written as `el = $$_el0`, which checks that `el` can hold that element type.
 - `{expr}` becomes an expression statement, and `{#each items as item}` becomes a `for…of` loop. `$$check.each` (svelte2tsx's `__sveltets_2_ensureArray`) accepts an array-like or iterable value and returns its items, so `item` is a `string` here.
 - The returned object describes the component: its props, exports, bindable props, slots and events. The component's type is computed from `ReturnType<typeof $$render>`.
 - At the end, svelte2tsx calls a helper, `__sveltets_2_fn_component($$render())`, and the checker infers the component's type from that call. svelte-typecheck declares `$$Component` with its type written out as Svelte's `Component<Props, Exports, Bindings>`.
@@ -166,7 +167,7 @@ async () => {
   {
     const $$_c0C = $$check.component(Field);
     const $$_c0 = new $$_c0C({
-      target: $$check.any(),
+      target: $$check.target,
       props: { label: "Name", value: value },
     });
     () => (value = $$check.any(null));
@@ -176,19 +177,16 @@ async () => {
   }
   if (value.length > 0) {
     {
-      const $$_el1 = svelteHTML.createElement("button", {
-        onclick: () => onsave(value),
-      });
+      svelteHTML.createElement("button", { onclick: () => onsave(value) });
     }
   } else {
     {
-      const $$_el2 = svelteHTML.createElement("p", {});
     }
   }
 };
 ```
 
-svelte2tsx writes the same statements, with `__sveltets_2_ensureComponent` in place of `$$check.component` and a scrambled variable name (`$$_dleiF0`, the tag's name reversed). It also wraps the `bind:` check in ignore comments.
+svelte2tsx writes the same statements, with `__sveltets_2_ensureComponent` in place of `$$check.component`, `__sveltets_2_any()` in place of `$$check.target`, and a scrambled variable name (`$$_dleiF0`, the tag's name reversed). It also wraps the `bind:` check in ignore comments. svelte-typecheck names the instance (`const $$_c0 = …`) only when something reads it, here the `bind:` check; a component with no `on:`, `bind:` or slot `let:` is a bare `new $$_c0C(…)`.
 
 - `$$check.component(Field)` accepts a Svelte 5 function component, a Svelte 4 class, or anything typed as `ConstructorOfATypedSvelteComponent`, and returns a constructor. Constructing it with `props` checks each attribute against the child's props, including that a required prop isn't missing.
 - `bind:value` produces two checks. `() => (value = $$check.any(null))` checks that `value` can be assigned to, so binding a `const` or an import is an error. `$$_c0.$$bindings = "value"` checks that `Field` marks `value` as `$bindable()`. Field's own output returns `bindings: $$check.bindings("value")`, and that becomes the type `$$bindings` accepts.
@@ -215,10 +213,6 @@ svelte-typecheck writes:
 ```ts
 import { writable } from "svelte/store";
 function $$render() {
-  let $$props = $$check.props();
-  let $$restProps = $$check.props();
-  let $$slots = $$check.any(0);
-
   let name: string;
   name = $$check.any(0);
   const count = writable(0);
@@ -227,13 +221,10 @@ function $$render() {
 
   async () => {
     {
-      const $$_el0 = svelteHTML.createElement("h1", {});
       greeting;
     }
     {
-      const $$_el1 = svelteHTML.createElement("p", {
-        "on:click": () => $count++,
-      });
+      svelteHTML.createElement("p", { "on:click": () => $count++ });
       $count;
     }
     ({ item: name });
@@ -309,7 +300,7 @@ const Legacy__SvelteComponent_ = __sveltets_2_isomorphic_component_slots(
 - Each store a component reads as `$count` gets a `let $count = $$check.store(count)` declaration right after the store's own. If `count` isn't a store, the error is at that generated declaration. svelte-check reports it at each `$count` in the source, and svelte-typecheck does the same: it records where the declaration and each use are, and reports the error once per use.
 - `$: greeting = …` becomes `let greeting = $$check.reactive(() => …)`. The helper returns what the arrow returns, so `greeting` gets the expression's type, as it would from a plain `let`.
 - `<slot item={name} />` becomes an object literal so its props are checked. The slot's props also go into the returned `slots`, which is where a parent's `let:item` gets its type. svelte2tsx calls a slot helper instead. svelte-typecheck calls one, `$$slot`, only when the component declares `$$Slots`, to check the slot's props against it.
-- svelte-typecheck declares `$$props`, `$$restProps` and `$$slots` in every legacy component. svelte2tsx declares them only when the component uses them.
+- `$$props`, `$$restProps` and `$$slots` are declared only when the component uses them, as svelte2tsx does: none of them here.
 - A legacy component's type is `__sveltets_2_IsomorphicComponent`, which can be constructed with `new`, as Svelte 4 does, and also called, as Svelte 5 does. This name, and the few other names a type error can print, keep svelte2tsx's spelling in `shims.d.ts` so the messages read as svelte-check's do. Every other helper is in svelte-typecheck's `$$check` namespace. A Svelte script can't declare a `$$` name, so they can't collide with a component's own names.
 
 ### Generics, snippets and `{#await}`
@@ -337,7 +328,6 @@ function $$render<T>() {
   const empty = (): ReturnType<import("svelte").Snippet> => {
     async () => {
       {
-        const $$_el0 = svelteHTML.createElement("p", {});
       }
     };
     return $$check.any(0);
@@ -359,7 +349,6 @@ function $$render<T>() {
       {
         const n = await $$_p1;
         {
-          const $$_el2 = svelteHTML.createElement("span", {});
           n;
         }
       }
@@ -462,7 +451,7 @@ export default $$Component;
 If `items` in the first sample is `[1, 2]`, tsgo reports the error in the generated file:
 
 ```
-svelte/src/++Counter.svelte.ts(8,96): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
+svelte/src/++Counter.svelte.ts(8,47): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
 ```
 
 svelte-typecheck reports it in the component:
