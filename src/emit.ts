@@ -1339,6 +1339,31 @@ export function emit(
     }
     out.copy(at, to);
   };
+  // svelte2tsx widens a prop to `any` where a parent could pass what its
+  // default doesn't allow: with no default, a type, or a `true`/`false`
+  // default, which TypeScript narrows.
+  const widensProp = (decl: Node, gapStart: number) =>
+    decl.id.type === "Identifier" &&
+    (!decl.init ||
+      decl.id.typeAnnotation ||
+      [...source.slice(gapStart, decl.id.start).matchAll(JSDOC_BLOCK)].some(
+        (m) => JSDOC_TYPE.test(m[0]),
+      ) ||
+      (decl.init.type === "Literal" && typeof decl.init.value === "boolean"));
+  /** `let`s exported by name, `export { className as class }`: props too. */
+  const exportedLets = new Set<string>(
+    runes
+      ? []
+      : body.flatMap((s: Node) =>
+          s.type === "ExportNamedDeclaration" && !s.declaration
+            ? s.specifiers
+                .map((spec: Node) => spec.local.name)
+                .filter(
+                  (name: string) => scopes.instance.get(name)?.kind === "let",
+                )
+            : [],
+        ),
+  );
   if (instance) {
     let cursor = instance.content.start;
     for (const s of body) {
@@ -1378,20 +1403,7 @@ export function emit(
           out.copy(at, d.end);
           if (d.type === "VariableDeclaration" && d.kind === "let")
             for (const decl of d.declarations) {
-              // svelte2tsx widens a prop to `any` where a parent could pass
-              // what its default doesn't allow: with no default, a type, or
-              // a `true`/`false` default, which TypeScript narrows.
-              const widens =
-                decl.id.type === "Identifier" &&
-                (!decl.init ||
-                  decl.id.typeAnnotation ||
-                  [
-                    ...source
-                      .slice(gapStart, decl.id.start)
-                      .matchAll(JSDOC_BLOCK),
-                  ].some((m) => JSDOC_TYPE.test(m[0])) ||
-                  (decl.init.type === "Literal" &&
-                    typeof decl.init.value === "boolean"));
+              const widens = widensProp(decl, gapStart);
               for (const name of idsOf(decl.id)) {
                 props.push({
                   name,
@@ -1471,6 +1483,13 @@ export function emit(
             .raw("<$$check.Details<$$Events>>")
             .copy(call.callee.end, s.end);
         else out.copy(s.start, s.end);
+        // A `let` exported by name is widened as an `export let` is.
+        if (s.type === "VariableDeclaration" && s.kind === "let")
+          for (const decl of s.declarations)
+            if (exportedLets.has(decl.id.name) && widensProp(decl, gapStart))
+              out.raw(
+                `;${decl.id.name} = $$check.any(${decl.init ? decl.id.name : 0});`,
+              );
       }
       for (const name of storeAfter.get(s.end) ?? []) declareStore(name);
     }
