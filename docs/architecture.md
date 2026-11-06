@@ -39,7 +39,7 @@ tsbuildinfo                     the checker's build cache
 *.json                          svelte-typecheck's own caches
 ```
 
-The generated tsconfig lists its files instead of globbing them, in the order svelte-check's program has them: the components, the project's own TS and JS, then `shims.d.ts` and Svelte's `svelte-html.d.ts`. It sets `rootDirs: ["../../..", "svelte"]`, so `svelte/src/` is treated as the same folder as `src/` and a component's relative imports of `.ts` files still resolve. It also sets `allowArbitraryExtensions`, so `import Counter from "./Counter.svelte"` resolves to `Counter.d.svelte.ts`. That file re-exports `++Counter.svelte.ts`. `noEmit`, `composite: false` and its own `tsBuildInfoFile` keep the checker from writing anything of the project's.
+The generated tsconfig lists its files instead of globbing them, in the order svelte-check's program has them: the components, the project's own TS and JS, then `shims.d.ts` and Svelte's `svelte-html.d.ts`. It sets `rootDirs: ["../../..", "svelte"]`, so `svelte/src/` is treated as the same folder as `src/` and a component's relative imports of `.ts` files still resolve. It also sets `allowArbitraryExtensions`, so `import Counter from "./Counter.svelte"` resolves to `Counter.d.svelte.ts`. That file re-exports `++Counter.svelte.ts`. `noEmit`, `composite: false` and its own `tsBuildInfoFile` keep the checker from writing anything of the project's. It sets `contentMappers: []`, since the components are already TypeScript: a content mapper the project declares (TypeScript 7.1) would claim them again, and needs `--runExternalCode` to run at all.
 
 ### A runes component
 

@@ -216,6 +216,42 @@ describe("typecheck", () => {
     ).toEqual(["props.ts:2 TS2322", "util.js:2 TS2322"]);
   }, 30_000);
 
+  // TypeScript 7.1 runs a tsconfig's content mappers only with
+  // `--runExternalCode`, and errors without it; the generated code is
+  // already TypeScript, so the generated tsconfig turns them off.
+  it.each<Checker>(["bun", "tsrs", "tsgo", "tsc"])(
+    "checks a project whose tsconfig declares content mappers, with %s",
+    async (checker) => {
+      const dir = join(root, `tests/.tmp/content-mappers-${checker}`);
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: { strict: true },
+          include: ["*.svelte", "*.ts"],
+          contentMappers: [
+            { package: "@sveltejs/ts-content-mapper", extensions: [".svelte"] },
+          ],
+        }),
+      );
+      writeFileSync(
+        join(dir, "Box.svelte"),
+        '<script lang="ts">\n  let n: number = "one";\n</script>\n',
+      );
+      const { diagnostics } = await typecheck({
+        cwd: dir,
+        diagnosticSources: ["js"],
+        checker,
+        incremental: false,
+      });
+      expect(
+        diagnostics.map((d) => `${relative(dir, d.file)}:${d.line} ${d.code}`),
+      ).toEqual(["Box.svelte:2 TS2322"]);
+    },
+    30_000,
+  );
+
   it("reads a JSDoc cast in a template expression, as svelte-check does", async () => {
     const dir = join(root, "tests/.tmp/template-cast");
     rmSync(dir, { recursive: true, force: true });

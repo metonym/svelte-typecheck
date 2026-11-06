@@ -11,6 +11,12 @@
   `typescript` when that's 7. It looked only for
   `@typescript/native-preview`, which stopped at a 7.0 preview, so
   TypeScript 7.0 and 7.1 releases weren't found.
+- A project whose tsconfig declares `contentMappers`, such as
+  `@sveltejs/ts-content-mapper`, checks with TypeScript 7.1 and tsrs.
+  The checker reported "Content mappers require the
+  '--runExternalCode' command line flag" on the tsconfig in every run,
+  and the run failed. The generated tsconfig now turns content mappers
+  off, since the components it lists are already TypeScript.
 
 ## 0.1.11 — 2026-11-05
 
