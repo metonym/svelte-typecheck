@@ -11,7 +11,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { compare, onlyIn } from "./compare.ts";
+import { compare, onlyIn, onlyUnionOrder } from "./compare.ts";
 import { mutate } from "./mutate.ts";
 import { type Project, PROJECTS } from "./projects.ts";
 
@@ -106,25 +106,35 @@ function prepare(project: Project): string {
     );
   for (const [file, text] of Object.entries(project.files ?? {}))
     writeFileSync(join(dir, file), `${text}\n`);
-  for (const command of project.setup ?? [])
-    sh([...pm, "exec", ...command], dir);
+  for (const command of project.setup ?? []) sh([...pm, ...command], dir);
   return dir;
 }
 
-/** What's wrong with one comparison, if anything. */
 type Pass = "as it is" | "with errors planted";
 
+/**
+ * What's wrong with one comparison, if anything, and how many lines
+ * differed only in a union's order, a documented difference.
+ */
 function problems(
   project: Project,
   pass: Pass,
   expected: string[],
   actual: string[],
-): string[] {
+): { problems: string[]; unionOrder: number } {
   const only = onlyIn({ expected, actual });
+  // One line of each tool's that differ only in a union's order.
+  const unionOrder = new Set<string>();
+  for (const a of only.svelteCheck) {
+    const b = only.svelteTypecheck.find(
+      (line) => !unionOrder.has(line) && onlyUnionOrder(a, line),
+    );
+    if (b) unionOrder.add(a).add(b);
+  }
   const found = [
     ...only.svelteCheck.map((line) => ({ only: "svelte-check", line })),
     ...only.svelteTypecheck.map((line) => ({ only: "svelte-typecheck", line })),
-  ];
+  ].filter((f) => !unionOrder.has(f.line));
   const known = (project.known ?? []).filter((k) => (k.pass ?? pass) === pass);
   const isKnown = (f: { only: string; line: string }) =>
     known.some((k) => k.only === f.only && k.line === f.line);
@@ -138,7 +148,9 @@ function problems(
   if (out.length === 0) {
     const shared = (lines: string[], tool: string) =>
       lines.filter(
-        (line) => !known.some((k) => k.only === tool && k.line === line),
+        (line) =>
+          !unionOrder.has(line) &&
+          !known.some((k) => k.only === tool && k.line === line),
       );
     const a = shared(expected, "svelte-check");
     const b = shared(actual, "svelte-typecheck");
@@ -148,7 +160,7 @@ function problems(
         `the same lines in another order, from line ${at + 1}:\n    svelte-check:     ${a[at]}\n    svelte-typecheck: ${b[at]}`,
       );
   }
-  return out;
+  return { problems: out, unionOrder: unionOrder.size / 2 };
 }
 
 const names = process.argv.slice(2);
@@ -174,10 +186,17 @@ for (const project of chosen) {
     const start = performance.now();
     const { expected, actual } = compare(dir, project.args ?? []);
     const seconds = ((performance.now() - start) / 1000).toFixed(1);
-    const found = problems(project, pass, expected, actual);
+    const { problems: found, unionOrder } = problems(
+      project,
+      pass,
+      expected,
+      actual,
+    );
     const summary = expected.at(-1) ?? "svelte-check printed nothing";
+    const unions =
+      unionOrder > 0 ? `, ${unionOrder} differing only in union order` : "";
     console.log(
-      `${found.length === 0 ? "✓" : "✗"} ${project.name}, ${pass}: ${summary} (${seconds} s)`,
+      `${found.length === 0 ? "✓" : "✗"} ${project.name}, ${pass}: ${summary}${unions} (${seconds} s)`,
     );
     for (const problem of found.slice(0, 30)) console.log(`  ${problem}`);
     if (found.length > 30) console.log(`  …and ${found.length - 30} more`);
