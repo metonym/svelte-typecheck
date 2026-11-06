@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
@@ -245,7 +247,6 @@ export async function compileAll(
     shape &&
     request.components.every((c) => untouched(c.source, shape.preprocess))
   ) {
-    warmed.delete(configKey(request));
     return {
       shape,
       results: await Promise.all(
@@ -261,7 +262,7 @@ export async function compileAll(
       ),
     };
   }
-  const config = await loadConfig(request);
+  const config = await svelteConfigOf(request.configDir, request.configFile);
   // A component no preprocessor can change compiles as it is: Svelte's
   // `preprocess` would hand none of it to a hook, and parse it for nothing.
   const readers = readersOf(config.preprocess);
@@ -285,9 +286,10 @@ export async function compileAll(
 }
 
 interface Pending {
-  request: CompileRequest;
-  done: (result: CompileResult) => void;
+  done: (result: never) => void;
   fail: (error: Error) => void;
+  /** The job, run on this thread, when the worker can't run it. */
+  here: () => Promise<unknown>;
 }
 
 /**
@@ -297,6 +299,8 @@ interface Pending {
  */
 let worker: Worker | undefined;
 const pending = new Map<number, Pending>();
+/** Jobs that keep the worker referenced: those a run waits for. */
+const waitedFor = new Set<number>();
 let nextId = 0;
 
 function startWorker(): Worker {
@@ -305,14 +309,16 @@ function startWorker(): Worker {
     ? "compile-worker.ts"
     : "compile-worker.js";
   const started = new Worker(new URL(file, import.meta.url));
+  started.unref();
   started.on(
     "message",
-    (reply: { id: number; result?: CompileResult; error?: string }) => {
+    (reply: { id: number; result?: unknown; error?: string }) => {
       const job = pending.get(reply.id);
       if (!job) return;
       pending.delete(reply.id);
-      if (pending.size === 0) started.unref();
-      if (reply.result) job.done(reply.result);
+      waitedFor.delete(reply.id);
+      if (waitedFor.size === 0) started.unref();
+      if (reply.error === undefined) job.done(reply.result as never);
       else job.fail(new Error(reply.error));
     },
   );
@@ -322,11 +328,34 @@ function startWorker(): Worker {
     worker = undefined;
     const jobs = [...pending.values()];
     pending.clear();
-    for (const job of jobs) compileAll(job.request).then(job.done, job.fail);
+    waitedFor.clear();
+    for (const job of jobs) job.here().then(job.done as never, job.fail);
   };
   started.on("error", fallBack);
   started.on("exit", fallBack);
   return started;
+}
+
+/** Posts a job to the worker, which it keeps alive for once `wait` runs. */
+function post<T>(message: object, here: () => Promise<T>) {
+  const running = (worker ??= startWorker());
+  const id = nextId++;
+  const result = new Promise<T>((done, fail) => {
+    pending.set(id, { done: done as never, fail, here });
+    running.postMessage({ id, ...message });
+  });
+  // Unhandled until waited for: a rejection is the run's then.
+  result.catch(() => {});
+  return {
+    result,
+    wait(): Promise<T> {
+      if (pending.has(id)) {
+        waitedFor.add(id);
+        worker?.ref();
+      }
+      return result;
+    },
+  };
 }
 
 /**
@@ -340,67 +369,64 @@ export function compileOffThread(
 ): Promise<CompileResult> | undefined {
   if (configNeedsChdir(request.configDir, request.configFile)) return;
   try {
-    worker ??= startWorker();
+    return post({ request }, () => compileAll(request)).wait();
   } catch {
     return;
   }
-  const id = nextId++;
-  const running = worker;
-  return new Promise((done, fail) => {
-    pending.set(id, { request, done, fail });
-    running.ref();
-    running.postMessage({ id, request });
-  });
 }
 
-/** What finds a project's compiler and config, without components. */
-export type CompilerSource = Pick<
+/** What finds a project's compiler and config, and the files to compile. */
+export interface CompileFilesRequest extends Omit<
   CompileRequest,
-  "svelteDir" | "configDir" | "configFile"
->;
+  "components" | "shape"
+> {
+  files: { path: string; filename: string }[];
+}
 
-/**
- * Loads the compiler and the config, the config kept for the compile that
- * follows in this thread, which then neither waits for it nor loads it a
- * second time, which through Vite costs CPU again.
- */
-export async function warmCompiler(source: CompilerSource): Promise<void> {
-  compilerOf(source.svelteDir);
-  const config = svelteConfigOf(source.configDir, source.configFile);
-  warmed.set(configKey(source), config);
-  await config;
+export interface CompileFilesResult extends CompileResult {
+  /** `compileKey` of each file, as it was read and compiled. */
+  keys: string[];
+}
+
+/** What a compile's result is kept by: the component's name and text. */
+export const compileKey = (filename: string, source: string) =>
+  createHash("sha1").update(`${filename}\0${source}`).digest("hex");
+
+/** `compileAll` on files this reads. */
+export async function compileFiles(
+  request: CompileFilesRequest,
+): Promise<CompileFilesResult> {
+  const { files, ...source } = request;
+  const components = await Promise.all(
+    files.map(async ({ path, filename }) => ({
+      source: await readFile(path, "utf-8"),
+      filename,
+    })),
+  );
+  return {
+    ...(await compileAll({ ...source, components })),
+    keys: components.map((c) => compileKey(c.filename, c.source)),
+  };
 }
 
 /**
- * Configs `warmCompiler` loaded, each for the one compile that follows it:
- * a later run loads its own, as the config may have changed.
+ * `compileFiles` on the worker, for a run that compiles every component:
+ * it starts as soon as the components are found, while this thread reads
+ * them, generates code and starts the checker. The worker is referenced
+ * for it only once the run waits for it, so a run that ends first doesn't
+ * wait. `undefined` as for `compileOffThread`.
  */
-const warmed = new Map<string, Promise<SvelteConfig>>();
-const configKey = (source: CompilerSource) =>
-  `${source.configDir}\0${source.configFile ?? ""}`;
-
-function loadConfig(source: CompilerSource): Promise<SvelteConfig> {
-  const key = configKey(source);
-  const config = warmed.get(key);
-  warmed.delete(key);
-  return config ?? svelteConfigOf(source.configDir, source.configFile);
-}
-
-/**
- * Starts the worker loading the compiler and the config while this thread
- * finds and reads the components, for a run that will compile many: the
- * compile request that follows then doesn't wait for them. The worker
- * stays unreferenced for it, so a run that ends first doesn't wait.
- */
-export function warmOffThread(source: CompilerSource): void {
-  if (configNeedsChdir(source.configDir, source.configFile)) return;
+export function compileFilesOffThread(request: CompileFilesRequest):
+  | {
+      wait: () => Promise<CompileFilesResult>;
+    }
+  | undefined {
+  if (configNeedsChdir(request.configDir, request.configFile)) return;
   try {
-    worker ??= startWorker();
+    return post({ files: request }, () => compileFiles(request));
   } catch {
     return;
   }
-  if (pending.size === 0) worker.unref();
-  worker.postMessage({ warm: source });
 }
 
 const TEXT_TYPE = /^text\//;

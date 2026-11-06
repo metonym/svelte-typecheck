@@ -4,10 +4,11 @@ import { createRequire } from "node:module";
 import { join } from "node:path";
 import {
   compileAll,
+  compileFilesOffThread,
+  compileKey,
   compileOffThread,
   compilerDiagnostics,
   svelteDirOf,
-  warmOffThread,
 } from "../src/compiler.ts";
 import { configNeedsChdir } from "../src/config.ts";
 
@@ -190,26 +191,39 @@ describe("compileAll without the hooks a component doesn't reach", () => {
   });
 });
 
-describe("warmOffThread", () => {
-  it("starts the worker on the config, then compiles with it", async () => {
-    const configDir = join(root, "tests/.tmp/compile-warm");
+describe("compileFilesOffThread", () => {
+  it("compiles the files it reads on the worker, as here", async () => {
+    const configDir = join(root, "tests/.tmp/compile-files");
     await rm(configDir, { recursive: true, force: true });
     await mkdir(configDir, { recursive: true });
+    // Records the thread that loads it.
     await writeFile(
       join(configDir, "svelte.config.js"),
-      'import { appendFileSync } from "node:fs";\nimport { isMainThread } from "node:worker_threads";\nappendFileSync(new URL("./loads", import.meta.url), isMainThread ? "main\\n" : "worker\\n");\nexport default {};\n',
+      'import { writeFileSync } from "node:fs";\nimport { isMainThread } from "node:worker_threads";\nwriteFileSync(new URL("./thread", import.meta.url), isMainThread ? "main" : "worker");\nexport default {};\n',
     );
-    const source = { svelteDir: svelteDirOf(root), configDir };
-    warmOffThread(source);
-    const component = { source: '<img src="a.png">\n', filename: "Img.svelte" };
-    const compiled = await compileOffThread({
-      ...source,
-      components: [component],
-    });
+    const source = '<img src="a.png">\n';
+    await writeFile(join(configDir, "Img.svelte"), source);
+    const request = {
+      svelteDir: svelteDirOf(root),
+      configDir,
+      files: [{ path: join(configDir, "Img.svelte"), filename: "Img.svelte" }],
+    };
+    const compiled = await compileFilesOffThread(request)?.wait();
     expect(compiled?.results[0]?.map((d) => d.code)).toEqual([
       "a11y_missing_attribute",
     ]);
-    expect(await readFile(join(configDir, "loads"), "utf-8")).toBe("worker\n");
+    // The key the run keeps the result by: the text it read.
+    expect(compiled?.keys).toEqual([compileKey("Img.svelte", source)]);
+    expect(await readFile(join(configDir, "thread"), "utf-8")).toBe("worker");
+    const { files, ...rest } = request;
+    expect(compiled?.results).toEqual(
+      (
+        await compileAll({
+          ...rest,
+          components: files.map((f) => ({ ...f, source })),
+        })
+      ).results,
+    );
   }, 30_000);
 });
 
