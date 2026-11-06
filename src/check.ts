@@ -1045,6 +1045,10 @@ export async function typecheck(
             ...(svelteMajor >= 5 ? [join(svelteDir, "types/index.d.ts")] : []),
           ].map(rel),
           include: [],
+          // The components are already TypeScript here. A content mapper
+          // (TypeScript 7.1) the project's tsconfig declares would claim
+          // them again, and needs `--runExternalCode` to run at all.
+          contentMappers: [],
         },
         null,
         2,
