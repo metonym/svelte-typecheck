@@ -37,6 +37,7 @@ export default defineConfig({
   edges: {
     "tests/baseline.test.ts": "src/cli.ts",
     "tests/compile-cache.test.ts": "src/cli.ts",
+    "tests/daemon.test.ts": "src/cli.ts",
     // The compiler's pass runs this on a worker thread.
     "src/compiler.ts": "src/compile-worker.ts",
     "tests/parity.test.ts": "src/cli.ts",
@@ -53,6 +54,7 @@ export default defineConfig({
     "src/shims.ts": "src/shims/**",
     "tests/baseline.test.ts": fixtures,
     "tests/changed.test.ts": fixtures,
+    "tests/daemon.test.ts": fixtures,
     "tests/checker.test.ts": fixtures,
     "tests/compile-cache.test.ts": [
       "tests/fixtures/Warnings.svelte",

@@ -3,6 +3,7 @@ import { resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { applyBaseline, createBaseline } from "./baseline.ts";
 import { EmitError, typecheck } from "./check.ts";
+import { serveDaemon } from "./daemon.ts";
 import {
   colors,
   OUTPUT_FORMATS,
@@ -71,11 +72,25 @@ svelte-typecheck's own:
   --update-baseline         Write the run's diagnostics to the baseline
   --strict-baseline         Exit 1 when the baseline has fixed diagnostics,
                             so it only goes down
+  --daemon                  Run on a process kept alive for this folder,
+                            started if none runs (SVELTE_TYPECHECK_DAEMON=1
+                            for every run; not on CI or with --watch)
+  --no-daemon               Run here, whatever SVELTE_TYPECHECK_DAEMON says
+
+The daemon:
+  svelte-typecheck start    Start it for this folder
+  svelte-typecheck stop     Stop it
+  svelte-typecheck status   Show whether it runs, and its log
 
 Exits 1 on an error, or a warning with --fail-on-warnings.`;
 
 /** Runs the CLI and returns its exit code. */
 export async function main(argv: string[]): Promise<0 | 1> {
+  // A daemon `cli.ts` started for `--daemon`, serving runs.
+  if (argv[0] === "--serve-daemon" && argv[1]) {
+    await serveDaemon(argv[1], main);
+    return new Promise(() => {});
+  }
   let values: ReturnType<typeof parse>["values"];
   try {
     values = parse(argv).values;
@@ -260,6 +275,9 @@ function parse(argv: string[]) {
       "update-baseline": { type: "boolean", default: false },
       "strict-baseline": { type: "boolean", default: false },
       since: { type: "string" },
+      // `cli.ts`'s, which hands the run to a daemon.
+      daemon: { type: "boolean", default: false },
+      "no-daemon": { type: "boolean", default: false },
       help: { type: "boolean", short: "h", default: false },
       version: { type: "boolean", short: "v", default: false },
     },
