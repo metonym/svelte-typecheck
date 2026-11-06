@@ -25,5 +25,11 @@
     "ostia.config.ts",
     "bivium.config.ts"
   ],
-  "exclude": ["tests/projects", "src/shims", "bench/corpus", "bench/scale"]
+  "exclude": [
+    "tests/projects",
+    "src/shims",
+    "bench/corpus",
+    "bench/scale",
+    "eval/.projects"
+  ]
 }
