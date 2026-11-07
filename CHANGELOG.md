@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- A "Cannot find module" error goes once the module is created. An
+  incremental run with that error kept its result, which no file it
+  stats changes when a missing file appears, so later runs reported it
+  until the cache was deleted: a generated JSON file, say, that a run
+  before the build couldn't find.
+
 ## 0.1.12 — 2026-11-06
 
 **Fixes**

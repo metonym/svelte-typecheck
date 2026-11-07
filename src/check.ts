@@ -82,6 +82,11 @@ const TOKEN = /^(?:[\w$]+|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`]*`)/;
 const STORE_ERROR = /^TS(2769|2345)$/;
 /** Unused label, and an unused comma operand. */
 const REACTIVE_NOISE = /^TS(7028|2695)$/;
+/**
+ * "Cannot find module": an import that resolved to nothing, whose file
+ * can appear where no input the result cache keys on changes.
+ */
+const UNRESOLVED_MODULE = /^TS(2307|2732|2792)$/;
 
 /** The caches' shape, in each one's key: a new shape misses the old. */
 const CACHE_FORMAT = 2;
@@ -1469,7 +1474,11 @@ export async function typecheck(
     .filter((path) => !under(path, outDir))
     .flatMap((path) => [path, ...declarationsBeside(path)]);
   if (incremental) await fileFacts.save();
-  if (incremental)
+  // A result with an import that resolved to nothing isn't kept: the file
+  // it names can appear anywhere resolution looks, which nothing here stats.
+  if (incremental && diagnostics.some((d) => UNRESOLVED_MODULE.test(d.code)))
+    await rm(resultPath, { force: true });
+  else if (incremental)
     await writeFile(
       resultPath,
       JSON.stringify({
