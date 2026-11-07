@@ -180,6 +180,37 @@ describe("incremental, with nothing changed", () => {
     await rm(dts);
     expect((await run()).diagnostics).toEqual([]);
   }, 30_000);
+
+  it("checks again once a module an import didn't find appears", async () => {
+    const dir = await workspace("replay-missing-module");
+    const outDir = join(
+      root,
+      "node_modules/.cache/svelte-typecheck/test-replay-missing-module",
+    );
+    await rm(outDir, { recursive: true, force: true });
+    const tsconfig = JSON.parse(
+      await readFile(join(dir, "tsconfig.json"), "utf-8"),
+    );
+    await writeFile(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({
+        ...tsconfig,
+        compilerOptions: {
+          ...tsconfig.compilerOptions,
+          resolveJsonModule: true,
+        },
+      }),
+    );
+    // A JSON file a build generates, which no `include` glob lists.
+    await writeFile(
+      join(dir, "Data.svelte"),
+      '<script lang="ts">\n  import data from "./data.json";\n</script>\n\n<p>{data.name}</p>\n',
+    );
+    const run = () => typecheck({ cwd: svelte5, workspace: dir, outDir });
+    expect((await run()).diagnostics.map((d) => d.code)).toEqual(["TS2307"]);
+    await writeFile(join(dir, "data.json"), '{ "name": "x" }\n');
+    expect((await run()).diagnostics).toEqual([]);
+  }, 30_000);
 });
 
 describe("the project's own build info", () => {
