@@ -15,6 +15,9 @@
 - A checker that exits with an error and reports none fails the run
   and prints its output. Before, the run passed, and incremental mode
   cached the result.
+- An error in `generics`, such as a constraint that names a type the
+  component declares in its script, is reported where it's written.
+  The generated code didn't map that text, so the error was dropped.
 
 ## 0.1.13 — 2026-11-06
 

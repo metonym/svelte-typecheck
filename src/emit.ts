@@ -89,19 +89,32 @@ export interface EmitOptions {
 
 /** `T extends A = B, U` as its parameters, top-level commas only. */
 function genericParams(generics: string): string[] {
-  const params: string[] = [];
+  return genericSpans(generics).map(([start, end]) =>
+    generics.slice(start, end),
+  );
+}
+
+/** Where each of `genericParams`' parameters starts and ends in `generics`. */
+function genericSpans(generics: string): [number, number][] {
+  const spans: [number, number][] = [];
   let depth = 0;
-  let current = "";
-  for (const c of generics) {
+  let start = 0;
+  const push = (end: number) => {
+    const text = generics.slice(start, end);
+    const from = start + text.length - text.trimStart().length;
+    const to = start + text.trimEnd().length;
+    if (to > from) spans.push([from, to]);
+  };
+  for (const [i, c] of [...generics].entries()) {
     if ("<([{".includes(c)) depth++;
     if (">)]}".includes(c)) depth--;
     if (c === "," && depth === 0) {
-      params.push(current);
-      current = "";
-    } else current += c;
+      push(i);
+      start = i + 1;
+    }
   }
-  params.push(current);
-  return params.map((p) => p.trim()).filter(Boolean);
+  push(generics.length);
+  return spans;
 }
 
 /** `generics="T extends A = B, U"` as JSDoc: `@template {A} [T=B]`, `@template U`. */
@@ -438,6 +451,12 @@ export function emit(
   const templateBlocks: [number, number][] = [];
   /** The component's type parameters, in TS: `generics="…"` and `$$Generic`. */
   const typeParams: string[] = [];
+  /**
+   * Writes each type parameter, its source text mapped, so an error in
+   * one (a constraint naming a missing type) is reported where it's
+   * written. Only `$$render` uses it, so each error is reported once.
+   */
+  const typeParamWriters: (() => void)[] = [];
   /** `type T = $$Generic<C>` statements, which become type parameters. */
   const genericAliases = new Set<Node>();
   if (instance && isTs)
@@ -452,6 +471,9 @@ export function emit(
           ? `${s.id.name} extends ${source.slice(arg.start, arg.end)}`
           : s.id.name,
       );
+      // Unmapped: svelte-check reports no error in a `$$Generic` constraint.
+      const param = typeParams[typeParams.length - 1] ?? "";
+      typeParamWriters.push(() => out.raw(param));
     }
   let generics = "";
   /** In JS, the component's `@template` tags, written right above `$$render`. */
@@ -459,8 +481,29 @@ export function emit(
   if (instance) {
     const tags: string[] = [];
     const attr = instance.attributes.find((a: Node) => a.name === "generics");
-    if (attr && isTs) typeParams.unshift(...genericParams(textOf(attr)));
-    else if (attr) tags.push(...jsdocTemplates(textOf(attr)));
+    if (attr && isTs) {
+      const text = textOf(attr);
+      const spans = genericSpans(text);
+      typeParams.unshift(
+        ...spans.map(([start, end]) => text.slice(start, end)),
+      );
+      const value = Array.isArray(attr.value) ? attr.value[0] : attr.value;
+      // Mapped only when the value is the source text as written: no
+      // entity like `&gt;` decoded.
+      const base =
+        value && source.slice(value.start, value.end) === text
+          ? value.start
+          : undefined;
+      typeParamWriters.unshift(
+        ...spans.map(
+          ([start, end]) =>
+            () =>
+              base === undefined
+                ? out.raw(text.slice(start, end))
+                : out.copy(base + start, base + end),
+        ),
+      );
+    } else if (attr) tags.push(...jsdocTemplates(textOf(attr)));
     const text = source.slice(instance.content.start, instance.content.end);
     for (const m of text.matchAll(JSDOC_BLOCK)) {
       const start = instance.content.start + (m.index ?? 0);
@@ -1192,10 +1235,19 @@ export function emit(
     : LEGACY_NAMES.flatMap(([used, declaration]) =>
         used.test(source) ? [`${declaration} `] : [],
       ).join("");
+  out.raw(`${async}function $$render`);
+  if (typeParamWriters.length > 0) {
+    out.raw("<");
+    for (const [i, write] of typeParamWriters.entries()) {
+      if (i > 0) out.raw(", ");
+      write();
+    }
+    out.raw(">");
+  }
   out.raw(
     runes
-      ? `${async}function $$render${generics}() { `
-      : `${async}function $$render${generics}() { ${legacyLets}${typed.has("$$Slots") ? "const $$slot = $$check.slots<$$Slots>(); " : ""}`,
+      ? "() { "
+      : `() { ${legacyLets}${typed.has("$$Slots") ? "const $$slot = $$check.slots<$$Slots>(); " : ""}`,
   );
   for (const name of storeAtStart) declareStore(name);
   out.raw("\n");
