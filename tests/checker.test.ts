@@ -187,6 +187,35 @@ describe("typecheck", () => {
     expect(result.checkerVersion).toBe("9.9.9");
   }, 30_000);
 
+  it("fails when the checker exits with an error and reports none", async () => {
+    const dir = join(svelte5, ".tmp/failing-typescript");
+    const pkg = join(dir, "node_modules/typescript");
+    mkdirSync(join(pkg, "bin"), { recursive: true });
+    writeFileSync(
+      join(pkg, "package.json"),
+      JSON.stringify({
+        name: "typescript",
+        version: "9.9.9",
+        bin: { tsc: "./bin/tsc" },
+      }),
+    );
+    writeFileSync(
+      join(pkg, "bin/tsc"),
+      "#!/usr/bin/env node\nconsole.error(\"Module not found 'check'\");\nprocess.exit(1);\n",
+    );
+    writeFileSync(join(dir, "tsconfig.json"), "{}");
+    expect(
+      typecheck({
+        cwd: svelte5,
+        workspace: dir,
+        outDir: "node_modules/.cache/svelte-typecheck/test-failing-typescript",
+        checker: "tsc",
+      }),
+    ).rejects.toThrow(
+      "The tsc checker exited with code 1 and reported no errors:\nModule not found 'check'",
+    );
+  }, 30_000);
+
   it("defaults to the project's TypeScript", async () => {
     const result = await typecheck({
       cwd: svelte5,
