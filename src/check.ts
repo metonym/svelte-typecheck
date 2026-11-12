@@ -30,7 +30,7 @@ import {
   svelteDirOf,
   withEdits,
 } from "./compiler.ts";
-import { configFingerprint } from "./config.ts";
+import { configFingerprint, realPath } from "./config.ts";
 import type { emit } from "./emit.ts";
 import { glob } from "./glob.ts";
 import { createLocator, type Output } from "./output.ts";
@@ -425,7 +425,9 @@ function commonDir(paths: string[]): string {
 export async function typecheck(
   options: TypecheckOptions = {},
 ): Promise<TypecheckResult> {
-  const cwd = resolve(options.cwd ?? process.cwd());
+  // A checker reports real paths, so `cwd` names the folder by its real path
+  // too, symlinks or not (macOS's `/tmp` is `/private/tmp`).
+  const cwd = realPath(resolve(options.cwd ?? process.cwd()));
   const workspace = resolve(cwd, options.workspace ?? ".");
   const project = projectOf({
     workspace,
@@ -1064,8 +1066,11 @@ export async function typecheck(
     );
     write(join(outDir, MANIFEST), JSON.stringify([...written].sort()));
     // Code for a component that's gone, which an import could still find.
+    // A manifest from before `cwd` was resolved can name this run's files
+    // by another path.
     for (const path of previous)
-      if (!written.has(path)) writes.push(rm(path, { force: true }));
+      if (!written.has(path) && !written.has(realPath(path)))
+        writes.push(rm(path, { force: true }));
   }
   await Promise.all(writes);
   // The caches go here, generated code or not.

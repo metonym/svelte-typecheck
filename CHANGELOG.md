@@ -18,6 +18,11 @@
 - An error in `generics`, such as a constraint that names a type the
   component declares in its script, is reported where it's written.
   The generated code didn't map that text, so the error was dropped.
+- `typecheck({ cwd })` with a `cwd` that goes through a symlink, such
+  as macOS's `/tmp`, reports errors in the `.svelte` files. Before, it
+  reported them in the generated code. An incremental run after a run
+  with the real path also deleted its own `tsconfig.json`, so the
+  checker failed with TS5058. The CLI was not affected.
 
 ## 0.1.13 — 2026-11-06
 
