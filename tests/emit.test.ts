@@ -61,6 +61,23 @@ describe("emit", () => {
     expect(out.code).not.toContain("$$render<");
   });
 
+  it("passes a `const` type parameter by its name alone", () => {
+    const { out } = emit(
+      `<script lang="ts" generics="const T extends readonly string[]">\n  let { items }: { items: T } = $props();\n</script>\n`,
+    );
+    expect(out.code).toContain(
+      "class $$Render<const T extends readonly string[]>",
+    );
+    expect(out.code).toContain("ReturnType<typeof $$render<T>>");
+  });
+
+  it("keeps a `const` type parameter in a JS component's JSDoc", () => {
+    const { out } = emit(
+      `<script generics="const T extends string[] = string[]">\n  export let items = undefined;\n</script>\n`,
+    );
+    expect(out.code).toContain(" * @template {string[]} [const T=string[]]");
+  });
+
   it("types a Svelte 3 component as a class, without a `children` prop", () => {
     const source = `<script>\n  import Box from "./Box.svelte";\n</script>\n\n<Box>x</Box>\n`;
     const svelte3 = emit(source, { svelte: 3 }).out.code;

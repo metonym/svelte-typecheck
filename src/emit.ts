@@ -24,7 +24,7 @@ import { Output } from "./output.ts";
  * declared in `shims.d.ts`, and `svelteHTML` in svelte's `svelte-html.d.ts`.
  */
 const GENERIC_PARAM =
-  /^(\w+)(?:\s+extends\s+([\s\S]+?))?(?:\s*=\s*([\s\S]+))?$/;
+  /^(const\s+)?(\w+)(?:\s+extends\s+([\s\S]+?))?(?:\s*=\s*([\s\S]+))?$/;
 const TS_LANG = /^(ts|typescript)$/;
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 const OWNS_TEMPLATE = /@(typedef|callback)\b/;
@@ -109,8 +109,8 @@ function jsdocTemplates(generics: string) {
   return genericParams(generics).map((p) => {
     const m = p.match(GENERIC_PARAM);
     if (!m) return ` * @template ${p}`;
-    const [, name, constraint, fallback] = m;
-    return ` * @template ${constraint ? `{${constraint}} ` : ""}${fallback ? `[${name}=${fallback}]` : name}`;
+    const [, modifier = "", name, constraint, fallback] = m;
+    return ` * @template ${constraint ? `{${constraint}} ` : ""}${fallback ? `[${modifier}${name}=${fallback}]` : `${modifier}${name}`}`;
   });
 }
 
@@ -1655,7 +1655,7 @@ export function emit(
   };
   if (isTs && typeParams.length > 0 && svelte >= 4) {
     // A generic component's type takes the parameters a use infers.
-    const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[1] ?? p);
+    const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[2] ?? p);
     const args = `<${names.join(", ")}>`;
     const rendered = topLevelAwait
       ? `Awaited<ReturnType<typeof $$render${args}>>`
@@ -1731,7 +1731,7 @@ export function emit(
       `return { props: ${runesProps ?? none}, exports: ${exported}, bindings: ${bindable}, slots: {}, events: {} };\n}\n`,
     );
     if (isTs && typeParams.length > 0) {
-      const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[1] ?? p);
+      const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[2] ?? p);
       const args = `<${names.join(", ")}>`;
       const part = (name: string) => `ReturnType<$$Render${args}["${name}"]>`;
       const renderType = topLevelAwait
