@@ -1,7 +1,8 @@
 // Checks each project in eval/projects.ts with svelte-check and
 // svelte-typecheck, as it is and with errors planted (eval/mutate.ts),
 // and fails on any line only one of them prints that isn't a known
-// difference, or on the same lines in another order.
+// difference, on the same lines in another order, or on an error
+// svelte-typecheck dropped that isn't a known one.
 //
 //   bun eval/parity.ts [name...]
 //
@@ -11,7 +12,7 @@
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { compare, onlyIn, onlyUnionOrder } from "./compare.ts";
+import { compare, droppedOf, onlyIn, onlyUnionOrder } from "./compare.ts";
 import { mutate } from "./mutate.ts";
 import { type Project, PROJECTS } from "./projects.ts";
 
@@ -113,6 +114,29 @@ function prepare(project: Project): string {
 type Pass = "as it is" | "with errors planted";
 
 /**
+ * The dropped errors that aren't known, and the known ones no longer
+ * dropped. A dropped error is one svelte-typecheck found but couldn't
+ * place in a component: a source map gap hides real errors this way.
+ */
+function droppedProblems(
+  project: Project,
+  pass: Pass,
+  dropped: string[],
+): string[] {
+  const known = (project.dropped ?? []).filter(
+    (k) => (k.pass ?? pass) === pass,
+  );
+  return [
+    ...dropped
+      .filter((line) => !known.some((k) => k.line === line))
+      .map((line) => `dropped: ${line}`),
+    ...known
+      .filter((k) => !dropped.includes(k.line))
+      .map((k) => `known, but no longer dropped: ${k.line}`),
+  ];
+}
+
+/**
  * What's wrong with one comparison, if anything, and how many lines
  * differed only in a union's order, a documented difference.
  */
@@ -186,12 +210,21 @@ for (const project of chosen) {
     const start = performance.now();
     const { expected, actual } = compare(dir, project.args ?? []);
     const seconds = ((performance.now() - start) / 1000).toFixed(1);
-    const { problems: found, unionOrder } = problems(
+    const { problems: differences, unionOrder } = problems(
       project,
       pass,
       expected,
       actual,
     );
+    const found = [
+      ...differences,
+      ...droppedProblems(
+        project,
+        pass,
+        // eslint-disable-next-line eslint/no-await-in-loop -- after this pass's run
+        await droppedOf(dir, project.args ?? []),
+      ),
+    ];
     const summary = expected.at(-1) ?? "svelte-check printed nothing";
     const unions =
       unionOrder > 0 ? `, ${unionOrder} differing only in union order` : "";
