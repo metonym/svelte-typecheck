@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- A `const` type parameter in `generics`, as in
+  `generics="const T extends readonly string[]"`, checks as
+  svelte-check checks it. The generated code passed the whole
+  parameter as a type argument, which doesn't parse, so the run failed.
+
 ## 0.1.13 — 2026-11-06
 
 **Fixes**
