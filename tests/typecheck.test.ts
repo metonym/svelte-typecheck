@@ -89,6 +89,38 @@ describe("typecheck", () => {
     30_000,
   );
 
+  // A checker reports real paths, and the last run's manifest lists them.
+  // A `cwd` through a symlink (macOS's `/tmp`) must name the same files.
+  it.each<Checker>(["bun", "tsrs", "tsgo", "tsc"])(
+    "reports them when cwd names the folder through a symlink, with %s",
+    async (checker) => {
+      const link = join(svelte5, `.tmp/cwd-link-${checker}`);
+      mkdirSync(join(svelte5, ".tmp"), { recursive: true });
+      rmSync(link, { force: true });
+      symlinkSync(svelte5, link);
+      const outDir = `node_modules/.cache/svelte-typecheck/test-cwd-link-${checker}`;
+      rmSync(join(svelte5, outDir), { recursive: true, force: true });
+      const run = async (cwd: string) =>
+        (
+          await typecheck({ cwd, workspace: "basic", checker, outDir })
+        ).diagnostics
+          .filter((d) => d.source !== "svelte")
+          .map(
+            (d) => `${relative(basic, d.file)}:${d.line}:${d.column} ${d.code}`,
+          );
+      expect(await run(svelte5)).toEqual(EXPECTED);
+      // A new component, so the next run can't reuse the last result.
+      const extra = join(basic, `Extra-${checker}.svelte`);
+      writeFileSync(extra, "<p>extra</p>\n");
+      try {
+        expect(await run(link)).toEqual(EXPECTED);
+      } finally {
+        rmSync(extra, { force: true });
+      }
+    },
+    30_000,
+  );
+
   it("reports them on Svelte 3, with its element types from the shims", async () => {
     const result = await typecheck({
       cwd: svelte5,
