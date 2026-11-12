@@ -72,6 +72,7 @@ export default defineConfig({
       "tests/projects/kit/{package.json,vite.config.ts}",
     ],
     "tests/parity.test.ts": "tests/projects/**",
+    "tests/dropped.test.ts": "tests/projects/**",
     "tests/typecheck.test.ts": [
       fixtures,
       "tests/projects/{preprocess/**,svelte3/package.json,svelte4/package.json}",

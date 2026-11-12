@@ -113,25 +113,7 @@ export async function main(argv: string[]): Promise<0 | 1> {
     (text) => process.stdout.write(text),
     colors(colorFlag(values.color, values["no-color"])),
   );
-  const options: TypecheckOptions = {
-    workspace: values.workspace ?? ".",
-    tsconfig: values["no-tsconfig"] ? false : values.tsconfig,
-    ignore: values.ignore?.split(","),
-    config: values.config,
-    checker: (values.checker ??
-      (values.tsgo || values["tsgo-experimental-api"] ? "tsgo" : undefined)) as
-      Checker | undefined,
-    components: values.components,
-    outDir: values["out-dir"],
-    declarations: !values["no-declarations"],
-    svelte: values.svelte,
-    diagnosticSources: values["diagnostic-sources"]
-      ?.split(",")
-      .map((source) => source.trim()) as DiagnosticSource[] | undefined,
-    compilerWarnings: parseCompilerWarnings(values["compiler-warnings"]),
-    // On unless `--no-incremental`; `--incremental` is svelte-check's flag.
-    incremental: !values["no-incremental"],
-  };
+  const options = optionsOf(values);
   if (values.changed || values.since) {
     try {
       options.only = changedFiles(process.cwd(), values.since);
@@ -233,6 +215,36 @@ export async function main(argv: string[]): Promise<0 | 1> {
   } catch (error) {
     return report(error as Error, false);
   }
+}
+
+/** The run's options from parsed flags, as the CLI passes them to `typecheck`. */
+function optionsOf(
+  values: ReturnType<typeof parse>["values"],
+): TypecheckOptions {
+  return {
+    workspace: values.workspace ?? ".",
+    tsconfig: values["no-tsconfig"] ? false : values.tsconfig,
+    ignore: values.ignore?.split(","),
+    config: values.config,
+    checker: (values.checker ??
+      (values.tsgo || values["tsgo-experimental-api"] ? "tsgo" : undefined)) as
+      Checker | undefined,
+    components: values.components,
+    outDir: values["out-dir"],
+    declarations: !values["no-declarations"],
+    svelte: values.svelte,
+    diagnosticSources: values["diagnostic-sources"]
+      ?.split(",")
+      .map((source) => source.trim()) as DiagnosticSource[] | undefined,
+    compilerWarnings: parseCompilerWarnings(values["compiler-warnings"]),
+    // On unless `--no-incremental`; `--incremental` is svelte-check's flag.
+    incremental: !values["no-incremental"],
+  };
+}
+
+/** The options the CLI runs with for `argv`: the parity eval runs the same check. */
+export function cliOptions(argv: string[]): TypecheckOptions {
+  return optionsOf(parse(argv).values);
 }
 
 /** svelte-check's default: human-verbose, or machine in Claude Code. */

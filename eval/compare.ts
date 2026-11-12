@@ -3,8 +3,11 @@
 // project's own when it has one: another install loads a second copy of
 // Svelte's types, which reports false errors.
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { typecheck } from "../src/check.ts";
+import { cliOptions } from "../src/main.ts";
+import { unprinted } from "../tests/unprinted.ts";
 
 const ROOT = join(import.meta.dirname, "..");
 const TIMESTAMP = /^\d+ /;
@@ -61,6 +64,15 @@ export function compare(projectPath: string, args: string[]): Comparison {
       project,
     ),
   };
+}
+
+/** {@link unprinted} for the CLI run with `args`, read from the cache it saved. */
+export async function droppedOf(
+  projectPath: string,
+  args: string[],
+): Promise<string[]> {
+  const cwd = realpathSync(resolve(projectPath));
+  return unprinted(cwd, await typecheck({ ...cliOptions(args), cwd }));
 }
 
 /** The lines only one tool printed, each as often as it printed it more. */
