@@ -8,6 +8,10 @@
   `generics="const T extends readonly string[]"`, checks as
   svelte-check checks it. The generated code passed the whole
   parameter as a type argument, which doesn't parse, so the run failed.
+- `--checker bun` checks under `bun --bun` and `[run] bun = true`.
+  There, a package bin runs on Bun named `node`, which ran `check` as
+  a script, so the run found no errors and passed. It now runs `bun`
+  from `PATH`.
 
 ## 0.1.13 — 2026-11-06
 
