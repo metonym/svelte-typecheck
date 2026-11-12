@@ -37,6 +37,22 @@ export interface CheckerCommand {
 }
 
 const WINDOWS_SHIM = /\.(cmd|bat)$/i;
+/** A path whose file is `bun` or `bun.exe`, with either separator. */
+const BUN_BINARY = /(^|[\\/])bun(\.exe)?$/i;
+
+/**
+ * The Bun binary, when the run is on Bun under that name. A package bin
+ * run with `--bun` (or `[run] bun = true`) runs on Bun under the name
+ * `node`, so its `#!/usr/bin/env node` shebang finds it, and Bun under
+ * that name runs as Node: `node check` looks for a script named `check`.
+ * On Windows, its path is a `bun-node-*\\node.exe` copy, not `bun.exe`.
+ */
+export function runtimeBun(
+  execPath: string,
+  version: string | undefined,
+): string | undefined {
+  return version && BUN_BINARY.test(execPath) ? execPath : undefined;
+}
 
 /**
  * A command on `PATH`. On Windows, a command is `name` plus one of
@@ -82,7 +98,8 @@ export function checkerCommand(
   cwd: string,
 ): CheckerCommand | undefined {
   if (checker === "bun") {
-    const bun = process.versions.bun ? process.execPath : onPath("bun");
+    const bun =
+      runtimeBun(process.execPath, process.versions.bun) ?? onPath("bun");
     return bun
       ? { command: bun, prefix: [], version: process.versions.bun }
       : undefined;

@@ -3,7 +3,12 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { typecheck } from "../src/check.ts";
-import { checkerCommand, nativeCommand, onPath } from "../src/checker.ts";
+import {
+  checkerCommand,
+  nativeCommand,
+  onPath,
+  runtimeBun,
+} from "../src/checker.ts";
 
 const root = join(import.meta.dir, "..");
 /** The project with every checker installed. */
@@ -135,6 +140,25 @@ describe("onPath", () => {
       process.env.PATH = PATH;
       process.env.PATHEXT = PATHEXT;
     }
+  });
+});
+
+describe("runtimeBun", () => {
+  it("is the runtime's binary when it's named bun", () => {
+    expect(runtimeBun("/home/a/.bun/bin/bun", "1.4.4")).toBe(
+      "/home/a/.bun/bin/bun",
+    );
+    expect(runtimeBun("C:\\bun\\bun.exe", "1.4.4")).toBe("C:\\bun\\bun.exe");
+  });
+
+  // `--bun` runs a package bin on Bun under the name node, which runs
+  // `check` as a script.
+  it("isn't Bun under the name node, or Node", () => {
+    expect(runtimeBun("/tmp/bun-node-38afee6c8/node", "1.4.4")).toBeUndefined();
+    expect(
+      runtimeBun("C:\\Temp\\bun-node-38afee6c8\\node.exe", "1.4.4"),
+    ).toBeUndefined();
+    expect(runtimeBun("/usr/bin/bun", undefined)).toBeUndefined();
   });
 });
 
