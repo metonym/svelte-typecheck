@@ -1623,7 +1623,10 @@ export function emit(
           p.type ?? `typeof ${p.local}`,
         ])
       : []),
-    ...exportsOf.map(([k, v]): [string, string] => [k, `typeof ${v}`]),
+    // An exported `const` or function is a prop too: once is enough.
+    ...exportsOf
+      .filter(([k]) => !accessors || !props.some((p) => p.name === k))
+      .map(([k, v]): [string, string] => [k, `typeof ${v}`]),
   ];
   const exposedType = `{${exposed.map(([k, type]) => `${keyOf(k)}: ${type}`).join(", ")}}`;
   let exportsValue = "{}";

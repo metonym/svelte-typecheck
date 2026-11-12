@@ -23,6 +23,9 @@
   reported them in the generated code. An incremental run after a run
   with the real path also deleted its own `tsconfig.json`, so the
   checker failed with TS5058. The CLI was not affected.
+- A component with `<svelte:options accessors />` and an exported
+  `const` or function lists it once in its exports. It was listed twice,
+  and TypeScript's "Duplicate identifier" error there was dropped.
 
 ## 0.1.13 — 2026-11-06
 
