@@ -12,6 +12,9 @@
   There, a package bin runs on Bun named `node`, which ran `check` as
   a script, so the run found no errors and passed. It now runs `bun`
   from `PATH`.
+- A checker that exits with an error and reports none fails the run
+  and prints its output. Before, the run passed, and incremental mode
+  cached the result.
 
 ## 0.1.13 — 2026-11-06
 

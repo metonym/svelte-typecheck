@@ -171,7 +171,7 @@ function run(
   args: string[],
   cwd: string,
   shell = false,
-): Promise<string> {
+): Promise<{ output: string; code: number | null }> {
   return new Promise((done, fail) => {
     // A shell's `$PWD` can name the folder through a symlink, and Go's
     // `os.Getwd` (tsgo's) trusts it: its paths would be relative to that.
@@ -187,7 +187,7 @@ function run(
       output += chunk;
     });
     child.on("error", fail);
-    child.on("close", () => done(output));
+    child.on("close", (code) => done({ output, code }));
   });
 }
 
@@ -1082,8 +1082,8 @@ export async function typecheck(
           [...launch.prefix, ...checkerArgs(checker, tsconfig)],
           cwd,
           launch.shell,
-        ).then((output) => ({ output, at: performance.now() }))
-      : Promise.resolve({ output: "", at: emitted });
+        ).then(({ output, code }) => ({ output, code, at: performance.now() }))
+      : Promise.resolve({ output: "", code: 0, at: emitted });
   // In TypeScript's program order, as svelte-check lists them: a file's
   // imports before it; in a file, the compiler's before the checker's.
   // The generated code: as this run wrote it, or read back from disk
@@ -1156,7 +1156,7 @@ export async function typecheck(
     }
   const compiledAt = (await compiledOffThreadAt) ?? performance.now();
   ordering.add(listedFiles);
-  const { output: text, at: checked } = await checking;
+  const { output: text, code, at: checked } = await checking;
 
   const raw = parseDiagnostics(text);
   const inOutput = (file: string) =>
@@ -1180,6 +1180,13 @@ export async function typecheck(
         .slice(0, 20)
         .map((d) => `${d.file}(${d.line},${d.column}): ${d.code} ${d.message}`)
         .join("\n")}`,
+    );
+  // A checker that fails with no error to report didn't check: a wrong
+  // binary, say, or a crash. Its output says why, and the run must fail,
+  // not report a clean result and cache it.
+  if (code !== 0 && raw.length === 0)
+    throw new Error(
+      `The ${checker} checker exited with code ${code} and reported no errors:\n${text.trim()}`,
     );
 
   const locators = new Map<string, ReturnType<typeof createLocator>>();
