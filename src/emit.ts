@@ -450,8 +450,28 @@ export function emit(
           return FUNCTION.test(node.type) ? SKIP : undefined;
         },
       });
-  for (const s of body)
-    if (s.type === "ImportDeclaration") copyStatement(s).raw("\n");
+  /**
+   * The comments above each import, which move with it, as in svelte2tsx:
+   * a `@ts-expect-error` there applies to it. A JSDoc block that moves to
+   * the top level on its own (a `@typedef` or `@template`) is left to that.
+   */
+  const importComments: [number, number][] = [];
+  let previousEnd = instance?.content.start ?? 0;
+  for (const s of body) {
+    if (s.type === "ImportDeclaration") {
+      let at = previousEnd;
+      for (const m of source.slice(at, s.start).matchAll(JSDOC_BLOCK)) {
+        if (!OWNS_TEMPLATE.test(m[0]) && !m[0].includes("@template")) continue;
+        const start = previousEnd + (m.index ?? 0);
+        out.copy(at, start);
+        at = start + m[0].length;
+      }
+      out.copy(at, s.start);
+      importComments.push([previousEnd, s.start]);
+      copyStatement(s).raw("\n");
+    }
+    previousEnd = s.end;
+  }
 
   // --- svelte2tsx's typing interfaces: `$$Props`, `$$Events`, `$$Slots`.
   const typed = new Set<string>();
@@ -1452,10 +1472,13 @@ export function emit(
     return;
   };
 
-  /** Copies [from, to), leaving out `@template` blocks. */
+  /** Copies [from, to), leaving out `@template` blocks and imports' comments. */
+  const moved = [...templateBlocks, ...importComments].sort(
+    (a, b) => a[0] - b[0],
+  );
   const copyGap = (from: number, to: number) => {
     let at = from;
-    for (const [s, e] of templateBlocks) {
+    for (const [s, e] of moved) {
       if (e <= at || s >= to) continue;
       out.copy(at, s);
       at = e;

@@ -257,6 +257,11 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check with @ts-expect-error above an import", () => {
+    const cwd = join(svelte5, "ts-comments");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // Under `moduleResolution: node`, TypeScript adds where it found types
   // that the import can't use.
   it("matches svelte-check on an import that finds types only in exports", () => {
