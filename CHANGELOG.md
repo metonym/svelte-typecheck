@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+**Features**
+
+- An `agent` output, the default when `AI_AGENT` or `CLAUDECODE` is
+  set. It prints each problem with its code and source lines, then one
+  summary line, as `bun check` does for an agent:
+  `✓ No type errors in 8 components`. Claude Code got svelte-check's
+  machine output before, with a timestamp on each line.
+
 **Fixes**
 
 - `generics` are read with the TypeScript parser. A component failed
