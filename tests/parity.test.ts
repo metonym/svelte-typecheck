@@ -146,6 +146,11 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check on an element's on: directives", () => {
+    const cwd = join(svelte5, "on-directive");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // Each helper the generated code calls, failing, and a TS file that
   // uses components wrongly: every name the shims' types print.
   it("matches svelte-check where a message prints the shims' types", () => {
