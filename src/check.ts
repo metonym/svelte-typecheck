@@ -108,6 +108,8 @@ interface EmitEffects {
   /** The generated code the checker reads, and the component's language. */
   genPath?: string;
   lang?: "ts" | "js";
+  /** Whether its syntax errors are the user's: `generics` that don't parse. */
+  userSyntax?: true;
   /** Its parse error, or TypeScript in its JS script. */
   diagnostics: Diagnostic[];
 }
@@ -652,6 +654,8 @@ export async function typecheck(
       >;
       /** A SvelteKit file's typed copy, whose syntax errors are the user's. */
       kit?: boolean;
+      /** A component whose `generics` don't parse: its syntax errors are the user's. */
+      userSyntax?: boolean;
     }
   >();
   const writes: Promise<void>[] = [];
@@ -784,7 +788,7 @@ export async function typecheck(
       });
     };
     /** An entry whose generated code is generated only when it's needed. */
-    const lazyOutput = (i: number, lang: "ts" | "js") => {
+    const lazyOutput = (i: number, lang: "ts" | "js", userSyntax: boolean) => {
       let result: ReturnType<typeof emit> | undefined;
       const get = () => {
         result ??= emitFor(i);
@@ -794,6 +798,7 @@ export async function typecheck(
         source: texts[i] ?? "",
         svelte: files[i] ?? "",
         isTs: lang === "ts",
+        userSyntax,
         get output() {
           return get().out;
         },
@@ -815,7 +820,10 @@ export async function typecheck(
         for (const file of cached.files) written.add(file);
         parseErrors.push(...cached.diagnostics);
         if (cached.genPath && cached.lang)
-          outputs.set(cached.genPath, lazyOutput(i, cached.lang));
+          outputs.set(
+            cached.genPath,
+            lazyOutput(i, cached.lang, cached.userSyntax === true),
+          );
         nextEmitCache.entries[key] = cached;
         continue;
       }
@@ -891,12 +899,14 @@ export async function typecheck(
       );
       effects.genPath = genPath;
       effects.lang = result.lang === "ts" ? "ts" : "js";
+      if (result.userSyntax) effects.userSyntax = true;
       outputs.set(genPath, {
         output: result.out,
         source: texts[i] ?? "",
         svelte: path,
         isTs: result.lang === "ts",
         emitted: result,
+        userSyntax: result.userSyntax,
       });
       put(genPath, result.out.code);
       if (typed)
@@ -1177,7 +1187,8 @@ export async function typecheck(
         (d) =>
           inOutput(d.file) &&
           SYNTAX_CODE.test(d.code) &&
-          !outputs.get(resolve(cwd, d.file))?.kit,
+          !outputs.get(resolve(cwd, d.file))?.kit &&
+          !outputs.get(resolve(cwd, d.file))?.userSyntax,
       );
   if (syntax.length > 0 || STOPPED.test(text))
     throw new EmitError(

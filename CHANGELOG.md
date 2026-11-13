@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- `generics` are read with the TypeScript parser. A component failed
+  the run with "Generated code has syntax errors" when its generics
+  had `=>` in a constraint, a comment, an `in` or `out` modifier, or
+  a `$` in a name. Generics with a syntax error of their own now
+  report it at the attribute, as svelte-check does.
+
 ## 0.1.15 — 2026-11-12
 
 **Fixes**

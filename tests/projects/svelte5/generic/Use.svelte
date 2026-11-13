@@ -2,6 +2,8 @@
   import Legacy from "./Legacy.svelte";
   import List from "./List.svelte";
   import Pick from "./Pick.svelte";
+  import Handlers from "./Handlers.svelte";
+  import Pattern from "./Pattern.svelte";
 
   const rows = [{ id: 1, name: "One" }];
 </script>
@@ -14,3 +16,7 @@
 <Legacy value={true} />
 <Pick items={["a", "b"]} picked="a" />
 <Pick items={["a", "b"]} picked="c" />
+<Handlers handlers={{ go: (x: number) => x }} name="go" />
+<Handlers handlers={{ go: (x: number) => x }} name="stop" />
+<Pattern pair="a=b" />
+<Pattern pair="ab" />

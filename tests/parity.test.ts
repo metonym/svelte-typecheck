@@ -86,6 +86,18 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // svelte-check reports more syntax errors here, from the broken
+  // generics it pastes in more places, and the type errors they cause.
+  it("reports svelte-check's first syntax errors in generics that don't parse", () => {
+    const cwd = join(svelte5, "generic-invalid");
+    const errors = (lines: string[]) =>
+      lines.filter((line) => line.startsWith("ERROR "));
+    const expected = errors(svelteCheck([], cwd));
+    const received = errors(ours([], cwd));
+    expect(received.length).toBeGreaterThan(0);
+    expect(received).toEqual(expected.slice(0, received.length));
+  }, 60_000);
+
   it("matches svelte-check with runes, snippets, attachments and function bindings", () => {
     const cwd = join(svelte5, "runes");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
