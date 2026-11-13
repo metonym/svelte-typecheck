@@ -31,7 +31,7 @@ interface Compiler {
     source: string,
     options: { filename: string; generate: false; dev?: boolean },
   ): { warnings: Warning[] };
-  /** Svelte 3's and 4's, for svelte2tsx's markup parse. */
+  /** Svelte 4's, for svelte2tsx's markup parse. */
   parse(source: string): unknown;
   preprocess(
     source: string,
@@ -194,9 +194,11 @@ async function preprocessedDiagnostics(
     // 3 and 4, which read only JavaScript, compile the whole component.
     // Svelte 5 reads TypeScript itself.
     const code =
-      unconfigured && !compiler.compileModule
-        ? (blankScripts(source) ?? source)
-        : source;
+      unconfigured && !compiler.compileModule ? blankScripts(source) : source;
+    // svelte-check transpiles TypeScript blanking can't remove, such as an
+    // `enum`, and compiles it. The compiler can't read it here, so it
+    // reports nothing, rather than a false error.
+    if (code === undefined) return [];
     diagnostics = diagnosticsOf(compiler, code, filename, compilerOptions);
   } else {
     const map =
@@ -243,9 +245,9 @@ const VERBATIM =
   /(<!--[^]*?-->)|(<(script|style)((?:\s+[^=>'"/\s]+=(?:"[^"]*"|'[^']*'|[^>\s]+)|\s+[^=>'"/\s]+)*\s*)>)([\S\s]*?)<\/\3>/g;
 
 /**
- * Throws the error Svelte 3's or 4's parser finds in a component's
- * markup, as svelte2tsx parses it for svelte-check: each script and
- * style blanked, so TypeScript in the markup (`{x as number}`) or
+ * Throws the error Svelte 4's parser finds in a component's markup,
+ * as svelte2tsx parses it for svelte-check: each script and style
+ * blanked, so TypeScript in the markup (`{x as number}`) or
  * Svelte 5 syntax (`{#snippet}`) is an error, as in that Svelte's build.
  */
 export function parseAsLegacy(source: string, svelteDir: string): void {

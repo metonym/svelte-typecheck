@@ -1162,9 +1162,10 @@ export async function typecheck(
       };
       let result: ReturnType<typeof emit>;
       try {
-        // svelte2tsx parses Svelte 3's and 4's markup with that Svelte's
-        // parser, whose errors svelte-check reports; sveast parses as Svelte 5.
-        if (svelteMajor < 5) parseAsLegacy(texts[i] ?? "", svelteDir);
+        // On Svelte 4, svelte-check hands svelte2tsx the project's parser,
+        // whose errors it reports. On 3 it keeps its own, Svelte 5's, as
+        // sveast parses.
+        if (svelteMajor === 4) parseAsLegacy(texts[i] ?? "", svelteDir);
         result = emitFor(i);
       } catch (error) {
         const e = error as Error & { start?: { line: number; column: number } };

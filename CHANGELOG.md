@@ -8,7 +8,8 @@
   Svelte 5 syntax, as `{#snippet}`, passed. They are parse errors, as
   in svelte-check and the build. With no svelte.config, a component
   with a `lang="ts"` script now gets the compiler's warnings, such as a
-  missing `alt`. Checks more
+  missing `alt`. A script with an `enum` no longer gets a false "The
+  keyword 'enum' is reserved" error. Checks more
   ([#93](https://github.com/metonym/svelte-typecheck/issues/93)).
 
 ## 0.1.19 — 2026-11-13
