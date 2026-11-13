@@ -2,15 +2,16 @@ import { readFileSync } from "node:fs";
 import { relative, sep } from "node:path";
 import type { Diagnostic } from "./types.ts";
 
-/** svelte-check's output formats. */
+/** svelte-check's output formats, and `agent` for a coding agent. */
 export type OutputFormat =
-  "human" | "human-verbose" | "machine" | "machine-verbose";
+  "human" | "human-verbose" | "machine" | "machine-verbose" | "agent";
 
 export const OUTPUT_FORMATS: OutputFormat[] = [
   "human",
   "human-verbose",
   "machine",
   "machine-verbose",
+  "agent",
 ];
 
 interface Colors {
@@ -78,6 +79,37 @@ function codeFrame(d: Diagnostic, c: Colors): string {
   return `${before}${middle}\n${after}`;
 }
 
+/**
+ * `bun check`'s frame for a coding agent: the line before, the line with
+ * carets under the range, and the line after, each with its number.
+ */
+function agentFrame(d: Diagnostic): string[] {
+  let lines: string[];
+  try {
+    lines = readFileSync(d.file, "utf-8").split("\n");
+  } catch {
+    return [];
+  }
+  const width = String(d.line + 1).length;
+  const row = (n: number) => {
+    const text = lines[n - 1];
+    return text === undefined ? [] : [`${String(n).padStart(width)} | ${text}`];
+  };
+  const end =
+    (d.endLine ?? d.line) === d.line
+      ? (d.endColumn ?? d.column)
+      : (lines[d.line - 1]?.length ?? 0) + 1;
+  const carets = "^".repeat(Math.max(1, end - d.column));
+  return [
+    ...row(d.line - 1),
+    ...row(d.line),
+    `${" ".repeat(width + 3 + d.column - 1)}${carets}`,
+    ...row(d.line + 1),
+  ];
+}
+
+const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
 /** The numeric code svelte-check reports for a TypeScript error, else the compiler's. */
 function codeOf(d: Diagnostic): string | number {
   if (d.code.startsWith("TS")) return Number(d.code.slice(2));
@@ -141,6 +173,7 @@ export function writer(
   const machine = format.startsWith("machine");
   const verbose = format.endsWith("verbose");
   const log = (message: string) => write(`${Date.now()} ${message}\n`);
+  if (format === "agent") return agentWriter(write);
   return {
     start(workspace: string, clearScreen = false) {
       if (!machine && clearScreen && process.stdout.isTTY)
@@ -210,6 +243,50 @@ export function writer(
     failure(error: Error) {
       if (machine) log(`FAILURE ${JSON.stringify(error.message)}`);
       else write(`${error.message}\n`);
+    },
+  };
+}
+
+/**
+ * Writes a run as `bun check` does for a coding agent: each problem as a
+ * tag with its source lines, then one summary line.
+ */
+function agentWriter(write: (text: string) => void) {
+  return {
+    start(_workspace: string, _clearScreen = false) {},
+    diagnostic(d: Diagnostic, workspace: string) {
+      const tag = d.severity === "error" ? "error" : "warning";
+      const file = relative(workspace, d.file);
+      const frame = agentFrame(d);
+      write(
+        [
+          `<${tag} file="${file}" line="${d.line}" column="${d.column}" code="${d.code}">`,
+          d.message,
+          ...(frame.length > 0 ? ["<source>", ...frame, "</source>"] : []),
+          `</${tag}>`,
+          "",
+        ].join("\n"),
+      );
+    },
+    note(text: string) {
+      write(`${text}\n`);
+    },
+    completion(summary: Summary, watching = false) {
+      const { files, errors, warnings, filesWithProblems } = summary;
+      const checked = plural(files, "component");
+      if (errors + warnings === 0) write(`✓ No type errors in ${checked}\n`);
+      else {
+        const found = warnings
+          ? `${plural(errors, "error")} and ${plural(warnings, "warning")}`
+          : plural(errors, "error");
+        write(
+          `Found ${found} in ${plural(filesWithProblems, "file")}, checked ${checked}\n`,
+        );
+      }
+      if (watching) write("Watching for file changes...\n");
+    },
+    failure(error: Error) {
+      write(`${error.message}\n`);
     },
   };
 }

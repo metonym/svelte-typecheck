@@ -27,8 +27,9 @@ Type-checks Svelte components, as svelte-check does.
 
 svelte-check's options:
   --workspace <dir>         Project folder (default: the current one)
-  --output <format>         human, human-verbose, machine or machine-verbose
-                            (default: human-verbose)
+  --output <format>         human, human-verbose, machine, machine-verbose
+                            or agent (default: human-verbose, or agent when
+                            AI_AGENT or CLAUDECODE is set)
   --tsconfig <path>         tsconfig or jsconfig, relative to the workspace;
                             its TS and JS files' errors are reported too
                             (default: the nearest from the workspace up)
@@ -247,11 +248,16 @@ export function cliOptions(argv: string[]): TypecheckOptions {
   return optionsOf(parse(argv).values);
 }
 
-/** svelte-check's default: human-verbose, or machine in Claude Code. */
+/**
+ * svelte-check's default, human-verbose, or agent for a coding agent, as
+ * `bun check` picks it.
+ */
 function formatOf(output: string | undefined): OutputFormat {
   if (output && (OUTPUT_FORMATS as string[]).includes(output))
     return output as OutputFormat;
-  return process.env.CLAUDECODE === "1" ? "machine" : "human-verbose";
+  return process.env.AI_AGENT || process.env.CLAUDECODE
+    ? "agent"
+    : "human-verbose";
 }
 
 function parse(argv: string[]) {

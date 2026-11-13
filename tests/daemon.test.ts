@@ -32,6 +32,7 @@ interface Run {
 const environment = (env: Record<string, string | undefined> = {}) => {
   const base: Record<string, string | undefined> = { ...process.env };
   delete base.CI;
+  delete base.AI_AGENT;
   delete base.CLAUDECODE;
   delete base.SVELTE_TYPECHECK_DAEMON;
   return { ...base, SVELTE_TYPECHECK_DAEMON_DIR: dir, ...env };
@@ -147,12 +148,13 @@ describe("--daemon", () => {
   it("runs with each run's environment, not the one that started it", async () => {
     const cwd = await project("env");
     const human = run(cwd, ["--daemon", "--checker", "tsgo"]);
-    expect(lines(human.stdout)).toEqual([]);
-    // Claude Code's machine output, by its environment.
+    expect(human.stdout).toContain("Loading svelte-typecheck");
+    // The agent output, by its environment.
     const agent = run(cwd, ["--daemon", "--checker", "tsgo"], {
-      CLAUDECODE: "1",
+      AI_AGENT: "1",
     });
-    expect(lines(agent.stdout).length).toBeGreaterThan(2);
+    expect(agent.stdout).not.toContain("Loading svelte-typecheck");
+    expect(agent.stdout).toContain("checked ");
   }, 120_000);
 
   it("starts again once its config changes", async () => {

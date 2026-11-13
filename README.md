@@ -49,7 +49,7 @@ svelte-typecheck --components "src/lib/**/*.svelte"
 # Check every component, without a tsconfig, skipping two folders
 svelte-typecheck --no-tsconfig --ignore dist,build
 
-# Print one line per diagnostic, which is easier for scripts and agents to read
+# Print one line per diagnostic, which is easier for scripts to read
 svelte-typecheck --output machine
 
 # Print errors only, or fail on warnings as well

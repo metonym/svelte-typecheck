@@ -10,7 +10,7 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 | svelte-check's options        |                                                                                                                                                                                |
 | :---------------------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `--workspace <dir>`           | Project folder (default: the current one)                                                                                                                                      |
-| `--output <format>`           | `human`, `human-verbose` (default), `machine` or `machine-verbose`                                                                                                             |
+| `--output <format>`           | `human`, `human-verbose` (default), `machine`, `machine-verbose` or `agent` (default when `AI_AGENT` or `CLAUDECODE` is set)                                                   |
 | `--tsconfig <path>`           | tsconfig or jsconfig, relative to the workspace (default: the nearest from the workspace up). The components it includes are checked, and its TS and JS files' errors reported |
 | `--no-tsconfig`               | Check every component under the workspace, and no TS or JS files                                                                                                               |
 | `--ignore <list>`             | With `--no-tsconfig`: paths to skip, comma-separated                                                                                                                           |

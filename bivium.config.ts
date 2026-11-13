@@ -38,6 +38,7 @@ export default defineConfig({
   // fixtures it checks or copies to a temp workspace. A key that names one
   // file vouches for all its disk reads, so a new test names its own.
   edges: {
+    "tests/agent.test.ts": "src/cli.ts",
     "tests/baseline.test.ts": "src/cli.ts",
     "tests/compile-cache.test.ts": "src/cli.ts",
     "tests/daemon.test.ts": "src/cli.ts",
@@ -59,6 +60,10 @@ export default defineConfig({
     "tests/changed.test.ts": fixtures,
     "tests/daemon.test.ts": fixtures,
     "tests/checker.test.ts": [fixtures, "tests/projects/ts7/**"],
+    "tests/agent.test.ts": [
+      "tests/projects/svelte5/package.json",
+      "tests/projects/svelte5/basic/tsconfig.json",
+    ],
     "tests/compile-cache.test.ts": [
       "tests/projects/svelte5/package.json",
       "tests/projects/svelte5/basic/Warnings.svelte",
