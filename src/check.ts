@@ -91,6 +91,12 @@ const REPEATED_KEY = "TS1117";
  * can appear where no input the result cache keys on changes.
  */
 const UNRESOLVED_MODULE = /^TS(2307|2732|2792)$/;
+/**
+ * The line TypeScript adds to "Cannot find module" when it found types
+ * the import can't use. svelte-check's resolver passes on only what an
+ * import resolved to, so its TypeScript never adds it.
+ */
+const OTHER_TYPES = /\n {2}There are types at .*/;
 
 /** The caches' shape, in each one's key: a new shape misses the old. */
 const CACHE_FORMAT = 2;
@@ -1414,6 +1420,8 @@ export async function typecheck(
     "gi",
   );
   for (const d of diagnostics) {
+    if (UNRESOLVED_MODULE.test(d.code))
+      d.message = d.message.replace(OTHER_TYPES, "");
     d.message = d.message.replace(generatedPath, (path) =>
       asTypeScriptPath(
         join(root, relative(toPosix(genDir), path)).replace(

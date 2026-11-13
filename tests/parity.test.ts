@@ -184,6 +184,43 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // Under `moduleResolution: node`, TypeScript adds where it found types
+  // that the import can't use.
+  it("matches svelte-check on an import that finds types only in exports", () => {
+    const cwd = join(svelte5, ".tmp/exports-only-types");
+    const files = {
+      "tsconfig.json": JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          module: "esnext",
+          moduleResolution: "node",
+          ignoreDeprecations: "6.0",
+        },
+      }),
+      "node_modules/pkg/package.json": JSON.stringify({
+        name: "pkg",
+        exports: { "./sub": { types: "./dist/sub.d.ts" } },
+      }),
+      "node_modules/pkg/dist/sub.d.ts": "export const a: number;\n",
+      "x.ts": 'import { a } from "pkg/sub";\nexport const b = a;\n',
+      "App.svelte": [
+        '<script lang="ts">',
+        '  import { a } from "pkg/sub";',
+        "</script>",
+        "{a}",
+      ].join("\n"),
+    };
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(cwd, file)), { recursive: true });
+      writeFileSync(join(cwd, file), content);
+    }
+    const unresolved = (lines: string[]) =>
+      lines.filter((line) => line.includes("pkg/sub"));
+    const expected = unresolved(svelteCheck([], cwd));
+    expect(expected).toHaveLength(2);
+    expect(unresolved(ours([], cwd))).toEqual(expected);
+  }, 60_000);
+
   it("warns, as svelte-check does, of a tsconfig with no components", () => {
     const cwd = join(svelte5, ".tmp/no-components");
     mkdirSync(join(cwd, "src"), { recursive: true });
