@@ -105,6 +105,13 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // svelte-check raises `target: "es5"` to ES2015 and `module: "commonjs"`
+  // to ESNext, so a component's `import.meta` and `for...of` are valid.
+  it("matches svelte-check with an ES5 target and a CommonJS module", () => {
+    const cwd = join(svelte5, "old-module");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // A `@typedef` moves to the top level, but a `@type` in its block
   // stays on the declaration below.
   it("keeps a `@type` beside a `@typedef` on its declaration", () => {

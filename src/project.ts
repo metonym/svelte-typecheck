@@ -58,6 +58,8 @@ interface RawConfig {
     skipLibCheck?: boolean;
     noUncheckedSideEffectImports?: boolean;
     moduleResolution?: string;
+    module?: string;
+    target?: string;
     outDir?: string;
     declarationDir?: string;
   };
@@ -77,6 +79,8 @@ interface Inputs {
   skipLibCheck?: boolean;
   noUncheckedSideEffectImports?: boolean;
   moduleResolution?: string;
+  module?: string;
+  target?: string;
   /** `include` and `exclude` as written, relative to the tsconfig read first. */
   includeSpecs?: string[];
   excludeSpecs?: string[];
@@ -155,6 +159,8 @@ function readInputs(
       skipLibCheck: options?.skipLibCheck,
       noUncheckedSideEffectImports: options?.noUncheckedSideEffectImports,
       moduleResolution: options?.moduleResolution,
+      module: options?.module,
+      target: options?.target,
       includeSpecs: config.include,
       excludeSpecs: config.exclude,
       outDir: options?.outDir && at(dir, options.outDir),
@@ -253,6 +259,9 @@ export interface Project {
   allowJs: boolean;
   /** Whether a declaration file's errors go unreported. */
   skipLibCheck: boolean;
+  /** The tsconfig's `target`, `module` and `moduleResolution`, as written. */
+  options: { target?: string; module?: string; moduleResolution?: string };
+
   /** Whether a side-effect import must resolve, or the checker's default. */
   noUncheckedSideEffectImports?: boolean;
   /**
@@ -315,6 +324,7 @@ export function projectOf(options: ProjectOptions): Project {
       checkJs: true,
       allowJs: true,
       skipLibCheck: true,
+      options: {},
       selfExports: {},
       configDirOptions: {},
       raw: {},
@@ -373,6 +383,12 @@ export function projectOf(options: ProjectOptions): Project {
       inputs.allowJs ??
       (basename(tsconfig) === "jsconfig.json" || inputs.checkJs === true),
     skipLibCheck: inputs.skipLibCheck ?? false,
+    options: {
+      target: inputs.target,
+      module: inputs.module,
+      moduleResolution: inputs.moduleResolution,
+    },
+
     noUncheckedSideEffectImports: inputs.noUncheckedSideEffectImports,
     // Resolution from before `exports` doesn't read them.
     selfExports: LEGACY_RESOLUTION.test(inputs.moduleResolution ?? "")
