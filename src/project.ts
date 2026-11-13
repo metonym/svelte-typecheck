@@ -321,8 +321,10 @@ export function projectOf(options: ProjectOptions): Project {
     // A package's subpath imports (`#lib/*`) work as `paths` do, after them.
     paths: { ...importsOf(dirname(tsconfig)), ...inputs.paths },
     checkJs: inputs.checkJs ?? false,
-    // A jsconfig.json allows JS by default.
-    allowJs: inputs.allowJs ?? basename(tsconfig) === "jsconfig.json",
+    // A jsconfig.json allows JS by default, and `checkJs` does too.
+    allowJs:
+      inputs.allowJs ??
+      (basename(tsconfig) === "jsconfig.json" || inputs.checkJs === true),
     skipLibCheck: inputs.skipLibCheck ?? false,
     // Resolution from before `exports` doesn't read them.
     selfExports: LEGACY_RESOLUTION.test(inputs.moduleResolution ?? "")

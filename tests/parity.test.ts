@@ -159,6 +159,12 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // TypeScript turns `allowJs` on with `checkJs`.
+  it("matches svelte-check with checkJs and no allowJs", () => {
+    const cwd = join(svelte5, "checkjs");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check's message rewrites and filters", () => {
     const cwd = join(svelte5, "filters");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
