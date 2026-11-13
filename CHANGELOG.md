@@ -8,6 +8,9 @@
   in svelte-check. `<Pick value="a" items={[1]} />` infers `T` as `"a"`;
   it was the constraint, so a prop typed by `T` could report an error
   that svelte-check doesn't, or miss one.
+- A JS component with `generics="…"` and `export let` props is generic
+  too, as the same component in TS is. svelte-check reports an error at
+  each use of one, even a valid one.
 
 ## 0.1.17 — 2026-11-12
 

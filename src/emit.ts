@@ -509,8 +509,8 @@ export function emit(
   /** In JS, the component's `@template` tags, written right above `$$render`. */
   let templateDoc = "";
   /**
-   * In JS, `generics="…"` as type parameters and `@template` tags, for a
-   * runes component's type. `@template` alone doesn't make the component
+   * In JS, `generics="…"` as type parameters and `@template` tags, for the
+   * component's type. `@template` alone doesn't make the component
    * generic, as in svelte-check.
    */
   const jsGenerics = {
@@ -1776,6 +1776,33 @@ export function emit(
       `class $$Render${generics} { props(): ${types.props} { return null as any; } events(): ${types.events} { return null as any; } slots(): ${types.slots} { return null as any; } bindings() { return ""; } exports(): ${rendered}["exports"] { return null as any; } }\n` +
         `interface $$Generic { new ${generics}(options: import("svelte").ComponentConstructorOptions<${part("props")}${children}>): import("svelte").SvelteComponent<${part("props")}, ${part("events")}, ${part("slots")}> & { $$bindings?: ${part("bindings")} } & ${part("exports")}; ${generics}(internal: unknown, props: ${part("props")} & { $$events?: ${part("events")}; $$slots?: ${part("slots")}${hasSlots ? "; children?: any" : ""} }): ${part("exports")}; z_$$bindings?: ReturnType<$$Render<${names.map(() => "any").join(", ")}>["bindings"]>; }\n` +
         `const $$Component: $$Generic = null as any;\ntype $$Component${generics} = InstanceType<typeof $$Component${args}>;\n`,
+    );
+  } else if (!isTs && jsGenerics.params.length > 0 && svelte >= 4) {
+    // The TS form above, as JSDoc, with each part read from `$$render<T>`.
+    const { names } = jsGenerics;
+    const params = `<${jsGenerics.params.join(", ")}>`;
+    const args = `<${names.join(", ")}>`;
+    const render = (typeArgs: string) =>
+      topLevelAwait
+        ? `Awaited<ReturnType<typeof $$render${typeArgs}>>`
+        : `ReturnType<typeof $$render${typeArgs}>`;
+    // `Loose` and `Expand` are conditional types, which `T` can't be
+    // inferred through: only props with a default are made optional.
+    const propsOf = `${render(args)}["props"]`;
+    const types = {
+      ...legacyTypes(render(args)),
+      props: typed.has("$$Props")
+        ? propsOf
+        : `${optional.length > 0 ? `$$check.WithOptional<${propsOf}, ${optional.join(" | ")}>` : propsOf}${anyProp ? " & { [index: string]: any }" : ""}`,
+    };
+    const exported = `${render(args)}["exports"]`;
+    const bindingsOf = (typeArgs: string) => `${render(typeArgs)}["bindings"]`;
+    const anyArgs = `<${names.map(() => "any").join(", ")}>`;
+    const children = hasSlots ? " & { children?: any }" : "";
+    out.raw(
+      `/** @typedef {{ new ${params}(options: import("svelte").ComponentConstructorOptions<${types.props}${children}>): import("svelte").SvelteComponent<${types.props}, ${types.events}, ${types.slots}> & { $$bindings?: ${bindingsOf(args)} } & ${exported}; ${params}(internal: unknown, props: ${types.props} & { $$events?: ${types.events}; $$slots?: ${types.slots}${hasSlots ? "; children?: any" : ""} }): ${exported}; z_$$bindings?: ${bindingsOf(anyArgs)}; }} $$Generic */\n` +
+        "const $$Component = /** @type {$$Generic} */ (/** @type {unknown} */ (null));\n" +
+        `/**\n${jsGenerics.tags.join("\n")}\n * @typedef {InstanceType<typeof $$Component${args}>} $$Component\n */\n`,
     );
   } else {
     const rendered = renderedType();

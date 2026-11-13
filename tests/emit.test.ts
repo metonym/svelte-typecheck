@@ -58,7 +58,9 @@ describe("emit", () => {
     expect(out.code).toContain(
       " * @template {{ id: string }} [Node={ id: string }]",
     );
-    expect(out.code).not.toContain("$$render<");
+    // Type arguments only in JSDoc, which JS allows.
+    const code = out.code.replace(/\/\*\*[\s\S]*?\*\//g, "");
+    expect(code).not.toContain("$$render<");
   });
 
   it("passes a `const` type parameter by its name alone", () => {
