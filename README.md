@@ -52,6 +52,9 @@ svelte-typecheck --no-tsconfig --ignore dist,build
 # Print one line per diagnostic, which is easier for scripts to read
 svelte-typecheck --output machine
 
+# Annotate a PR's diff from GitHub Actions
+svelte-typecheck --output github
+
 # Print errors only, or fail on warnings as well
 svelte-typecheck --threshold error
 svelte-typecheck --fail-on-warnings

@@ -27,8 +27,9 @@ Type-checks Svelte components, as svelte-check does.
 
 svelte-check's options:
   --workspace <dir>         Project folder (default: the current one)
-  --output <format>         human, human-verbose, machine, machine-verbose
-                            or agent (default: human-verbose, or agent when
+  --output <format>         human, human-verbose, machine, machine-verbose,
+                            agent or github, for GitHub Actions annotations
+                            (default: human-verbose, or agent when
                             AGENT, AI_AGENT, CLAUDECODE, CODEX_CI or
                             CODEX_THREAD_ID is set, and not to 0)
   --tsconfig <path>         tsconfig or jsconfig, relative to the workspace;
