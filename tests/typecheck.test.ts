@@ -100,7 +100,7 @@ describe("typecheck", () => {
       expect(
         result.diagnostics.map(
           (d) =>
-            `${relative(svelte5, d.file)}:${d.line}:${d.column} ${d.code} ${d.severity}`,
+            `${relative(svelte5, d.file).replaceAll("\\", "/")}:${d.line}:${d.column} ${d.code} ${d.severity}`,
         ),
       ).toEqual([
         "deprecated/tsconfig.json:3:3 TS5102 error",
