@@ -186,6 +186,12 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // TypeScript turns `allowJs` on with `checkJs`.
+  it("matches svelte-check with checkJs and no allowJs", () => {
+    const cwd = join(svelte5, "checkjs");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // A package with a JS entry, and types the import can't use: TypeScript
   // says where they are, and svelte-check's TypeScript doesn't know.
   it.each([
