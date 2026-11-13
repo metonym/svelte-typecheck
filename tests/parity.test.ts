@@ -361,6 +361,83 @@ describe("svelte-check parity, machine output", () => {
     expect(unresolved(ours([], cwd))).toEqual(expected);
   }, 60_000);
 
+  // A Svelte library's `exports` can name a component as its types.
+  it("matches svelte-check on a package whose exports' types are components", () => {
+    const cwd = join(svelte5, ".tmp/exports-components");
+    const files = {
+      "tsconfig.json": JSON.stringify({
+        compilerOptions: { strict: true, moduleResolution: "bundler" },
+      }),
+      "node_modules/lib/package.json": JSON.stringify({
+        name: "lib",
+        type: "module",
+        exports: {
+          "./editor": {
+            types: "./src/Editor.svelte",
+            svelte: "./src/Editor.svelte",
+          },
+          "./components/*": {
+            types: "./src/*.svelte",
+            svelte: "./src/*.svelte",
+          },
+        },
+      }),
+      "node_modules/lib/src/types.ts": "export type Version = number;\n",
+      "node_modules/lib/src/Editor.svelte": [
+        '<script lang="ts">',
+        '  import type { Version } from "./types.js";',
+        '  import Toolbar from "./Toolbar.svelte";',
+        "  let { onversion }: { onversion: (v: Version) => void } = $props();",
+        "</script>",
+        "<Toolbar /><button onclick={() => onversion(1)}>x</button>",
+      ].join("\n"),
+      // svelte-check reports nothing in a package's component.
+      "node_modules/lib/src/Toolbar.svelte": [
+        '<script lang="ts">',
+        '  let { label = "x" }: { label?: string } = $props();',
+        '  const unused: number = "a";',
+        "</script>",
+        "<span>{label}</span>",
+      ].join("\n"),
+      "node_modules/@scope/ui/package.json": JSON.stringify({
+        name: "@scope/ui",
+        type: "module",
+        exports: { ".": { types: "./Button.svelte" } },
+      }),
+      "node_modules/@scope/ui/Button.svelte": [
+        '<script lang="ts">',
+        '  let { size }: { size: "s" | "m" } = $props();',
+        "</script>",
+        "<button>{size}</button>",
+      ].join("\n"),
+      "App.svelte": [
+        '<script lang="ts">',
+        '  import Editor from "lib/editor";',
+        '  import Toolbar from "lib/components/Toolbar";',
+        '  import Button from "@scope/ui";',
+        '  import Missing from "lib/components/Missing";',
+        "</script>",
+        "<Editor onversion={(v) => v.toFixed()} />",
+        '<Editor onversion="nope" />',
+        "<Toolbar label={1} />",
+        '<Button size="l" />',
+        "<Missing />",
+      ].join("\n"),
+      "props.ts": [
+        'import type { ComponentProps } from "svelte";',
+        'import type Toolbar from "lib/components/Toolbar";',
+        "export const props: ComponentProps<typeof Toolbar> = { label: 2 };",
+      ].join("\n"),
+    };
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(cwd, file)), { recursive: true });
+      writeFileSync(join(cwd, file), content);
+    }
+    const expected = svelteCheck([], cwd);
+    expect(expected.filter((line) => line.startsWith("ERROR"))).toHaveLength(5);
+    expect(ours([], cwd)).toEqual(expected);
+  }, 60_000);
+
   it("warns, as svelte-check does, of a tsconfig with no components", () => {
     const cwd = join(svelte5, ".tmp/no-components");
     mkdirSync(join(cwd, "src"), { recursive: true });

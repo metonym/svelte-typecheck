@@ -269,6 +269,9 @@ export interface Project {
    * finds, once `paths` finds nothing.
    */
   selfExports: Record<string, string[]>;
+  /** Whether an import of a package reads its `exports`. */
+  readsExports: boolean;
+
   /**
    * `baseUrl`, `rootDir` and `typeRoots` with `${configDir}`, expanded: a
    * tsconfig that extends the project's from elsewhere expands it there.
@@ -326,6 +329,8 @@ export function projectOf(options: ProjectOptions): Project {
       skipLibCheck: true,
       options: {},
       selfExports: {},
+      readsExports: true,
+
       configDirOptions: {},
       raw: {},
       reports: () => false,
@@ -394,6 +399,8 @@ export function projectOf(options: ProjectOptions): Project {
     selfExports: LEGACY_RESOLUTION.test(inputs.moduleResolution ?? "")
       ? {}
       : exportsOf(dirname(tsconfig)),
+    readsExports: !LEGACY_RESOLUTION.test(inputs.moduleResolution ?? ""),
+
     configDirOptions: inputs.configDirOptions ?? {},
     raw,
     inputSpecs:
@@ -435,7 +442,7 @@ function importsOf(dir: string): Record<string, string[]> {
 }
 
 /** A package's `exports` under its own name, in `paths`' shape. */
-function exportsOf(dir: string): Record<string, string[]> {
+export function exportsOf(dir: string): Record<string, string[]> {
   const path = findUp(dir, "package.json");
   if (!path) return {};
   let name: unknown;
