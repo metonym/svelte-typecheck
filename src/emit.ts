@@ -390,6 +390,8 @@ export function emit(
   /** `$:` statements and transition directives, as source ranges. */
   const reactive: [number, number][] = [];
   const transitions: [number, number][] = [];
+  /** An element's repeated `on:`s, whose keys repeat in its object. */
+  const repeatedKeys: [number, number][] = [];
   /** Each `<slot>`'s attributes, by slot name. */
   const slots = new Map<string, Node[]>();
   /** Events the component forwards: an element's DOM event, or `any`. */
@@ -812,8 +814,11 @@ export function emit(
       node.type === "RegularElement"
         ? node.start + node.name.length
         : (node.tag?.end ?? node.start + 1);
-    // A key can't repeat in an object literal (several `on:click`s can), so
-    // each repeat gets its own `createElement` call.
+    // A repeated `on:` repeats its key, as svelte2tsx writes it: the last
+    // handler is the key's type, and TypeScript reports an error in it at
+    // each key. That the key repeats (TS1117) is dropped, as svelte-check
+    // drops it. Any other repeat, which the compiler rejects, gets its own
+    // `createElement` call.
     const seen = new Set<string>();
     const repeats: Node[] = [];
     // Actions go first: what they return can add to the element's attributes.
@@ -856,8 +861,12 @@ export function emit(
           out.from(objectAt, () => out.raw("{"));
           for (const a of attributes) {
             const k = attributeKey(a);
-            if (k !== null && seen.has(k)) repeats.push(a);
-            else {
+            if (k !== null && seen.has(k)) {
+              if (a.type === "OnDirective") {
+                repeatedKeys.push([a.start, a.end]);
+                elementAttribute(a, inComponent);
+              } else repeats.push(a);
+            } else {
               if (k !== null) seen.add(k);
               elementAttribute(a, inComponent);
             }
@@ -1657,6 +1666,7 @@ export function emit(
       userSyntax,
       reactive,
       transitions,
+      repeatedKeys,
       storeDeclarations,
       bindingChecks,
     };
@@ -1834,6 +1844,7 @@ export function emit(
     userSyntax,
     reactive,
     transitions,
+    repeatedKeys,
     storeDeclarations,
     bindingChecks,
   };
