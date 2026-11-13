@@ -23,8 +23,6 @@ import { Output } from "./output.ts";
  * from what `$$render` returns. The `$$check` helpers it calls are
  * declared in `shims.d.ts`, and `svelteHTML` in svelte's `svelte-html.d.ts`.
  */
-const GENERIC_PARAM =
-  /^(const\s+)?(\w+)(?:\s+extends\s+([\s\S]+?))?(?:\s*=\s*([\s\S]+))?$/;
 const TS_LANG = /^(ts|typescript)$/;
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 const OWNS_TEMPLATE = /@(typedef|callback)\b/;
@@ -87,42 +85,69 @@ export interface EmitOptions {
   checkJs?: boolean;
 }
 
-/** `T extends A = B, U` as its parameters, top-level commas only. */
-function genericParams(generics: string): string[] {
-  return genericSpans(generics).map(([start, end]) =>
-    generics.slice(start, end),
-  );
+/** A `generics` parameter, its offsets in the attribute's text. */
+interface GenericParam {
+  start: number;
+  end: number;
+  name: string;
+  isConst: boolean;
+  constraint?: string;
+  fallback?: string;
 }
 
-/** Where each of `genericParams`' parameters starts and ends in `generics`. */
-function genericSpans(generics: string): [number, number][] {
-  const spans: [number, number][] = [];
-  let depth = 0;
-  let start = 0;
-  const push = (end: number) => {
-    const text = generics.slice(start, end);
-    const from = start + text.length - text.trimStart().length;
-    const to = start + text.trimEnd().length;
-    if (to > from) spans.push([from, to]);
-  };
-  for (const [i, c] of [...generics].entries()) {
-    if ("<([{".includes(c)) depth++;
-    if (">)]}".includes(c)) depth--;
-    if (c === "," && depth === 0) {
-      push(i);
-      start = i + 1;
-    }
+const GENERICS_HEAD = "function $$generics<";
+const LEADING_NAME = /^\s*(?:const\s+)?([$\w]+)/;
+
+/**
+ * `generics="T extends A = B, U"` as its parameters, read by the TS
+ * parser, so a comma or `=>` in a constraint doesn't split it. Generics
+ * that don't parse come back as one parameter over the whole text, so
+ * TypeScript reports their syntax errors there, as svelte-check does.
+ */
+function parseGenerics(generics: string): {
+  params: GenericParam[];
+  parsed: boolean;
+} {
+  const code = `${GENERICS_HEAD}${generics}\n>() {}`;
+  const whole = () => ({
+    params: [
+      {
+        start: 0,
+        end: generics.length,
+        name: generics.match(LEADING_NAME)?.[1] ?? "",
+        isConst: false,
+      },
+    ],
+    parsed: false,
+  });
+  // eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+  let declaration: any;
+  try {
+    declaration = parseModule(code, { typescript: true }).body[0];
+  } catch {
+    return whole();
   }
-  push(generics.length);
-  return spans;
+  const list = declaration?.typeParameters;
+  // A `>` in the text closes the list early.
+  if (list?.end !== GENERICS_HEAD.length + generics.length + 2) return whole();
+  const text = (node: { start: number; end: number } | null) =>
+    node ? code.slice(node.start, node.end) : undefined;
+  // eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+  const params = list.params.map((p: any) => ({
+    start: p.start - GENERICS_HEAD.length,
+    end: p.end - GENERICS_HEAD.length,
+    name: typeof p.name === "string" ? p.name : p.name.name,
+    isConst: Boolean(p.const),
+    constraint: text(p.constraint),
+    fallback: text(p.default),
+  }));
+  return { params, parsed: true };
 }
 
 /** `generics="T extends A = B, U"` as JSDoc: `@template {A} [T=B]`, `@template U`. */
-function jsdocTemplates(generics: string) {
-  return genericParams(generics).map((p) => {
-    const m = p.match(GENERIC_PARAM);
-    if (!m) return ` * @template ${p}`;
-    const [, modifier = "", name, constraint, fallback] = m;
+function jsdocTemplates(params: GenericParam[]) {
+  return params.map(({ name, isConst, constraint, fallback }) => {
+    const modifier = isConst ? "const " : "";
     return ` * @template ${constraint ? `{${constraint}} ` : ""}${fallback ? `[${modifier}${name}=${fallback}]` : `${modifier}${name}`}`;
   });
 }
@@ -449,8 +474,12 @@ export function emit(
   // only the JSDoc block right above a function, so merge the tags into one.
   /** JSDoc blocks moved out of the instance script. */
   const templateBlocks: [number, number][] = [];
+  /** Whether its syntax errors are the user's: `generics` that don't parse. */
+  let userSyntax = false;
   /** The component's type parameters, in TS: `generics="…"` and `$$Generic`. */
   const typeParams: string[] = [];
+  /** Each type parameter's name, as a type argument passes it. */
+  const typeParamNames: string[] = [];
   /**
    * Writes each type parameter, its source text mapped, so an error in
    * one (a constraint naming a missing type) is reported where it's
@@ -471,6 +500,7 @@ export function emit(
           ? `${s.id.name} extends ${source.slice(arg.start, arg.end)}`
           : s.id.name,
       );
+      typeParamNames.push(s.id.name);
       // Unmapped: svelte-check reports no error in a `$$Generic` constraint.
       const param = typeParams[typeParams.length - 1] ?? "";
       typeParamWriters.push(() => out.raw(param));
@@ -481,29 +511,33 @@ export function emit(
   if (instance) {
     const tags: string[] = [];
     const attr = instance.attributes.find((a: Node) => a.name === "generics");
+    const attrText = attr ? textOf(attr) : "";
+    const value = Array.isArray(attr?.value) ? attr.value[0] : attr?.value;
+    // Mapped only when the value is the source text as written: no
+    // entity like `&gt;` decoded.
+    const base =
+      value && source.slice(value.start, value.end) === attrText
+        ? value.start
+        : undefined;
+    const parsedGenerics = attr ? parseGenerics(attrText) : undefined;
+    const params = parsedGenerics?.params ?? [];
+    userSyntax = parsedGenerics?.parsed === false;
     if (attr && isTs) {
-      const text = textOf(attr);
-      const spans = genericSpans(text);
+      const spans = params.map(({ start, end }) => [start, end] as const);
       typeParams.unshift(
-        ...spans.map(([start, end]) => text.slice(start, end)),
+        ...spans.map(([start, end]) => attrText.slice(start, end)),
       );
-      const value = Array.isArray(attr.value) ? attr.value[0] : attr.value;
-      // Mapped only when the value is the source text as written: no
-      // entity like `&gt;` decoded.
-      const base =
-        value && source.slice(value.start, value.end) === text
-          ? value.start
-          : undefined;
+      typeParamNames.unshift(...params.map(({ name }) => name));
       typeParamWriters.unshift(
         ...spans.map(
           ([start, end]) =>
             () =>
               base === undefined
-                ? out.raw(text.slice(start, end))
+                ? out.raw(attrText.slice(start, end))
                 : out.copy(base + start, base + end),
         ),
       );
-    } else if (attr) tags.push(...jsdocTemplates(textOf(attr)));
+    } else if (attr) tags.push(...jsdocTemplates(params));
     const text = source.slice(instance.content.start, instance.content.end);
     for (const m of text.matchAll(JSDOC_BLOCK)) {
       const start = instance.content.start + (m.index ?? 0);
@@ -1598,6 +1632,7 @@ export function emit(
       isTs,
       lang,
       tsInJs,
+      userSyntax,
       reactive,
       transitions,
       storeDeclarations,
@@ -1710,7 +1745,7 @@ export function emit(
   };
   if (isTs && typeParams.length > 0 && svelte >= 4) {
     // A generic component's type takes the parameters a use infers.
-    const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[2] ?? p);
+    const names = typeParamNames;
     const args = `<${names.join(", ")}>`;
     const rendered = topLevelAwait
       ? `Awaited<ReturnType<typeof $$render${args}>>`
@@ -1747,6 +1782,7 @@ export function emit(
     isTs,
     lang,
     tsInJs,
+    userSyntax,
     reactive,
     transitions,
     storeDeclarations,
@@ -1786,7 +1822,7 @@ export function emit(
       `return { props: ${runesProps ?? none}, exports: ${exported}, bindings: ${bindable}, slots: {}, events: {} };\n}\n`,
     );
     if (isTs && typeParams.length > 0) {
-      const names = typeParams.map((p) => p.match(GENERIC_PARAM)?.[2] ?? p);
+      const names = typeParamNames;
       const args = `<${names.join(", ")}>`;
       const part = (name: string) => `ReturnType<$$Render${args}["${name}"]>`;
       const renderType = topLevelAwait
