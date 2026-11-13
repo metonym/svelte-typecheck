@@ -153,6 +153,11 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check on a component's CSS custom properties", () => {
+    const cwd = join(svelte5, "css-props");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // Without `allowJs`, an import of a JS component has no declaration.
   it("matches svelte-check on imports of a JS component without allowJs", () => {
     const cwd = join(svelte5, "untyped");

@@ -963,7 +963,12 @@ export function emit(
           if (inComponent && a.name === "slot") continue;
           const shorthand = shorthandOf(a);
           if (shorthand) out.copy(shorthand.start, shorthand.end).raw(",");
-          else {
+          else if (a.name.startsWith("--")) {
+            // A CSS custom property isn't a prop: only its value is checked.
+            out.raw("...$$check.none({");
+            key(a, a.name);
+            attrValue(a.value).raw("}),");
+          } else {
             key(a, a.name);
             attrValue(a.value).raw(",");
           }
