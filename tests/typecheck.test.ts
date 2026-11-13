@@ -106,6 +106,10 @@ describe("typecheck", () => {
         "deprecated/tsconfig.json:3:3 TS5102 error",
         "deprecated/tsconfig.json:7:5 TS5102 error",
       ]);
+      // The hint names the folder `baseUrl` did, from the project's tsconfig.
+      expect(result.diagnostics[0]?.message).toContain(
+        `"paths": {"*": ["./src/*"]}`,
+      );
     },
     30_000,
   );

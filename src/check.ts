@@ -69,6 +69,8 @@ const STOPPED = /Stopped before type checking/;
 /** A deprecated option's error, and the `ignoreDeprecations` that silences it. */
 const IGNORE_DEPRECATIONS =
   /is deprecated .*"ignoreDeprecations": "(\d+\.\d+)"/;
+/** tsgo's hint for a removed `baseUrl`: its folder, relative to our tsconfig. */
+const BASE_URL_HINT = /"paths": \{"\*": \["(.*?)(\/\*)"\]\}/;
 /** The option an option's error names: `baseUrl`, `target=ES5`. */
 const OPTION_NAME = /^Option '([^'=]+)/;
 const TS_SCRIPT = /<script\b[^>]*\blang=["']?(ts|typescript)\b/;
@@ -1370,6 +1372,12 @@ export async function typecheck(
       const offset = optionOffset(content, d.message);
       diagnostics.push({
         ...d,
+        // `baseUrl`'s replacement, which names a folder from ours.
+        message: d.message.replace(
+          BASE_URL_HINT,
+          (_, target: string, rest: string) =>
+            `"paths": {"*": ["${relativeTo(dirname(file), resolve(dirname(tsconfig), target))}${rest}"]}`,
+        ),
         file,
         ...locator(file, () => content).position(offset),
         ...endOf(content, offset, file),
