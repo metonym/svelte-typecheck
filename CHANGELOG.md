@@ -4,6 +4,11 @@
 
 **Fixes**
 
+- "Could not find a declaration file" for a package with types the
+  import can't use ends with svelte-check's second line, "Try
+  `npm i --save-dev @types/…`". It was TypeScript's "There are types
+  at …". One such package has types only in `exports`, under
+  `moduleResolution: node`.
 - A `// @ts-expect-error` or `// @ts-ignore` above an import in a
   component applies to it, as in svelte-check. The import moves out of
   the render function, and its comments now move with it.
