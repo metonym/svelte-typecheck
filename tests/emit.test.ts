@@ -45,10 +45,15 @@ describe("emit", () => {
     expect(out.code).toContain("d = $$check.any(0);");
   });
 
-  it("checks a repeated event handler in a call of its own", () => {
-    const { out } = emit("<button on:click on:click={() => {}}>x</button>\n");
+  it("repeats a repeated event handler's key, as svelte2tsx does", () => {
+    const source = "<button on:click on:click={() => {}}>x</button>\n";
+    const { out, repeatedKeys } = emit(source);
     const calls = out.code.match(/svelteHTML\.createElement\("button"/g);
-    expect(calls).toHaveLength(2);
+    expect(calls).toHaveLength(1);
+    expect(out.code.match(/"on:click":/g)).toHaveLength(2);
+    // The second, whose TS1117 is dropped.
+    expect(repeatedKeys).toEqual([[17, 36]]);
+    expect(source.slice(17, 36)).toBe("on:click={() => {}}");
   });
 
   it("writes `generics` as JSDoc in a JS component", () => {

@@ -45,6 +45,7 @@ What svelte-typecheck does that svelte-check doesn't:
 - **Slot content for a Svelte 5 component without a `children` prop** is reported at the tag's name. svelte-check places the error where svelte2tsx's text rewriting happens to anchor its inserted `children`: an attribute's opening quote, the start of a line, or after an attribute.
 - **`--out-dir` outside the project** can't find its packages from the generated code; the default is inside `node_modules`.
 - **`<svelte:element this={tag}>` whose tag may be any element**, such as a component's generic `Tag extends keyof HTMLElementTagNameMap`: svelte-check reports TypeScript's "union type too complex" and checks none of the element's attributes; here its attributes are checked as an element's. An attribute error on it names the attributes' type with the tag widened: `keyof HTMLElementTagNameMap extends Tag ? string : Tag`.
+- **A repeated `on:` on `<svelte:document>`**, such as two `on:click`s: svelte-check reports TypeScript's "An object literal cannot have multiple properties with the same name" about its generated code, as it drops that error on other elements only. Here it isn't reported on any element.
 
 ## Limitations
 
