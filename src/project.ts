@@ -264,11 +264,6 @@ export interface Project {
 
   /** Whether a side-effect import must resolve, or the checker's default. */
   noUncheckedSideEffectImports?: boolean;
-  /**
-   * The package's `exports`, as `paths`: what an import of its own name
-   * finds, once `paths` finds nothing.
-   */
-  selfExports: Record<string, string[]>;
   /** Whether an import of a package reads its `exports`. */
   readsExports: boolean;
 
@@ -328,7 +323,6 @@ export function projectOf(options: ProjectOptions): Project {
       allowJs: true,
       skipLibCheck: true,
       options: {},
-      selfExports: {},
       readsExports: true,
 
       configDirOptions: {},
@@ -396,9 +390,6 @@ export function projectOf(options: ProjectOptions): Project {
 
     noUncheckedSideEffectImports: inputs.noUncheckedSideEffectImports,
     // Resolution from before `exports` doesn't read them.
-    selfExports: LEGACY_RESOLUTION.test(inputs.moduleResolution ?? "")
-      ? {}
-      : exportsOf(dirname(tsconfig)),
     readsExports: !LEGACY_RESOLUTION.test(inputs.moduleResolution ?? ""),
 
     configDirOptions: inputs.configDirOptions ?? {},
