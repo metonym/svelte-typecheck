@@ -2,16 +2,72 @@
 
 ## Unreleased
 
+Some projects that passed may now fail. Each fix below marked "Checks
+more" found a case where a run checked less than svelte-check does, and
+passed when it shouldn't have.
+
 **Fixes**
 
+- A deprecated tsconfig option, like `baseUrl` or `target: "es5"`,
+  stopped tsc on TypeScript 6 before it type-checked, and the run
+  passed. tsgo, tsrs and Bun passed too, or Bun failed with an empty
+  "Generated code has syntax errors". Now tsc reruns with the
+  `ignoreDeprecations` it asks for, and reports each option as a
+  warning, as svelte-check does. tsgo, tsrs and Bun report each
+  removed option as an error. Both point at the option in the
+  project's tsconfig. Checks more
+  ([#86](https://github.com/metonym/svelte-typecheck/issues/86)).
+- `paths` resolve against an inherited `baseUrl`. With `baseUrl` set,
+  an alias like `$lib/*` found nothing, which gave hundreds of false
+  errors.
+- `target` and `module` change as in svelte-check: a target below
+  ES2015 is ES2015, and a CommonJS, AMD, UMD, System, ES2015 or unset
+  module is ESNext. A CommonJS project failed with "Generated code has
+  syntax errors", and an ES5 one got false errors. Checks more
+  ([#94](https://github.com/metonym/svelte-typecheck/issues/94)).
+- `${configDir}` in a tsconfig expands to the folder of the tsconfig
+  being compiled, as in TypeScript. It was read as a folder name, so a
+  project whose shared tsconfig uses it, as Astro's does, found no
+  components. Checks more
+  ([#69](https://github.com/metonym/svelte-typecheck/issues/69)).
+- `checkJs` without `allowJs` checks JS components and modules, as
+  TypeScript defaults `allowJs` to `checkJs`. They went unchecked
+  before. Checks more
+  ([#68](https://github.com/metonym/svelte-typecheck/issues/68)).
+- An import of a `.svelte` file that doesn't exist reports TS2307, or
+  TS2882 for a side-effect import, as in svelte-check. Svelte's
+  `*.svelte` module declaration hid it. Checks more
+  ([#66](https://github.com/metonym/svelte-typecheck/issues/66)).
+- A package whose `exports` types are a component, as
+  `"types": "./Editor.svelte"`, is typed from that component, as in
+  svelte-check. Its imports reported "Cannot find module"
+  ([#71](https://github.com/metonym/svelte-typecheck/issues/71)).
+- An error on an element's `on:` points at the event's name, 3 columns
+  later, as in svelte-check
+  ([#75](https://github.com/metonym/svelte-typecheck/issues/75)).
+- An error in a repeated `on:click` on one element is reported at each
+  one, and an error in an earlier handler isn't, as in svelte-check
+  ([#88](https://github.com/metonym/svelte-typecheck/issues/88)).
+- An error on a component's `bind:edited` names the prop `'edited'`,
+  as in svelte-check. It was `'"edited"'`
+  ([#76](https://github.com/metonym/svelte-typecheck/issues/76)).
+- A CSS custom property on a component, as `<Child --gap="1px" />`,
+  isn't passed as a prop. Each one was an excess-property error that
+  could hide a real error on the same tag. Its value is still checked
+  ([#72](https://github.com/metonym/svelte-typecheck/issues/72)).
+- "Cannot find module" has no "There are types at …" line, as in
+  svelte-check
+  ([#74](https://github.com/metonym/svelte-typecheck/issues/74)).
 - "Could not find a declaration file" for a package with types the
   import can't use ends with svelte-check's second line, "Try
   `npm i --save-dev @types/…`". It was TypeScript's "There are types
   at …". One such package has types only in `exports`, under
-  `moduleResolution: node`.
+  `moduleResolution: node`
+  ([#87](https://github.com/metonym/svelte-typecheck/issues/87)).
 - A `// @ts-expect-error` or `// @ts-ignore` above an import in a
   component applies to it, as in svelte-check. The import moves out of
-  the render function, and its comments now move with it.
+  the render function, and its comments now move with it
+  ([#70](https://github.com/metonym/svelte-typecheck/issues/70)).
 - In a JS component, a `@type` in the same JSDoc block as a `@typedef`
   or `@callback` applies to the declaration below it, as in
   svelte-check. The whole block moved to the top level with the
