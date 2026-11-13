@@ -433,6 +433,8 @@ export function emit(
   /** `$:` statements and transition directives, as source ranges. */
   const reactive: [number, number][] = [];
   const transitions: [number, number][] = [];
+  /** An element's repeated `on:`s, whose keys repeat in its object. */
+  const repeatedKeys: [number, number][] = [];
   /** Each `<slot>`'s attributes, by slot name. */
   const slots = new Map<string, Node[]>();
   /** Events the component forwards: an element's DOM event, or `any`. */
@@ -491,8 +493,28 @@ export function emit(
           return FUNCTION.test(node.type) ? SKIP : undefined;
         },
       });
-  for (const s of body)
-    if (s.type === "ImportDeclaration") copyStatement(s).raw("\n");
+  /**
+   * The comments above each import, which move with it, as in svelte2tsx:
+   * a `@ts-expect-error` there applies to it. A JSDoc block that moves to
+   * the top level on its own (a `@typedef` or `@template`) is left to that.
+   */
+  const importComments: [number, number][] = [];
+  let previousEnd = instance?.content.start ?? 0;
+  for (const s of body) {
+    if (s.type === "ImportDeclaration") {
+      let at = previousEnd;
+      for (const m of source.slice(at, s.start).matchAll(JSDOC_BLOCK)) {
+        if (!OWNS_TEMPLATE.test(m[0]) && !m[0].includes("@template")) continue;
+        const start = previousEnd + (m.index ?? 0);
+        out.copy(at, start);
+        at = start + m[0].length;
+      }
+      out.copy(at, s.start);
+      importComments.push([previousEnd, s.start]);
+      copyStatement(s).raw("\n");
+    }
+    previousEnd = s.end;
+  }
 
   // --- svelte2tsx's typing interfaces: `$$Props`, `$$Events`, `$$Slots`.
   const typed = new Set<string>();
@@ -797,7 +819,10 @@ export function emit(
     } else if (a.type === "SpreadAttribute")
       out.raw("...").copy(a.expression.start, a.expression.end).raw(",");
     else if (a.type === "OnDirective") {
-      key(a, `on:${a.name}`);
+      // An error on it points at the event's name, after `on:`.
+      out
+        .from(nameAt(a), () => out.raw(JSON.stringify(`on:${a.name}`)))
+        .raw(":");
       if (a.expression) expression(a.expression);
       else {
         out.raw("undefined");
@@ -860,8 +885,11 @@ export function emit(
       node.type === "RegularElement"
         ? node.start + node.name.length
         : (node.tag?.end ?? node.start + 1);
-    // A key can't repeat in an object literal (several `on:click`s can), so
-    // each repeat gets its own `createElement` call.
+    // A repeated `on:` repeats its key, as svelte2tsx writes it: the last
+    // handler is the key's type, and TypeScript reports an error in it at
+    // each key. That the key repeats (TS1117) is dropped, as svelte-check
+    // drops it. Any other repeat, which the compiler rejects, gets its own
+    // `createElement` call.
     const seen = new Set<string>();
     const repeats: Node[] = [];
     // Actions go first: what they return can add to the element's attributes.
@@ -904,8 +932,12 @@ export function emit(
           out.from(objectAt, () => out.raw("{"));
           for (const a of attributes) {
             const k = attributeKey(a);
-            if (k !== null && seen.has(k)) repeats.push(a);
-            else {
+            if (k !== null && seen.has(k)) {
+              if (a.type === "OnDirective") {
+                repeatedKeys.push([a.start, a.end]);
+                elementAttribute(a, inComponent);
+              } else repeats.push(a);
+            } else {
               if (k !== null) seen.add(k);
               elementAttribute(a, inComponent);
             }
@@ -1014,15 +1046,21 @@ export function emit(
           if (inComponent && a.name === "slot") continue;
           const shorthand = shorthandOf(a);
           if (shorthand) out.copy(shorthand.start, shorthand.end).raw(",");
-          else {
+          else if (a.name.startsWith("--")) {
+            // A CSS custom property isn't a prop: only its value is checked.
+            out.raw("...$$check.none({");
+            key(a, a.name);
+            attrValue(a.value).raw("}),");
+          } else {
             key(a, a.name);
             attrValue(a.value).raw(",");
           }
         } else if (a.type === "SpreadAttribute")
           out.raw("...").copy(a.expression.start, a.expression.end).raw(",");
         else if (a.type === "BindDirective" && a.name !== "this") {
-          // An error on a bound prop points at its name, after `bind:`.
-          out.from(nameAt(a), () => out.raw(JSON.stringify(a.name))).raw(":");
+          // An error on a bound prop points at its name, after `bind:`, and
+          // prints it bare, as svelte2tsx writes it.
+          out.from(nameAt(a), () => out.raw(keyOf(a.name))).raw(":");
           if (isGetSet(a.expression)) bound(a.expression).raw(",");
           else out.copy(a.expression.start, a.expression.end).raw(",");
         } else if (a.type === "AttachTag") attach(a);
@@ -1485,10 +1523,13 @@ export function emit(
     return;
   };
 
-  /** Copies [from, to), leaving out `@template` blocks. */
+  /** Copies [from, to), leaving out `@template` blocks and imports' comments. */
+  const moved = [...templateBlocks, ...importComments].sort(
+    (a, b) => a[0] - b[0],
+  );
   const copyGap = (from: number, to: number) => {
     let at = from;
-    for (const [s, e] of templateBlocks) {
+    for (const [s, e] of moved) {
       if (e <= at || s >= to) continue;
       out.copy(at, s);
       at = e;
@@ -1705,6 +1746,7 @@ export function emit(
       userSyntax,
       reactive,
       transitions,
+      repeatedKeys,
       storeDeclarations,
       bindingChecks,
     };
@@ -1882,6 +1924,7 @@ export function emit(
     userSyntax,
     reactive,
     transitions,
+    repeatedKeys,
     storeDeclarations,
     bindingChecks,
   };
