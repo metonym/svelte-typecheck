@@ -590,6 +590,19 @@ describe("svelte-check parity, machine output", () => {
     }, 60_000);
   });
 
+  it("matches svelte-check on Svelte 4 with TypeScript and no svelte.config", () => {
+    // Compiler warnings from the stripped script, and Svelte 4's parse
+    // errors for TypeScript and Svelte 5 syntax in markup.
+    // svelte-check from the Svelte 5 project loads the fixture's Svelte 4.
+    const cwd = join(root, "tests/projects/svelte4/markup");
+    const theirs = machine(
+      [...svelteCheckBin(svelte5), "--output", "machine"],
+      cwd,
+    );
+    expect(theirs).toContainEqual(expect.stringContaining("Unexpected token"));
+    expect(ours([], cwd)).toEqual(theirs);
+  }, 60_000);
+
   it("matches svelte-check with preprocessors", () => {
     const cwd = join(root, "tests/projects/preprocess");
     // svelte-check's css source (not supported) flags the custom style.

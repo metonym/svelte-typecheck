@@ -33,6 +33,7 @@ import {
   type CompileResult,
   type ConfigShape,
   isSvelteModule,
+  parseAsLegacy,
   svelteDirOf,
   withEdits,
 } from "./compiler.ts";
@@ -1161,6 +1162,9 @@ export async function typecheck(
       };
       let result: ReturnType<typeof emit>;
       try {
+        // svelte2tsx parses Svelte 3's and 4's markup with that Svelte's
+        // parser, whose errors svelte-check reports; sveast parses as Svelte 5.
+        if (svelteMajor < 5) parseAsLegacy(texts[i] ?? "", svelteDir);
         result = emitFor(i);
       } catch (error) {
         const e = error as Error & { start?: { line: number; column: number } };
