@@ -164,6 +164,11 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check with @ts-expect-error above an import", () => {
+    const cwd = join(svelte5, "ts-comments");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("warns, as svelte-check does, of a tsconfig with no components", () => {
     const cwd = join(svelte5, ".tmp/no-components");
     mkdirSync(join(cwd, "src"), { recursive: true });

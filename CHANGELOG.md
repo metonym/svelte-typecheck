@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- A `// @ts-expect-error` or `// @ts-ignore` above an import in a
+  component applies to it, as in svelte-check. The import moves out of
+  the render function, and its comments now move with it.
+
 ## 0.1.18 — 2026-11-13
 
 **Features**
