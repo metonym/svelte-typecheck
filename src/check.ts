@@ -75,6 +75,16 @@ const TS_SCRIPT = /<script\b[^>]*\blang=["']?(ts|typescript)\b/;
 const GENERATED_NAME =
   /(?:\+\+)?([^/\\]+?)(?:\.d\.svelte(?:\.ts)?|\.svelte\.[jt]s)$/;
 const DRIVE_PATH = /\b[A-Z]:\//g;
+/**
+ * An untyped package's import (TS7016), whose package has types the
+ * import can't use: TypeScript says where. svelte-check's resolver
+ * passes on only what an import resolved to, so its TypeScript gives
+ * the line for a package with no types.
+ */
+const UNUSABLE_TYPES =
+  /^(Could not find a declaration file for module '([^']*)'\..*)\n {2}There are types at .*$/;
+/** A package's name in a module specifier: `@scope/name` or `name`. */
+const PACKAGE_NAME = /^(?:@[^/]+\/)?[^/]+/;
 const toPosix = (path: string) => path.split(sep).join("/");
 const escapeRegExp = (text: string) =>
   text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -88,11 +98,19 @@ const TOKEN = /^(?:[\w$]+|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`]*`)/;
 const STORE_ERROR = /^TS(2769|2345)$/;
 /** Unused label, and an unused comma operand. */
 const REACTIVE_NOISE = /^TS(7028|2695)$/;
+/** "An object literal cannot have multiple properties with the same name." */
+const REPEATED_KEY = "TS1117";
 /**
  * "Cannot find module": an import that resolved to nothing, whose file
  * can appear where no input the result cache keys on changes.
  */
 const UNRESOLVED_MODULE = /^TS(2307|2732|2792|2882)$/;
+/**
+ * The line TypeScript adds to "Cannot find module" when it found types
+ * the import can't use. svelte-check's resolver passes on only what an
+ * import resolved to, so its TypeScript never adds it.
+ */
+const OTHER_TYPES = /\n {2}There are types at .*/;
 
 /** The caches' shape, in each one's key: a new shape misses the old. */
 const CACHE_FORMAT = 3;
@@ -427,6 +445,7 @@ function nonBindableMessage(message: string): string {
 const NOTHING_EMITTED = {
   reactive: [],
   transitions: [],
+  repeatedKeys: [],
   storeDeclarations: [],
   bindingChecks: [],
 };
@@ -721,7 +740,11 @@ export async function typecheck(
       isTs: boolean;
       emitted: Pick<
         ReturnType<typeof emit>,
-        "reactive" | "transitions" | "storeDeclarations" | "bindingChecks"
+        | "reactive"
+        | "transitions"
+        | "repeatedKeys"
+        | "storeDeclarations"
+        | "bindingChecks"
       >;
       /** A SvelteKit file's typed copy, whose syntax errors are the user's. */
       kit?: boolean;
@@ -1348,7 +1371,8 @@ export async function typecheck(
   // A syntax error in generated code stops the checker before it
   // type-checks anything, so it must fail the run, not pass it. A type
   // error anywhere means it type-checked, and a TS1xxx error was one of
-  // the semantic ones (no default export, misplaced `await`).
+  // the semantic ones (no default export, misplaced `await`). A repeated
+  // key is one too: the checker reports it as it type-checks.
   const typeChecked = raw.some((d) => TYPE_CODE.test(d.code));
   const syntax = typeChecked
     ? []
@@ -1356,6 +1380,7 @@ export async function typecheck(
         (d) =>
           inOutput(d.file) &&
           SYNTAX_CODE.test(d.code) &&
+          d.code !== REPEATED_KEY &&
           !outputs.get(resolve(cwd, d.file))?.kit &&
           !outputs.get(resolve(cwd, d.file))?.userSyntax,
       );
@@ -1475,14 +1500,16 @@ export async function typecheck(
         continue;
       }
       // What svelte-check filters out: a `$:` label TypeScript calls unused,
-      // a no-op comma in `$: a, b`, and a transition's third argument.
+      // a no-op comma in `$: a, b`, a transition's third argument, and a
+      // repeated `on:`'s repeated key.
       const within = (ranges: [number, number][]) =>
         ranges.some(([from, to]) => from <= source && source < to);
       if (
         (REACTIVE_NOISE.test(d.code) && within(gen.emitted.reactive)) ||
         (d.code === "TS2554" &&
           d.message.startsWith("Expected 3 arguments") &&
-          within(gen.emitted.transitions))
+          within(gen.emitted.transitions)) ||
+        (d.code === REPEATED_KEY && within(gen.emitted.repeatedKeys))
       )
         continue;
       const start = locator(gen.svelte, () => gen.source).position(source);
@@ -1528,6 +1555,8 @@ export async function typecheck(
     "gi",
   );
   for (const d of diagnostics) {
+    if (UNRESOLVED_MODULE.test(d.code))
+      d.message = d.message.replace(OTHER_TYPES, "");
     d.message = d.message.replace(generatedPath, (path) =>
       asTypeScriptPath(
         join(root, relative(toPosix(genDir), path)).replace(
@@ -1538,6 +1567,21 @@ export async function typecheck(
     );
     if (process.platform === "win32")
       d.message = d.message.replace(DRIVE_PATH, (drive) => drive.toLowerCase());
+    // TypeScript gives another line when the program has the package's
+    // types, or its `@types`, from another import. Rare, and the checker
+    // doesn't say, so this is the usual one.
+    if (d.code === "TS7016")
+      d.message = d.message.replace(
+        UNUSABLE_TYPES,
+        (_, head: string, specifier: string) => {
+          // `@scope/name`'s `@types` package is `@types/scope__name`.
+          const pkg = PACKAGE_NAME.exec(specifier)?.[0] ?? specifier;
+          const name = pkg.includes("/")
+            ? pkg.slice(1).replace("/", "__")
+            : pkg;
+          return `${head}\n  Try \`npm i --save-dev @types/${name}\` if it exists or add a new declaration (.d.ts) file containing \`declare module '${specifier}';\``;
+        },
+      );
   }
   diagnostics.push(...compiled);
   if (sources.has("js")) diagnostics.push(...parseErrors);

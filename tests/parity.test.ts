@@ -98,6 +98,18 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // A `@typedef` moves to the top level, but a `@type` in its block
+  // stays on the declaration below.
+  it("keeps a `@type` beside a `@typedef` on its declaration", () => {
+    const cwd = join(svelte5, "typedef-js");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check on a component's bind: directives", () => {
+    const cwd = join(svelte5, "bind-shorthand");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // svelte-check reports an error at each use of a JS legacy component
   // with generics, even a valid one. Here it's generic, as the same
   // component in TS is in svelte-check.
@@ -153,10 +165,25 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check on an element's on: directives", () => {
+    const cwd = join(svelte5, "on-directive");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check on an element's repeated on: directives", () => {
+    const cwd = join(svelte5, "repeated-on-directive");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // Each helper the generated code calls, failing, and a TS file that
   // uses components wrongly: every name the shims' types print.
   it("matches svelte-check where a message prints the shims' types", () => {
     const cwd = join(svelte5, "helpers");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check on a component's CSS custom properties", () => {
+    const cwd = join(svelte5, "css-props");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
@@ -166,9 +193,130 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // TypeScript turns `allowJs` on with `checkJs`.
+  it("matches svelte-check with checkJs and no allowJs", () => {
+    const cwd = join(svelte5, "checkjs");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  // A package with a JS entry, and types the import can't use: TypeScript
+  // says where they are, and svelte-check's TypeScript doesn't know.
+  it.each([
+    [
+      "types only in exports, under moduleResolution node",
+      "untyped-node10",
+      { moduleResolution: "node", ignoreDeprecations: "6.0" },
+      "pkg",
+      {
+        "package.json": {
+          name: "pkg",
+          version: "1.0.0",
+          exports: {
+            ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
+          },
+        },
+        "index.js": "export const c = 1;\n",
+        "dist/index.d.ts": "export declare const c: number;\n",
+        "dist/index.js": "export const c = 1;\n",
+      },
+    ],
+    [
+      "types outside exports, in a scoped package",
+      "untyped-bundler",
+      { moduleResolution: "bundler" },
+      "@scope/pkg",
+      {
+        "package.json": {
+          name: "@scope/pkg",
+          version: "1.0.0",
+          exports: { ".": { import: "./dist/index.js" } },
+        },
+        "index.d.ts": "export declare const c: number;\n",
+        "dist/index.js": "export const c = 1;\n",
+      },
+    ],
+  ])(
+    "matches svelte-check on an untyped package import with %s",
+    (_, name, options, pkg, files) => {
+      const cwd = join(svelte5, ".tmp", name);
+      const write = (file: string, content: unknown) => {
+        mkdirSync(dirname(join(cwd, file)), { recursive: true });
+        writeFileSync(
+          join(cwd, file),
+          typeof content === "string" ? content : JSON.stringify(content),
+        );
+      };
+      write("tsconfig.json", {
+        // Without skipLibCheck, Svelte's own types fail to resolve under
+        // `node`; that's #74.
+        compilerOptions: {
+          strict: true,
+          module: "esnext",
+          skipLibCheck: true,
+          ...options,
+        },
+      });
+      for (const [file, content] of Object.entries(files))
+        write(`node_modules/${pkg}/${file}`, content);
+      write("y.ts", `import { c } from "${pkg}";\nexport const d = c;\n`);
+      write(
+        "App.svelte",
+        `<script lang="ts">\n  import { c } from "${pkg}";\n</script>\n\n{c}\n`,
+      );
+      const expected = svelteCheck([], cwd);
+      expect(
+        expected.filter((line) => line.includes("Try `npm i")),
+      ).toHaveLength(2);
+      expect(ours([], cwd)).toEqual(expected);
+    },
+    60_000,
+  );
+
   it("matches svelte-check's message rewrites and filters", () => {
     const cwd = join(svelte5, "filters");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check with @ts-expect-error above an import", () => {
+    const cwd = join(svelte5, "ts-comments");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  // Under `moduleResolution: node`, TypeScript adds where it found types
+  // that the import can't use.
+  it("matches svelte-check on an import that finds types only in exports", () => {
+    const cwd = join(svelte5, ".tmp/exports-only-types");
+    const files = {
+      "tsconfig.json": JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          module: "esnext",
+          moduleResolution: "node",
+          ignoreDeprecations: "6.0",
+        },
+      }),
+      "node_modules/pkg/package.json": JSON.stringify({
+        name: "pkg",
+        exports: { "./sub": { types: "./dist/sub.d.ts" } },
+      }),
+      "node_modules/pkg/dist/sub.d.ts": "export const a: number;\n",
+      "x.ts": 'import { a } from "pkg/sub";\nexport const b = a;\n',
+      "App.svelte": [
+        '<script lang="ts">',
+        '  import { a } from "pkg/sub";',
+        "</script>",
+        "{a}",
+      ].join("\n"),
+    };
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(cwd, file)), { recursive: true });
+      writeFileSync(join(cwd, file), content);
+    }
+    const unresolved = (lines: string[]) =>
+      lines.filter((line) => line.includes("pkg/sub"));
+    const expected = unresolved(svelteCheck([], cwd));
+    expect(expected).toHaveLength(2);
+    expect(unresolved(ours([], cwd))).toEqual(expected);
   }, 60_000);
 
   it("warns, as svelte-check does, of a tsconfig with no components", () => {
