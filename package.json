@@ -54,7 +54,7 @@
     "bun-types": "1.4.4",
     "knip": "^6.44.1",
     "ostia": "^0.2.12",
-    "sveast": "^0.9.7"
+    "sveast": "^0.9.9"
   },
   "repository": {
     "type": "git",
