@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -53,6 +54,38 @@ describe("typecheck", () => {
     },
     30_000,
   );
+
+  // A run learns which `ignoreDeprecations` the tsconfig needs, and the
+  // next runs tsc once, with it, for the same result.
+  it("reuses what a run learned of a tsconfig's deprecated options", async () => {
+    const options = {
+      cwd: svelte5,
+      workspace: "deprecated",
+      checker: "tsc" as const,
+      outDir: "node_modules/.cache/svelte-typecheck/test-deprecated-cache",
+    };
+    rmSync(join(svelte5, options.outDir), { recursive: true, force: true });
+    const first = await typecheck(options);
+    expect(existsSync(join(svelte5, options.outDir, "deprecations.json"))).toBe(
+      true,
+    );
+    const count = join(svelte5, "deprecated/src/lib/Count.svelte");
+    const text = readFileSync(count, "utf-8");
+    // A change to a component, so the result isn't reused whole.
+    writeFileSync(count, `${text}\n`);
+    try {
+      const second = await typecheck(options);
+      expect(second.diagnostics).toEqual(first.diagnostics);
+      expect(first.diagnostics.map((d) => `${d.code} ${d.severity}`)).toEqual([
+        "TS2322 error",
+        "TS2322 error",
+        "TS5101 warning",
+        "TS5101 warning",
+      ]);
+    } finally {
+      writeFileSync(count, text);
+    }
+  }, 60_000);
 
   // TypeScript 7 removed what TypeScript 6 deprecates, and won't check.
   it.each<Checker>(["bun", "tsrs", "tsgo"])(

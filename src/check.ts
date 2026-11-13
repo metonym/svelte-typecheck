@@ -1144,11 +1144,30 @@ export async function typecheck(
   // The compiler pass runs while the checker's process works.
   const launch =
     checker && native && sources.has("js") ? await native : undefined;
+  // What a last run learned of the tsconfig's deprecated options, so this
+  // one runs the checker once, not twice.
+  const deprecationsPath = join(outDir, DEPRECATIONS_CACHE);
+  const deprecationsKey = hash(
+    JSON.stringify([
+      checker,
+      statsOf([...project.configFiles, ...packageFilesOf(projectDir)]),
+    ]),
+  );
+  const known = incremental
+    ? await readFile(deprecationsPath, "utf-8")
+        .then((text) => JSON.parse(text) as DeprecationsCache)
+        .then((c) => (c.key === deprecationsKey ? c : undefined))
+        .catch(() => undefined)
+    : undefined;
   const checking =
     checker && launch
       ? run(
           launch.command,
-          [...launch.prefix, ...checkerArgs(checker, tsconfig)],
+          [
+            ...launch.prefix,
+            ...checkerArgs(checker, tsconfig),
+            ...(known ? ["--ignoreDeprecations", known.ignore] : []),
+          ],
           cwd,
           launch.shell,
         ).then(({ output, code }) => ({ output, code, at: performance.now() }))
@@ -1242,7 +1261,7 @@ export async function typecheck(
   // ours extends its tsconfig.
   const onOptions = (d: RawDiagnostic) =>
     d.file !== "" && resolve(cwd, d.file) === tsconfig;
-  let raw = parseDiagnostics(text);
+  let raw = [...(known?.diagnostics ?? []), ...parseDiagnostics(text)];
   // A deprecated option stops tsc before it type-checks. svelte-check's
   // language service checks anyway and warns of the option, so the checker
   // runs again, told to ignore it.
@@ -1250,7 +1269,7 @@ export async function typecheck(
     raw.map((d) => onOptions(d) && IGNORE_DEPRECATIONS.exec(d.message)?.[1]),
   );
   const [ignored] = ignore;
-  if (checker && launch && ignore.size === 1 && ignored) {
+  if (checker && launch && !known && ignore.size === 1 && ignored) {
     const deprecated = raw;
     ({ output: text, code } = await run(
       launch.command,
@@ -1265,6 +1284,15 @@ export async function typecheck(
     ));
     checked = performance.now();
     raw = [...deprecated, ...parseDiagnostics(text)];
+    if (incremental)
+      await writeFile(
+        deprecationsPath,
+        JSON.stringify({
+          key: deprecationsKey,
+          ignore: ignored,
+          diagnostics: deprecated,
+        } satisfies DeprecationsCache),
+      );
   }
   const inOutput = (file: string) =>
     resolve(cwd, file).startsWith(`${outDir}${sep}`);
@@ -1629,6 +1657,15 @@ export async function typecheck(
 }
 
 const FACTS_CACHE = "files.json";
+const DEPRECATIONS_CACHE = "deprecations.json";
+interface DeprecationsCache {
+  /** The checker, and the stats of the tsconfigs and package files. */
+  key: string;
+  /** The `ignoreDeprecations` the checker asked for. */
+  ignore: string;
+  /** The checker's errors for the deprecated options. */
+  diagnostics: RawDiagnostic[];
+}
 interface Facts {
   /** Its size and modification time. */
   stat: string;
