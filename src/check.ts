@@ -40,6 +40,7 @@ import {
   asTypeScriptPath,
   byFolder,
   programFiles,
+  type Project,
   projectOf,
   relativeTo,
   scriptsOf,
@@ -161,6 +162,37 @@ const DEFAULT_COMPILER_OPTIONS = {
   module: "esnext",
   moduleResolution: "bundler",
 };
+
+/**
+ * The options svelte-check changes before it checks: a `target` below
+ * ES2015, and a `module` for which a component's `import.meta` or
+ * top-level `await` isn't valid. An unset `moduleResolution`, which it
+ * makes `node10`, is `bundler` here: TypeScript 7 removed `node10`.
+ */
+function svelteCheckOptions(options: Project["options"]) {
+  const target = options.target?.toLowerCase();
+  const module = options.module?.toLowerCase();
+  const resolution = options.moduleResolution?.toLowerCase();
+  return {
+    ...(!target ? { target: "esnext" } : {}),
+    ...(target === "es3" || target === "es5" ? { target: "es2015" } : {}),
+    ...(!module || OLD_MODULES.has(module) ? { module: "esnext" } : {}),
+    ...(resolution === "classic" ? { moduleResolution: "node10" } : {}),
+    // TypeScript 5 resolves `esnext` with `classic`, which can't find a package.
+    ...(!resolution && !module?.startsWith("node")
+      ? { moduleResolution: "bundler" }
+      : {}),
+  };
+}
+const OLD_MODULES = new Set([
+  "amd",
+  "commonjs",
+  "es2015",
+  "es6",
+  "none",
+  "system",
+  "umd",
+]);
 
 /** Thrown when generated code doesn't parse: an emitter bug, not a type error. */
 export class EmitError extends Error {}
@@ -1065,7 +1097,9 @@ export async function typecheck(
         {
           ...(project.tsconfig ? { extends: rel(project.tsconfig) } : {}),
           compilerOptions: {
-            ...(project.tsconfig ? {} : DEFAULT_COMPILER_OPTIONS),
+            ...(project.tsconfig
+              ? svelteCheckOptions(project.options)
+              : DEFAULT_COMPILER_OPTIONS),
             rootDirs: [rel(root), "svelte", ...rootDirs.map(rel)],
             ...(Object.keys(paths).length > 0
               ? {

@@ -91,6 +91,13 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // svelte-check raises `target: "es5"` to ES2015 and `module: "commonjs"`
+  // to ESNext, so a component's `import.meta` and `for...of` are valid.
+  it("matches svelte-check with an ES5 target and a CommonJS module", () => {
+    const cwd = join(svelte5, "old-module");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // svelte-check reports an error at each use of a JS legacy component
   // with generics, even a valid one. Here it's generic, as the same
   // component in TS is in svelte-check.
