@@ -11,6 +11,12 @@
   `// svelte-ignore` and `--compiler-warnings` apply. A module with an
   `enum` or a parameter property isn't compiled, as its types can't be
   removed in place.
+- A `github` output, for GitHub Actions. Each problem prints as a
+  workflow command, `::error file=…,line=…::message`, which a PR shows
+  on its diff. Paths are relative to `GITHUB_WORKSPACE`, so a project
+  in a subfolder annotates the right file. svelte-check has no such
+  output
+  ([sveltejs/language-tools#1036](https://github.com/sveltejs/language-tools/issues/1036)).
 
 **Fixes**
 

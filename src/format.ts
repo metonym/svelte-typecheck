@@ -1,10 +1,18 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { relative, sep } from "node:path";
 import type { Diagnostic } from "./types.ts";
 
-/** svelte-check's output formats, and `agent` for a coding agent. */
+/**
+ * svelte-check's output formats, `agent` for a coding agent, and `github`
+ * for GitHub Actions annotations.
+ */
 export type OutputFormat =
-  "human" | "human-verbose" | "machine" | "machine-verbose" | "agent";
+  | "human"
+  | "human-verbose"
+  | "machine"
+  | "machine-verbose"
+  | "agent"
+  | "github";
 
 export const OUTPUT_FORMATS: OutputFormat[] = [
   "human",
@@ -12,6 +20,7 @@ export const OUTPUT_FORMATS: OutputFormat[] = [
   "machine",
   "machine-verbose",
   "agent",
+  "github",
 ];
 
 interface Colors {
@@ -164,6 +173,20 @@ function displayed(workspace: string): string {
     : workspace;
 }
 
+/** human's summary: the count of errors, warnings and files, colored. */
+function humanSummary(
+  summary: Summary,
+  write: (text: string) => void,
+  c: Colors,
+) {
+  const { errors, warnings, filesWithProblems } = summary;
+  if (filesWithProblems) write("====================================\n");
+  const message = `svelte-typecheck found ${errors} ${errors === 1 ? "error" : "errors"} and ${warnings} ${warnings === 1 ? "warning" : "warnings"}${filesWithProblems ? ` in ${filesWithProblems} ${filesWithProblems === 1 ? "file" : "files"}` : ""}\n`;
+  if (errors) write(c.red(message));
+  else if (warnings) write(c.yellow(message));
+  else write(c.green(message));
+}
+
 /** Writes a run as svelte-check would, to `write`. */
 export function writer(
   format: OutputFormat,
@@ -174,6 +197,7 @@ export function writer(
   const verbose = format.endsWith("verbose");
   const log = (message: string) => write(`${Date.now()} ${message}\n`);
   if (format === "agent") return agentWriter(write);
+  if (format === "github") return githubWriter(write, c);
   return {
     start(workspace: string, clearScreen = false) {
       if (!machine && clearScreen && process.stdout.isTTY)
@@ -233,11 +257,7 @@ export function writer(
         );
         return;
       }
-      if (filesWithProblems) write("====================================\n");
-      const message = `svelte-typecheck found ${errors} ${errors === 1 ? "error" : "errors"} and ${warnings} ${warnings === 1 ? "warning" : "warnings"}${filesWithProblems ? ` in ${filesWithProblems} ${filesWithProblems === 1 ? "file" : "files"}` : ""}\n`;
-      if (errors) write(c.red(message));
-      else if (warnings) write(c.yellow(message));
-      else write(c.green(message));
+      humanSummary(summary, write, c);
       if (watching) write("Watching for file changes...");
     },
     failure(error: Error) {
@@ -287,6 +307,63 @@ function agentWriter(write: (text: string) => void) {
     },
     failure(error: Error) {
       write(`${error.message}\n`);
+    },
+  };
+}
+
+/** A workflow command's message, with what would end it escaped. */
+const escapeData = (text: string) =>
+  text.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+/** A workflow command's property, which a `:` or `,` would end too. */
+const escapeProperty = (text: string) =>
+  escapeData(text).replace(/:/g, "%3A").replace(/,/g, "%2C");
+
+/**
+ * Writes a run as GitHub Actions workflow commands, which a PR shows on
+ * its diff: `::error file=…,line=…::message`. A file is relative to
+ * `GITHUB_WORKSPACE`, the repository's root, so a project in a subfolder
+ * annotates the right file. The summary is human's.
+ */
+function githubWriter(write: (text: string) => void, c: Colors) {
+  // Diagnostics' paths are real, so the root must be too: on macOS,
+  // /tmp is a link to /private/tmp.
+  const rootOf = (workspace: string) => {
+    const root = process.env.GITHUB_WORKSPACE || workspace;
+    try {
+      return realpathSync(root);
+    } catch {
+      return root;
+    }
+  };
+  return {
+    start(_workspace: string, _clearScreen = false) {},
+    diagnostic(d: Diagnostic, workspace: string) {
+      const root = rootOf(workspace);
+      const file = relative(root, d.file).split(sep).join("/");
+      const properties = [
+        `file=${file}`,
+        `line=${d.line}`,
+        `col=${d.column}`,
+        `endLine=${d.endLine ?? d.line}`,
+        `endColumn=${d.endColumn ?? d.column}`,
+        `title=${d.code}`,
+      ].map((p) => {
+        const at = p.indexOf("=");
+        return `${p.slice(0, at)}=${escapeProperty(p.slice(at + 1))}`;
+      });
+      write(
+        `::${d.severity} ${properties.join(",")}::${escapeData(d.message)}\n`,
+      );
+    },
+    note(text: string) {
+      write(`${text}\n`);
+    },
+    completion(summary: Summary, watching = false) {
+      humanSummary(summary, write, c);
+      if (watching) write("Watching for file changes...\n");
+    },
+    failure(error: Error) {
+      write(`::error::${escapeData(error.message)}\n`);
     },
   };
 }
