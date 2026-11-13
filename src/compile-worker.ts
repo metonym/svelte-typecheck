@@ -5,6 +5,8 @@ import {
   compileAll,
   compileFiles,
   type CompileFilesRequest,
+  compileModules,
+  type CompileModulesRequest,
   type CompileRequest,
 } from "./compiler.ts";
 
@@ -13,17 +15,16 @@ parentPort?.on(
   async (
     message:
       | { id: number; request: CompileRequest }
-      | { id: number; files: CompileFilesRequest },
+      | { id: number; files: CompileFilesRequest }
+      | { id: number; modules: CompileModulesRequest },
   ) => {
     const { id } = message;
     try {
-      parentPort?.postMessage({
-        id,
-        result:
-          "files" in message
-            ? await compileFiles(message.files)
-            : await compileAll(message.request),
-      });
+      let result: unknown;
+      if ("files" in message) result = await compileFiles(message.files);
+      else if ("modules" in message) result = compileModules(message.modules);
+      else result = await compileAll(message.request);
+      parentPort?.postMessage({ id, result });
     } catch (error) {
       parentPort?.postMessage({
         id,

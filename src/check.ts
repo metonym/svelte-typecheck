@@ -23,10 +23,12 @@ import {
   compileAll,
   compileFilesOffThread,
   compileKey,
+  compileModulesOffThread,
   compileOffThread,
   type CompileRequest,
   type CompileResult,
   type ConfigShape,
+  isSvelteModule,
   svelteDirOf,
   withEdits,
 } from "./compiler.ts";
@@ -635,6 +637,37 @@ export async function typecheck(
   }
   // Unhandled until awaited, after the checker: a rejection is the run's.
   compilingOffThread?.catch(() => {});
+  // The program's `.svelte.js` and `.svelte.ts` modules, which a build
+  // compiles too: their runes have warnings of their own. Those not cached
+  // compile on the worker, while the checker runs.
+  const modules = sources.has("svelte")
+    ? listedFiles.filter(
+        (path) =>
+          isSvelteModule(path) &&
+          !resolve(cwd, path).startsWith(`${outDir}${sep}`) &&
+          !path.includes(`${sep}node_modules${sep}`),
+      )
+    : [];
+  const moduleTexts = await Promise.all(
+    modules.map((path) => readFile(path, "utf-8").catch(() => "")),
+  );
+  const moduleKeys = modules.map((path, i) =>
+    compileKey(relative(cwd, path), moduleTexts[i] ?? ""),
+  );
+  const missingModules = modules
+    .map((_, i) => i)
+    .filter((i) => cache.entries[moduleKeys[i] ?? ""] === undefined);
+  const compilingModules =
+    missingModules.length > 0
+      ? compileModulesOffThread({
+          svelteDir,
+          modules: missingModules.map((i) => ({
+            source: moduleTexts[i] ?? "",
+            filename: relative(cwd, modules[i] ?? ""),
+          })),
+        })
+      : undefined;
+  compilingModules?.catch(() => {});
   // When it finished, for the run's timings, as this thread may be busy then.
   const compiledOffThreadAt = compilingOffThread?.then(
     () => performance.now(),
@@ -1132,6 +1165,7 @@ export async function typecheck(
 
   const compiled: Diagnostic[] = [];
   const perFile: CompilerDiagnostic[][] = [];
+  const perModule: CompilerDiagnostic[][] = [];
   if (sources.has("svelte")) {
     if (missing.length > 0) {
       // Here, once the checker runs, when there's no worker for it.
@@ -1143,9 +1177,15 @@ export async function typecheck(
       cache.shapeKey = fresh.shape && shapeKey;
     }
     for (const key of keys) perFile.push(cache.entries[key] ?? []);
+    if (compilingModules) {
+      const fresh = await compilingModules;
+      for (const [n, i] of missingModules.entries())
+        cache.entries[moduleKeys[i] ?? ""] = fresh[n] ?? [];
+    }
+    for (const key of moduleKeys) perModule.push(cache.entries[key] ?? []);
     if (incremental) {
       const kept = Object.fromEntries(
-        keys.map((key) => [key, cache.entries[key] ?? []]),
+        [...keys, ...moduleKeys].map((key) => [key, cache.entries[key] ?? []]),
       );
       await writeFile(
         cachePath,
@@ -1158,8 +1198,12 @@ export async function typecheck(
       );
     }
   }
-  for (const [i, path] of files.entries())
-    for (const d of perFile[i] ?? []) {
+  const byFile: (readonly [string, CompilerDiagnostic[] | undefined])[] = [
+    ...files.map((path, i) => [path, perFile[i]] as const),
+    ...modules.map((path, i) => [path, perModule[i]] as const),
+  ];
+  for (const [path, found] of byFile)
+    for (const d of found ?? []) {
       const level = options.compilerWarnings?.[d.code];
       if (d.severity === "warning" && level === "ignore") continue;
       compiled.push({

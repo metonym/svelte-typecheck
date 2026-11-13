@@ -120,7 +120,17 @@ describe("svelte-check parity, machine output", () => {
 
   it("matches svelte-check with runes, snippets, attachments and function bindings", () => {
     const cwd = join(svelte5, "runes");
-    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+    // The one warning svelte-check misses: a module's, which it doesn't
+    // compile. `counter.svelte.ts` has a type error too, so the files
+    // with problems are the same.
+    const extra = `WARNING "counter.svelte.ts" 8:5 "This reference only captures the initial value of \`label\`. Did you mean to reference it inside a closure instead?\\nhttps://svelte.dev/e/state_referenced_locally"`;
+    const mine = ours([], cwd);
+    expect(mine).toContain(extra);
+    expect(mine.filter((line) => line !== extra)).toEqual(
+      svelteCheck([], cwd).map((line) =>
+        line.replace(/ (\d+) WARNINGS/, (_, n) => ` ${Number(n) + 1} WARNINGS`),
+      ),
+    );
   }, 60_000);
 
   it("matches svelte-check in a SvelteKit project", () => {
