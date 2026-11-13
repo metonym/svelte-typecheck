@@ -55,6 +55,10 @@ svelte-typecheck --output machine
 # Annotate a PR's diff from GitHub Actions
 svelte-typecheck --output github
 
+# Print each problem with its code and source lines, for a coding agent.
+# This is the default under Claude Code, Codex, or with AGENT set.
+svelte-typecheck --output agent
+
 # Print errors only, or fail on warnings as well
 svelte-typecheck --threshold error
 svelte-typecheck --fail-on-warnings
