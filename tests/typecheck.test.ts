@@ -351,6 +351,67 @@ describe("typecheck", () => {
     30_000,
   );
 
+  // A repeated `on:` repeats its key in the element's object, as
+  // svelte2tsx writes it. Each checker reports the last handler's error
+  // at each key, and that the key repeats (TS1117) at none.
+  it.each<Checker>(["bun", "tsrs", "tsgo", "tsc"])(
+    "reports a repeated on: as svelte-check does, with %s",
+    async (checker) => {
+      const { diagnostics } = await typecheck({
+        cwd: svelte5,
+        workspace: "repeated-on-directive",
+        diagnosticSources: ["js"],
+        checker,
+        incremental: false,
+        outDir: `node_modules/.cache/svelte-typecheck/test-repeated-on-${checker}`,
+      });
+      expect(diagnostics.map((d) => `${d.line}:${d.column} ${d.code}`)).toEqual(
+        [
+          "5:12 TS2322",
+          "5:37 TS2322",
+          "8:12 TS2322",
+          "8:37 TS2322",
+          "8:62 TS2322",
+          "9:12 TS2322",
+          "9:54 TS2322",
+          "11:9 TS2353",
+          "12:19 TS2322",
+          "12:47 TS2322",
+        ],
+      );
+    },
+    30_000,
+  );
+
+  // With no type error to show it type-checked, TS1117 alone isn't taken
+  // for a syntax error in the generated code.
+  it.each<Checker>(["bun", "tsrs", "tsgo", "tsc"])(
+    "passes a repeated on: with no error, with %s",
+    async (checker) => {
+      const dir = join(svelte5, `.tmp/repeated-on-${checker}`);
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: { strict: true },
+          include: ["*.svelte"],
+        }),
+      );
+      writeFileSync(
+        join(dir, "App.svelte"),
+        '<script lang="ts">\n  let x = 0;\n</script>\n<button on:click={() => (x = 1)} on:click={() => (x = 2)}>{x}</button>\n',
+      );
+      const { diagnostics } = await typecheck({
+        cwd: dir,
+        checker,
+        incremental: false,
+      });
+      expect(diagnostics).toEqual([]);
+    },
+    30_000,
+  );
+
   it("reads a JSDoc cast in a template expression, as svelte-check does", async () => {
     const dir = join(svelte5, ".tmp/template-cast");
     rmSync(dir, { recursive: true, force: true });

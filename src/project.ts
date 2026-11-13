@@ -56,6 +56,7 @@ interface RawConfig {
     checkJs?: boolean;
     allowJs?: boolean;
     skipLibCheck?: boolean;
+    noUncheckedSideEffectImports?: boolean;
     moduleResolution?: string;
     outDir?: string;
     declarationDir?: string;
@@ -74,6 +75,7 @@ interface Inputs {
   checkJs?: boolean;
   allowJs?: boolean;
   skipLibCheck?: boolean;
+  noUncheckedSideEffectImports?: boolean;
   moduleResolution?: string;
   /** `include` and `exclude` as written, relative to the tsconfig read first. */
   includeSpecs?: string[];
@@ -151,6 +153,7 @@ function readInputs(
       checkJs: options?.checkJs,
       allowJs: options?.allowJs,
       skipLibCheck: options?.skipLibCheck,
+      noUncheckedSideEffectImports: options?.noUncheckedSideEffectImports,
       moduleResolution: options?.moduleResolution,
       includeSpecs: config.include,
       excludeSpecs: config.exclude,
@@ -248,6 +251,8 @@ export interface Project {
   allowJs: boolean;
   /** Whether a declaration file's errors go unreported. */
   skipLibCheck: boolean;
+  /** Whether a side-effect import must resolve, or the checker's default. */
+  noUncheckedSideEffectImports?: boolean;
   /**
    * The package's `exports`, as `paths`: what an import of its own name
    * finds, once `paths` finds nothing.
@@ -360,9 +365,12 @@ export function projectOf(options: ProjectOptions): Project {
     // A package's subpath imports (`#lib/*`) work as `paths` do, after them.
     paths: { ...importsOf(dirname(tsconfig)), ...inputs.paths },
     checkJs: inputs.checkJs ?? false,
-    // A jsconfig.json allows JS by default.
-    allowJs: inputs.allowJs ?? basename(tsconfig) === "jsconfig.json",
+    // A jsconfig.json allows JS by default, and `checkJs` does too.
+    allowJs:
+      inputs.allowJs ??
+      (basename(tsconfig) === "jsconfig.json" || inputs.checkJs === true),
     skipLibCheck: inputs.skipLibCheck ?? false,
+    noUncheckedSideEffectImports: inputs.noUncheckedSideEffectImports,
     // Resolution from before `exports` doesn't read them.
     selfExports: LEGACY_RESOLUTION.test(inputs.moduleResolution ?? "")
       ? {}
