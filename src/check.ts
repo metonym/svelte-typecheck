@@ -39,6 +39,7 @@ import { createLocator, type Output } from "./output.ts";
 import {
   asTypeScriptPath,
   byFolder,
+  exportsOf,
   programFiles,
   projectOf,
   relativeTo,
@@ -318,31 +319,14 @@ function importResolver(rootDirs: string[], paths: Record<string, string[]>) {
     }
     return;
   };
-  const patterns = Object.entries(paths).map(([key, targets]) => {
-    const star = key.indexOf("*");
-    return { key, star, targets };
-  });
   return (from: string, specifier: string): string | undefined => {
     if (specifier.startsWith(".")) {
       const target = resolve(dirname(from), specifier);
       return fileAt(target) ?? throughRootDirs(target);
     }
-    for (const { key, star, targets } of patterns) {
-      let rest: string;
-      if (star === -1) {
-        if (specifier !== key) continue;
-        rest = "";
-      } else {
-        const prefix = key.slice(0, star);
-        const suffix = key.slice(star + 1);
-        if (
-          !specifier.startsWith(prefix) ||
-          !specifier.endsWith(suffix) ||
-          specifier.length < prefix.length + suffix.length
-        )
-          continue;
-        rest = specifier.slice(prefix.length, specifier.length - suffix.length);
-      }
+    for (const [key, targets] of Object.entries(paths)) {
+      const rest = starOf(key, specifier);
+      if (rest === undefined) continue;
       for (const target of targets) {
         const found = fileAt(target.replace("*", rest));
         if (found) return found;
@@ -350,6 +334,58 @@ function importResolver(rootDirs: string[], paths: Record<string, string[]>) {
     }
     return;
   };
+}
+
+/** What a `paths` or `exports` key's `*` stands for in a specifier it matches. */
+function starOf(key: string, specifier: string): string | undefined {
+  const star = key.indexOf("*");
+  if (star === -1) return specifier === key ? "" : undefined;
+  const prefix = key.slice(0, star);
+  const suffix = key.slice(star + 1);
+  return specifier.startsWith(prefix) &&
+    specifier.endsWith(suffix) &&
+    specifier.length >= prefix.length + suffix.length
+    ? specifier.slice(prefix.length, specifier.length - suffix.length)
+    : undefined;
+}
+
+const matchesPaths = (paths: Record<string, string[]>, specifier: string) =>
+  Object.keys(paths).some((key) => starOf(key, specifier) !== undefined);
+
+/** A file's import specifiers, from a scan of its text. */
+const specifiersOf = (code: string) =>
+  [...code.matchAll(STATIC_IMPORT), ...code.matchAll(DYNAMIC_IMPORT)].map(
+    (m) => m[1] ?? "",
+  );
+
+/** The package name a bare specifier starts with: `pkg` or `@scope/pkg`. */
+const PACKAGE_NAME = /^(?:@[\w.-]+\/)?\w[\w.-]*(?=\/|$)/;
+
+/** The installed package an import from a folder finds, as Node walks up. */
+function packageDirOf(from: string, name: string): string | undefined {
+  for (let dir = from; ; dir = dirname(dir)) {
+    const path = join(dir, "node_modules", name);
+    if (existsSync(join(path, "package.json"))) return path;
+    if (dirname(dir) === dir) return;
+  }
+}
+
+/**
+ * The file a package's `exports`, in `paths`' shape, give a specifier, as
+ * TypeScript tries them: its own key, then the longest pattern's first target.
+ */
+function exportOf(
+  exports: Record<string, string[]>,
+  specifier: string,
+): string | undefined {
+  const exact = exports[specifier]?.[0];
+  if (exact) return exact;
+  const [pattern] = Object.keys(exports)
+    .filter((key) => key.includes("*") && starOf(key, specifier) !== undefined)
+    .sort((a, b) => b.indexOf("*") - a.indexOf("*"));
+  if (!pattern) return;
+  const rest = starOf(pattern, specifier) ?? "";
+  return exports[pattern]?.[0]?.replaceAll("*", rest);
 }
 
 const NON_BINDABLE =
@@ -445,6 +481,8 @@ export async function typecheck(
       join("node_modules/.cache/svelte-typecheck", relative(cwd, workspace)),
   );
   const genDir = join(outDir, "svelte");
+  /** Generated code for the components packages export, not reported. */
+  const packagesDir = join(outDir, "packages");
   const declarations = options.declarations ?? true;
   const svelteDir = svelteDirOf(cwd, options.svelte);
   const sources = new Set(options.diagnosticSources ?? ["js", "svelte"]);
@@ -753,7 +791,7 @@ export async function typecheck(
       }),
     );
     const tsModules = listedFiles.filter((path) => TS_MODULE.test(path));
-    await fileFacts.read(tsModules);
+    await fileFacts.read(tsModules, "svelteImports");
     return [...tsComponents.keys(), ...tsModules].flatMap((path) =>
       fileFacts
         .of(
@@ -768,6 +806,44 @@ export async function typecheck(
           return target && untyped.has(target) ? [{ ...i, path, target }] : [];
         }),
     );
+  })();
+  /**
+   * An import of a package whose `exports` name a component as its types,
+   * which svelte-check types by the component: each package and component.
+   */
+  const packageComponents = await (async () => {
+    if (!(sources.has("js") && declarations && project.readsExports)) return [];
+    const scripts = listedFiles.filter((path) => !path.endsWith(".svelte"));
+    await fileFacts.read(scripts, "specifiers");
+    /** Each package's `package.json` and `exports`, by its name. */
+    const packages = new Map<string, [string, Record<string, string[]>]>();
+    const found = new Map<
+      string,
+      { specifier: string; path: string; manifest: string }
+    >();
+    for (const [i, from] of [...files, ...scripts].entries())
+      for (const specifier of fileFacts.of(
+        from,
+        "specifiers",
+        specifiersOf,
+        texts[i],
+      )) {
+        const name = PACKAGE_NAME.exec(specifier)?.[0];
+        if (!name || found.has(specifier)) continue;
+        if (matchesPaths(project.paths, specifier)) continue;
+        let known = packages.get(name);
+        if (!known) {
+          const dir = packageDirOf(dirname(from), name);
+          known = dir ? [join(dir, "package.json"), exportsOf(dir)] : ["", {}];
+          packages.set(name, known);
+        }
+        const [manifest, exports] = known;
+        const path = exportOf(exports, specifier);
+        // With its own `X.svelte.d.ts`, svelte-check doesn't find it either.
+        if (path?.endsWith(".svelte") && !existsSync(`${path}.d.ts`))
+          found.set(specifier, { specifier, path, manifest });
+      }
+    return [...found.values()].filter(({ path }) => existsSync(path));
   })();
   // The compiler's diagnostics alone need no generated code, and leave
   // the last run's in place.
@@ -948,6 +1024,47 @@ export async function typecheck(
           `export { default } from "./++${name}.svelte.js";\nexport * from "./++${name}.svelte.js";\n`,
         );
     }
+    // A package's component, which an import of the package finds through
+    // `paths`: generated apart, by its path in `node_modules`.
+    const packageCode = new Map<string, string>();
+    for (const { specifier, path } of packageComponents) {
+      const text = readFileSync(path, "utf-8");
+      const key = hash(`${path}\0package\0${text}`);
+      const cached = emitCache.entries[key]?.genPath;
+      let genPath = cached && existsSync(cached) ? cached : undefined;
+      if (genPath) written.add(genPath);
+      else {
+        const inPackages = `${sep}node_modules${sep}`;
+        const at = path.lastIndexOf(inPackages) + inPackages.length;
+        const genFrom = join(packagesDir, dirname(path.slice(at)));
+        let result: ReturnType<typeof emit>;
+        try {
+          result = emit(text, {
+            svelte: svelteMajor,
+            basename: basename(path),
+            checkJs: project.checkJs,
+            rewriteImport: (s) =>
+              s.startsWith(".")
+                ? relativeTo(genFrom, resolve(dirname(path), s))
+                : undefined,
+          });
+        } catch {
+          continue;
+        }
+        if (result.lang === "js" && !project.allowJs) continue;
+        genPath = join(
+          genFrom,
+          `++${basename(path, ".svelte")}.svelte.${result.isTs ? "ts" : "js"}`,
+        );
+        write(genPath, result.out.code);
+      }
+      nextEmitCache.entries[key] = {
+        files: [genPath],
+        genPath,
+        diagnostics: [],
+      };
+      packageCode.set(specifier, genPath);
+    }
     if (incremental) write(emitCachePath, JSON.stringify(nextEmitCache));
 
     // An untyped JS component, as TypeScript has an untyped JS module:
@@ -1026,6 +1143,8 @@ export async function typecheck(
       for (const i of untypedImports)
         if (!i.specifier.startsWith("."))
           paths[i.specifier] = [untypedDeclarationOf(i.target)];
+    for (const [specifier, genPath] of packageCode)
+      paths[specifier] = [genPath];
 
     // A copy beside the generated code, so its `import("svelte")` is the
     // project's Svelte, not whichever this package was installed with.
@@ -1146,11 +1265,7 @@ export async function typecheck(
       return fileFacts.of(
         path,
         "specifiers",
-        (code) =>
-          [
-            ...code.matchAll(STATIC_IMPORT),
-            ...code.matchAll(DYNAMIC_IMPORT),
-          ].map((m) => m[1] ?? ""),
+        specifiersOf,
         generated.get(path),
       );
     },
@@ -1374,7 +1489,8 @@ export async function typecheck(
         svelteMajor,
       );
     } else if (inOutput(d.file) || !project.reports(abs)) {
-      if (inOutput(d.file))
+      // svelte-check reports nothing in a package's component either.
+      if (inOutput(d.file) && !under(abs, packagesDir))
         dropped.push({ ...d, file: abs, severity: "error", source: "ts" });
       continue;
     } else {
@@ -1537,9 +1653,13 @@ export async function typecheck(
       compile: compiledAt - (compileStartedAt ?? emitted),
     },
   };
-  const inputs = [...order.keys()]
-    .filter((path) => !under(path, outDir))
-    .flatMap((path) => [path, ...declarationsBeside(path)]);
+  const inputs = [
+    ...[...order.keys()].filter((path) => !under(path, outDir)),
+    // The components packages export, read outside the program.
+    ...packageComponents.map(({ path }) => path),
+  ]
+    .flatMap((path) => [path, ...declarationsBeside(path)])
+    .concat(packageComponents.map(({ manifest }) => manifest));
   if (incremental) await fileFacts.save();
   // A result with an import that resolved to nothing isn't kept: the file
   // it names can appear anywhere resolution looks, which nothing here stats.
@@ -1679,7 +1799,8 @@ async function factsCache(path: string, enabled: boolean) {
       facts[kind] ??= compute(
         text ?? texts.get(file) ?? readFileSync(file, "utf-8"),
       );
-      if (facts.specifiers && facts.svelteImports) texts.delete(file);
+      // A run reads `specifiers` last: `svelteImports` comes first, if at all.
+      if (facts.specifiers) texts.delete(file);
       return facts[kind] as NonNullable<Facts[K]>;
     },
     /**
@@ -1687,11 +1808,15 @@ async function factsCache(path: string, enabled: boolean) {
      * at a time, a run's first read of a project's TS files can take a
      * few hundred milliseconds.
      */
-    async read(files: string[]): Promise<void> {
+    async read(
+      files: string[],
+      kind: "specifiers" | "svelteImports",
+    ): Promise<void> {
       await Promise.all(
         files.map(async (file) => {
           const facts = used[file] ?? entries[file];
-          if (facts?.stat === statOf(file) && facts.svelteImports) return;
+          if (facts?.stat === statOf(file) && facts[kind]) return;
+          if (texts.has(file)) return;
           const text = await readFile(file, "utf-8").catch(() => undefined);
           if (text !== undefined) texts.set(file, text);
         }),

@@ -220,6 +220,8 @@ export interface Project {
    * finds, once `paths` finds nothing.
    */
   selfExports: Record<string, string[]>;
+  /** Whether an import of a package reads its `exports`. */
+  readsExports: boolean;
   /** The tsconfig's own `include` and `exclude`, as written. */
   raw: { include?: string[]; exclude?: string[] };
   /**
@@ -271,6 +273,7 @@ export function projectOf(options: ProjectOptions): Project {
       allowJs: true,
       skipLibCheck: true,
       selfExports: {},
+      readsExports: true,
       raw: {},
       reports: () => false,
     };
@@ -328,6 +331,7 @@ export function projectOf(options: ProjectOptions): Project {
     selfExports: LEGACY_RESOLUTION.test(inputs.moduleResolution ?? "")
       ? {}
       : exportsOf(dirname(tsconfig)),
+    readsExports: !LEGACY_RESOLUTION.test(inputs.moduleResolution ?? ""),
     raw,
     inputSpecs:
       inputs.files || raw.references
@@ -368,7 +372,7 @@ function importsOf(dir: string): Record<string, string[]> {
 }
 
 /** A package's `exports` under its own name, in `paths`' shape. */
-function exportsOf(dir: string): Record<string, string[]> {
+export function exportsOf(dir: string): Record<string, string[]> {
   const path = findUp(dir, "package.json");
   if (!path) return {};
   let name: unknown;
