@@ -1088,9 +1088,12 @@ export async function typecheck(
             ...(Object.keys(paths).length > 0
               ? {
                   paths: Object.fromEntries(
+                    // Against the `baseUrl` ours inherits, if any.
                     Object.entries(paths).map(([key, targets]) => [
                       key,
-                      targets.map(rel),
+                      targets.map((t) =>
+                        relativeTo(project.baseUrl ?? outDir, t),
+                      ),
                     ]),
                   ),
                 }

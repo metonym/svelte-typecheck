@@ -209,6 +209,8 @@ export interface Project {
   configFiles: string[];
   /** The tsconfig's `paths`, with absolute targets. */
   paths: Record<string, string[]>;
+  /** The tsconfig's `baseUrl`, as an absolute path. */
+  baseUrl?: string;
   /** Whether a JS component's types are checked. */
   checkJs: boolean;
   /** Whether a JS component is in the program at all, or untyped. */
@@ -320,6 +322,7 @@ export function projectOf(options: ProjectOptions): Project {
     configFiles,
     // A package's subpath imports (`#lib/*`) work as `paths` do, after them.
     paths: { ...importsOf(dirname(tsconfig)), ...inputs.paths },
+    baseUrl: inputs.baseUrl,
     checkJs: inputs.checkJs ?? false,
     // A jsconfig.json allows JS by default.
     allowJs: inputs.allowJs ?? basename(tsconfig) === "jsconfig.json",
