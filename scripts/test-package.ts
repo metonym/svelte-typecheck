@@ -23,11 +23,11 @@ const MACHINE_ERROR = /^\d+ ERROR "(.+)" (\d+:\d+) /gm;
 const WINDOWS = process.platform === "win32";
 
 function run(command: string, args: string[], cwd: string) {
-  // npm is a `.cmd` shim on Windows, which runs only through the shell.
+  // npm and npx are `.cmd` shims on Windows, which run only through the shell.
   return spawnSync(command, args, {
     cwd,
     encoding: "utf-8",
-    shell: WINDOWS && command === "npm",
+    shell: WINDOWS && (command === "npm" || command === "npx"),
   });
 }
 
@@ -101,7 +101,8 @@ try {
     dist,
   ).trim();
 
-  // A project with the fixtures, svelte and TypeScript 6 for `tsc`.
+  // A project with the fixtures, svelte and TypeScript 6 for `tsc`. Its
+  // `check` script is one `bun check` would run in its place.
   const project = join(dir, "project");
   cpSync(join(root, "tests/projects/svelte5/basic"), project, {
     recursive: true,
@@ -111,6 +112,13 @@ try {
       name: "project",
       private: true,
       type: "module",
+      scripts: {
+        check: "echo the check script ran",
+        "typecheck:tsc":
+          "svelte-typecheck --checker tsc --output machine --no-incremental",
+        "typecheck:bun":
+          "svelte-typecheck --checker bun --output machine --no-incremental",
+      },
     }),
   });
   ok(
@@ -143,6 +151,31 @@ try {
       `${runtime} svelte-typecheck: exit ${result.status}, ${errors.length} errors\n${result.stdout}${result.stderr}`,
     );
   }
+
+  // Each way a user starts it, with each runtime's checker. Under `--bun`,
+  // Bun runs the bin under the name node; `bun x` and npx, from the
+  // project's `node_modules/.bin`.
+  const launchers: [string, (checker: string) => string[]][] = [
+    ["npx", (c) => ["--no-install", "svelte-typecheck", "--checker", c]],
+    ["bun", (c) => ["x", "svelte-typecheck", "--checker", c]],
+    ["bun", (c) => ["x", "--bun", "svelte-typecheck", "--checker", c]],
+    ["npm", (c) => ["run", "--silent", `typecheck:${c}`]],
+    ["bun", (c) => ["run", `typecheck:${c}`]],
+    ["bun", (c) => ["--bun", "run", `typecheck:${c}`]],
+  ];
+  for (const [command, args] of launchers)
+    for (const checker of ["tsc", "bun"]) {
+      const argv = args(checker);
+      const machine = argv.includes("--checker")
+        ? [...argv, "--output", "machine", "--no-incremental"]
+        : argv;
+      const result = run(command, machine, project);
+      const errors = [...result.stdout.matchAll(MACHINE_ERROR)];
+      assert(
+        result.status === 1 && errors.length === 12,
+        `${command} ${machine.join(" ")}: exit ${result.status}, ${errors.length} errors\n${result.stdout}${result.stderr}`,
+      );
+    }
 
   // On Node with no other checker on PATH (bun run adds this repo's
   // node_modules/.bin, with tsrs and tsgo), it finds the project's tsc.
