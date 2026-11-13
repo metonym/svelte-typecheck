@@ -11,7 +11,11 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
-import { lexComponent, lexImportsExports } from "sveast/lexer";
+import {
+  lexComponent,
+  lexDynamicImports,
+  lexImportsExports,
+} from "sveast/lexer";
 import { version as TOOL_VERSION } from "../package.json";
 import {
   checkerArgs,
@@ -100,7 +104,7 @@ const REPEATED_KEY = "TS1117";
  * "Cannot find module": an import that resolved to nothing, whose file
  * can appear where no input the result cache keys on changes.
  */
-const UNRESOLVED_MODULE = /^TS(2307|2732|2792)$/;
+const UNRESOLVED_MODULE = /^TS(2307|2732|2792|2882)$/;
 /**
  * The line TypeScript adds to "Cannot find module" when it found types
  * the import can't use. svelte-check's resolver passes on only what an
@@ -109,7 +113,7 @@ const UNRESOLVED_MODULE = /^TS(2307|2732|2792)$/;
 const OTHER_TYPES = /\n {2}There are types at .*/;
 
 /** The caches' shape, in each one's key: a new shape misses the old. */
-const CACHE_FORMAT = 2;
+const CACHE_FORMAT = 3;
 /** The last run's result, and a key to what it read. */
 const RESULT_CACHE = "result.json";
 interface ResultCache {
@@ -294,12 +298,44 @@ function programOrder(
   };
 }
 
+/** `./a.js` names `./a.ts`, `./a.d.ts` too, as TypeScript resolves it. */
+const moduleCandidates = (target: string) =>
+  [
+    target,
+    `${target}.ts`,
+    `${target}.d.ts`,
+    `${target}.js`,
+    target.replace(JS_EXTENSION, ".$1ts$2"),
+    target.replace(JS_EXTENSION, ".d.$1ts"),
+    join(target, "index.ts"),
+    join(target, "index.js"),
+  ].filter((path) => !path.includes(`${sep}node_modules${sep}`));
+
+/**
+ * What declares a `.svelte` file's module to TypeScript: the file, its
+ * declaration (`A.svelte.d.ts`, `A.d.svelte.ts`), or a module named after
+ * it (`A.svelte.ts`), in `node_modules` too.
+ */
+const componentCandidates = (target: string) => [
+  target,
+  ...[".ts", ".tsx", ".d.ts", ".js", ".jsx"].map((ext) => `${target}${ext}`),
+  `${target.slice(0, -".svelte".length)}.d.svelte.ts`,
+  ...["index.ts", "index.tsx", "index.d.ts", "index.js", "index.jsx"].map(
+    (index) => join(target, index),
+  ),
+];
+
 /**
  * A module resolver for ordering, close enough to TypeScript's: relative
  * imports, through `rootDirs` (SvelteKit's `./$types`) when the file isn't
- * there, and `paths`. Packages aren't followed.
+ * there, and `paths`. Packages aren't followed. `matchesPaths` tells
+ * whether a specifier is one `paths` maps.
  */
-function importResolver(rootDirs: string[], paths: Record<string, string[]>) {
+function importResolver(
+  rootDirs: string[],
+  paths: Record<string, string[]>,
+  candidates: (target: string) => string[] = moduleCandidates,
+) {
   const exists = new Map<string, boolean>();
   const isFile = (path: string) => {
     let found = exists.get(path);
@@ -309,20 +345,7 @@ function importResolver(rootDirs: string[], paths: Record<string, string[]>) {
     }
     return found;
   };
-  // `./a.js` names `./a.ts`, `./a.d.ts` too, as TypeScript resolves it.
-  const fileAt = (target: string) =>
-    [
-      target,
-      `${target}.ts`,
-      `${target}.d.ts`,
-      `${target}.js`,
-      target.replace(JS_EXTENSION, ".$1ts$2"),
-      target.replace(JS_EXTENSION, ".d.$1ts"),
-      join(target, "index.ts"),
-      join(target, "index.js"),
-    ].find(
-      (path) => !path.includes(`${sep}node_modules${sep}`) && isFile(path),
-    );
+  const fileAt = (target: string) => candidates(target).find(isFile);
   const throughRootDirs = (target: string) => {
     const from = rootDirs
       .filter((dir) => target.startsWith(`${dir}${sep}`))
@@ -340,11 +363,9 @@ function importResolver(rootDirs: string[], paths: Record<string, string[]>) {
     const star = key.indexOf("*");
     return { key, star, targets };
   });
-  return (from: string, specifier: string): string | undefined => {
-    if (specifier.startsWith(".")) {
-      const target = resolve(dirname(from), specifier);
-      return fileAt(target) ?? throughRootDirs(target);
-    }
+  /** The targets of each `paths` key a specifier matches, or `undefined` for none. */
+  const pathTargets = (specifier: string): string[] | undefined => {
+    let matched: string[] | undefined;
     for (const { key, star, targets } of patterns) {
       let rest: string;
       if (star === -1) {
@@ -361,13 +382,30 @@ function importResolver(rootDirs: string[], paths: Record<string, string[]>) {
           continue;
         rest = specifier.slice(prefix.length, specifier.length - suffix.length);
       }
-      for (const target of targets) {
-        const found = fileAt(target.replace("*", rest));
-        if (found) return found;
-      }
+      matched = [
+        ...(matched ?? []),
+        ...targets.map((target) => target.replace("*", rest)),
+      ];
+    }
+    return matched;
+  };
+  const resolveImport = (
+    from: string,
+    specifier: string,
+  ): string | undefined => {
+    if (specifier.startsWith(".")) {
+      const target = resolve(dirname(from), specifier);
+      return fileAt(target) ?? throughRootDirs(target);
+    }
+    for (const target of pathTargets(specifier) ?? []) {
+      const found = fileAt(target);
+      if (found) return found;
     }
     return;
   };
+  return Object.assign(resolveImport, {
+    matchesPaths: (specifier: string) => pathTargets(specifier) !== undefined,
+  });
 }
 
 const NON_BINDABLE =
@@ -788,9 +826,96 @@ export async function typecheck(
         .flatMap((i) => {
           const target =
             resolvePath(path, i.specifier) ?? resolveSelf(path, i.specifier);
-          return target && untyped.has(target) ? [{ ...i, path, target }] : [];
+          return target && untyped.has(target) && i.form !== "dynamic"
+            ? [{ ...i, path, target }]
+            : [];
         }),
     );
+  })();
+  /**
+   * Imports of `.svelte` files that aren't there. Svelte's own types
+   * declare every `*.svelte` module, so the checker finds them all.
+   * svelte-check hides that declaration, so TypeScript reports them, in
+   * Svelte 4 and 5: Svelte 3's types don't declare it.
+   */
+  const missingImports = await (async () => {
+    if (!(sources.has("js") && svelteMajor >= 4)) return [];
+    // What TypeScript checks: TS, and JS with `checkJs`.
+    const components = new Map(
+      files.flatMap((path, i) => {
+        const text = texts[i] ?? "";
+        return TS_SCRIPT.test(text) || project.checkJs
+          ? [[path, text] as const]
+          : [];
+      }),
+    );
+    const checkedModules = listedFiles.filter(
+      (path) =>
+        (TS_MODULE.test(path) || (project.checkJs && JS_FILE.test(path))) &&
+        !(project.skipLibCheck && DECLARATION_FILE.test(path)),
+    );
+    await fileFacts.read(checkedModules);
+    const resolvePath = importResolver(
+      [root, ...project.rootDirs],
+      project.paths,
+      componentCandidates,
+    );
+    // An import of the package's own name, which `paths` didn't find.
+    const resolveSelf = importResolver(
+      [],
+      project.selfExports,
+      componentCandidates,
+    );
+    const absent = [...components.keys(), ...checkedModules].flatMap((path) =>
+      fileFacts
+        .of(
+          path,
+          "svelteImports",
+          (content) => svelteImportsOf(content, path.endsWith(".svelte")),
+          components.get(path),
+        )
+        .filter((i) => {
+          if (i.specifier.startsWith("."))
+            return !resolvePath(path, i.specifier);
+          // A package's, which `paths` doesn't map, isn't looked for; one
+          // `paths` maps can still be a package's, as TypeScript falls back.
+          return (
+            resolvePath.matchesPaths(i.specifier) &&
+            !resolvePath(path, i.specifier) &&
+            !resolveSelf(path, i.specifier) &&
+            packageDirOf(path, i.specifier) === undefined
+          );
+        })
+        .map((i) => ({
+          ...i,
+          path,
+          source: (
+            path.endsWith(".svelte")
+              ? TS_SCRIPT.test(components.get(path) ?? "")
+              : TS_MODULE.test(path)
+          )
+            ? ("ts" as const)
+            : ("js" as const),
+        })),
+    );
+    if (absent.length === 0) return [];
+    // A project that declares `*.svelte` itself: svelte-check keeps that.
+    const declares = listedFiles.some(
+      (path) =>
+        TS_MODULE.test(path) &&
+        SVELTE_MODULE_DECLARATION.test(readFileSync(path, "utf-8")),
+    );
+    if (declares) return [];
+    // A file with `@ts-nocheck` isn't checked.
+    const unchecked = new Set(
+      [...new Set(absent.map((i) => i.path))].filter((path) =>
+        hasNoCheck(
+          components.get(path) ?? readFileSync(path, "utf-8"),
+          path.endsWith(".svelte"),
+        ),
+      ),
+    );
+    return absent.filter((i) => !unchecked.has(i.path));
   })();
   // The compiler's diagnostics alone need no generated code, and leave
   // the last run's in place.
@@ -1462,12 +1587,40 @@ export async function typecheck(
   if (sources.has("js")) diagnostics.push(...parseErrors);
   // Without `allowJs`, svelte-check still loads a JS component, so an
   // import of it from TypeScript is untyped (TS7016). It isn't in this
-  // program, so the import is found here.
-  if (untypedImports.length > 0) {
-    /** `@ts-expect-error`s that TS7016 would have used, by file and line. */
+  // program, so the import is found here. So is one of a component that
+  // isn't there (TS2307), which Svelte's types declare to the checker.
+  const sideEffectsChecked =
+    project.noUncheckedSideEffectImports ??
+    // TypeScript 6 turned it on; tsgo, tsrs and Bun check them too.
+    !(checker === "tsc" && Number.parseInt(command?.version ?? "") < 6);
+  const importErrors = [
+    ...untypedImports.map((i) => ({
+      ...i,
+      source: "ts" as const,
+      code: "TS7016",
+      message: `Could not find a declaration file for module '${i.specifier}'. '${asTypeScriptPath(i.target)}' implicitly has an 'any' type.`,
+    })),
+    ...missingImports
+      // A side-effect import is checked only with that option.
+      .filter((i) => i.form !== "side-effect" || sideEffectsChecked)
+      .map((i) => ({
+        ...i,
+        ...(i.form === "side-effect"
+          ? {
+              code: "TS2882",
+              message: `Cannot find module or type declarations for side-effect import of '${i.specifier}'.`,
+            }
+          : {
+              code: "TS2307",
+              message: `Cannot find module '${i.specifier}' or its corresponding type declarations.`,
+            }),
+      })),
+  ];
+  if (importErrors.length > 0) {
+    /** `@ts-expect-error`s that these errors would have used, by file and line. */
     const expected = new Set<string>();
     const untypedErrors: Diagnostic[] = [];
-    for (const i of untypedImports) {
+    for (const i of importErrors) {
       // With `skipLibCheck`, a declaration file's errors aren't reported.
       if (project.skipLibCheck && DECLARATION_FILE.test(i.path)) continue;
       if (i.directive) {
@@ -1479,12 +1632,19 @@ export async function typecheck(
         file: i.path,
         line: i.line,
         column: i.column,
+        // The specifier, quotes included, as the editor underlines it.
+        endLine: i.line,
+        endColumn: i.column + i.length,
         severity: "error",
-        source: "ts",
-        code: "TS7016",
-        message: `Could not find a declaration file for module '${i.specifier}'. '${asTypeScriptPath(i.target)}' implicitly has an 'any' type.`,
+        source: i.source,
+        code: i.code,
+        message: i.message,
       });
     }
+    untypedErrors.sort(
+      (a, b) =>
+        a.file.localeCompare(b.file) || a.line - b.line || a.column - b.column,
+    );
     // Where TypeScript reports it: after the errors before the import in
     // its file (another import's, say), and before those after it.
     for (const error of untypedErrors) {
@@ -1587,7 +1747,11 @@ export async function typecheck(
   if (incremental) await fileFacts.save();
   // A result with an import that resolved to nothing isn't kept: the file
   // it names can appear anywhere resolution looks, which nothing here stats.
-  if (incremental && diagnostics.some((d) => UNRESOLVED_MODULE.test(d.code)))
+  if (
+    incremental &&
+    (missingImports.length > 0 ||
+      diagnostics.some((d) => UNRESOLVED_MODULE.test(d.code)))
+  )
     await rm(resultPath, { force: true });
   else if (incremental)
     await writeFile(
@@ -1624,9 +1788,48 @@ interface SvelteImport {
   directive: "ignore" | "expect-error" | null;
   /** The names it imports, or re-exports. */
   names: string[];
+  /** The specifier's length, quotes included. */
+  length: number;
+  /** `import "./A.svelte"`, which binds nothing, or `import("./A.svelte")`. */
+  form?: "side-effect" | "dynamic";
 }
 
-/** A TS source's `.svelte` imports: a module's, or a component's scripts'. */
+/** A declaration of every `.svelte` module, as Svelte's types have one. */
+const SVELTE_MODULE_DECLARATION = /declare\s+module\s+(["'])\*\.svelte\1/;
+/** A file's leading comments, where TypeScript reads `@ts-nocheck`. */
+const LEADING_COMMENTS = /^(?:\s|\/\/[^\n]*|\/\*[\s\S]*?\*\/)*/;
+const NO_CHECK = /^\s*(?:\/\/|\/\*|\*)\s*@ts-nocheck\b/m;
+
+/** Whether a module, or a component's script, starts with `@ts-nocheck`. */
+function hasNoCheck(content: string, component: boolean): boolean {
+  const lexed = component ? lexComponent(content) : undefined;
+  const scripts = lexed
+    ? [lexed.module, lexed.instance].flatMap((script) =>
+        script ? [content.slice(script.content.start, script.content.end)] : [],
+      )
+    : [content];
+  return scripts.some((script) =>
+    NO_CHECK.test(LEADING_COMMENTS.exec(script)?.[0] ?? ""),
+  );
+}
+
+/** The folder of the package a bare specifier names, from `from` up. */
+function packageDirOf(from: string, specifier: string): string | undefined {
+  const parts = specifier.split("/");
+  const name = (
+    specifier.startsWith("@") ? parts.slice(0, 2) : parts.slice(0, 1)
+  ).join("/");
+  for (let dir = dirname(from); ; dir = dirname(dir)) {
+    const path = join(dir, "node_modules", name);
+    if (existsSync(path)) return path;
+    if (dirname(dir) === dir) return;
+  }
+}
+
+/** `import` alone before a specifier: an import for its side effects. */
+const SIDE_EFFECT_IMPORT = /^import\s*$/;
+
+/** A source's `.svelte` imports: a module's, or a component's scripts'. */
 function svelteImportsOf(content: string, component: boolean): SvelteImport[] {
   if (!content.includes(".svelte")) return [];
   const lexed = component ? lexComponent(content) : undefined;
@@ -1637,30 +1840,62 @@ function svelteImportsOf(content: string, component: boolean): SvelteImport[] {
     : [[0, content.length] as const];
   const locate = createLocator(content);
   const lines = content.split("\n");
-  return ranges.flatMap(([start, end]) =>
-    lexImportsExports(content.slice(start, end)).flatMap((statement) => {
-      const specifier = statement.source?.value;
-      if (!specifier?.endsWith(".svelte")) return [];
-      const at = locate.position(start + (statement.source?.start ?? 0));
-      const directive = TS_DIRECTIVE.exec(lines[at.line - 2] ?? "")?.[1];
-      return [
-        {
-          specifier,
-          line: at.line,
-          column: at.column,
-          directive:
-            directive === "ignore" || directive === "expect-error"
-              ? directive
-              : null,
-          names: statement.specifiers.flatMap((spec) => {
-            // An import's name in the module, or a re-export's.
-            const name = "imported" in spec ? spec.imported : spec.local;
-            return name === "*" ? [] : [name];
-          }),
-        },
-      ];
-    }),
-  );
+  const at = (
+    offset: number,
+  ): Pick<SvelteImport, "line" | "column" | "directive"> => {
+    const position = locate.position(offset);
+    const directive = TS_DIRECTIVE.exec(lines[position.line - 2] ?? "")?.[1];
+    return {
+      line: position.line,
+      column: position.column,
+      directive:
+        directive === "ignore" || directive === "expect-error"
+          ? directive
+          : null,
+    };
+  };
+  return ranges.flatMap(([start, end]) => {
+    const script = content.slice(start, end);
+    const statements = lexImportsExports(script).flatMap(
+      (statement): SvelteImport[] => {
+        const source = statement.source;
+        if (!source?.value.endsWith(".svelte")) return [];
+        const sideEffect =
+          statement.kind === "import" &&
+          SIDE_EFFECT_IMPORT.test(script.slice(statement.start, source.start));
+        return [
+          {
+            specifier: source.value,
+            ...at(start + source.start),
+            length: source.end - source.start,
+            names: statement.specifiers.flatMap((spec) => {
+              // An import's name in the module, or a re-export's.
+              const name = "imported" in spec ? spec.imported : spec.local;
+              return name === "*" ? [] : [name];
+            }),
+            ...(sideEffect ? { form: "side-effect" as const } : {}),
+          },
+        ];
+      },
+    );
+    const dynamic = lexDynamicImports(script).flatMap(
+      ({ kind, source }): SvelteImport[] =>
+        kind === "import" && source?.value.endsWith(".svelte")
+          ? [
+              {
+                specifier: source.value,
+                ...at(start + source.start),
+                length: source.end - source.start,
+                names: [],
+                form: "dynamic",
+              },
+            ]
+          : [],
+    );
+    return [...statements, ...dynamic].sort(
+      (a, b) => a.line - b.line || a.column - b.column,
+    );
+  });
 }
 
 /**

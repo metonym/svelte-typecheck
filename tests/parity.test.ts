@@ -81,6 +81,13 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // Svelte's types declare every `*.svelte` module; svelte-check hides
+  // that, so an import of a component that isn't there is an error.
+  it("matches svelte-check with imports of components that aren't there", () => {
+    const cwd = join(svelte5, "missing");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check with generic components", () => {
     const cwd = join(svelte5, "generic");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
