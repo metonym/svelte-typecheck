@@ -216,6 +216,31 @@ describe("typecheck", () => {
     );
   }, 30_000);
 
+  // `bun check` runs a package.json `check` script in its place, which
+  // can exit 0 having checked nothing.
+  it("runs bun check in a project with a check script", async () => {
+    const dir = join(svelte5, ".tmp/check-script");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(
+      join(dir, "package.json"),
+      JSON.stringify({ scripts: { check: "echo script" } }),
+    );
+    writeFileSync(
+      join(dir, "tsconfig.json"),
+      JSON.stringify({ compilerOptions: { strict: true } }),
+    );
+    writeFileSync(
+      join(dir, "Bad.svelte"),
+      '<script lang="ts">\n  const n: string = 1;\n</script>\n',
+    );
+    const result = await typecheck({
+      cwd: dir,
+      checker: "bun",
+      incremental: false,
+    });
+    expect(result.diagnostics.map((d) => d.code)).toEqual(["TS2322"]);
+  }, 30_000);
+
   it("defaults to the project's TypeScript", async () => {
     const result = await typecheck({
       cwd: svelte5,

@@ -156,9 +156,13 @@ export async function nativeCommand(
   }
 }
 
-/** The arguments that check a project and print errors as `tsc` does. */
+/**
+ * The arguments that check a project and print errors as `tsc` does.
+ * `bun check` runs a package.json `check` script in its place, unless
+ * `--no-script`.
+ */
 export function checkerArgs(checker: Checker, tsconfig: string): string[] {
   return checker === "bun"
-    ? ["check", "-p", tsconfig, "--no-pretty", "--all"]
+    ? ["check", "--no-script", "-p", tsconfig, "--no-pretty", "--all"]
     : ["-p", tsconfig, "--pretty", "false"];
 }

@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- `--checker bun` checks a project whose `package.json` has a `check`
+  script. `bun check` ran that script in its place, so the run found
+  no errors and passed. It now passes `--no-script`, which needs
+  Bun 1.4.4.
+
 ## 0.1.14 — 2026-11-12
 
 **Fixes**
