@@ -193,6 +193,34 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // `${configDir}` is the folder of the tsconfig compiled, not of the
+  // base that sets it.
+  it("matches svelte-check with ${configDir} in an extended tsconfig", () => {
+    const cwd = join(svelte5, "config-dir");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check with ${configDir} in the tsconfig", () => {
+    const cwd = join(svelte5, ".tmp/config-dir");
+    mkdirSync(join(cwd, "src"), { recursive: true });
+    writeFileSync(
+      join(cwd, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          module: "esnext",
+          moduleResolution: "bundler",
+        },
+        include: ["${configDir}/src"],
+      }),
+    );
+    writeFileSync(
+      join(cwd, "src/App.svelte"),
+      '<script lang="ts">\n  let n: number = "a";\n</script>\n\n{n}\n',
+    );
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // TypeScript turns `allowJs` on with `checkJs`.
   it("matches svelte-check with checkJs and no allowJs", () => {
     const cwd = join(svelte5, "checkjs");
@@ -341,6 +369,11 @@ describe("svelte-check parity, machine output", () => {
     ["an include that matches nothing", "no-inputs", { include: ["scr"] }],
     // TypeScript reads `my.app` as a file, so "." includes nothing.
     ["a folder whose name has a dot", "my.app", { include: ["."] }],
+    [
+      "an include with ${configDir}",
+      "no-inputs-config-dir",
+      { include: ["${configDir}/lib"] },
+    ],
     // An inherited include is named from the extending tsconfig; with no
     // exclude, outDir is excluded.
     [
