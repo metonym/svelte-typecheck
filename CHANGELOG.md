@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- "Could not find a declaration file" for a package with types the
+  import can't use ends with svelte-check's second line, "Try
+  `npm i --save-dev @types/…`". It was TypeScript's "There are types
+  at …". One such package has types only in `exports`, under
+  `moduleResolution: node`.
+
 ## 0.1.18 — 2026-11-13
 
 **Features**
