@@ -746,7 +746,10 @@ export function emit(
     } else if (a.type === "SpreadAttribute")
       out.raw("...").copy(a.expression.start, a.expression.end).raw(",");
     else if (a.type === "OnDirective") {
-      key(a, `on:${a.name}`);
+      // An error on it points at the event's name, after `on:`.
+      out
+        .from(nameAt(a), () => out.raw(JSON.stringify(`on:${a.name}`)))
+        .raw(":");
       if (a.expression) expression(a.expression);
       else {
         out.raw("undefined");
