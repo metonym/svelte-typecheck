@@ -508,6 +508,16 @@ export function emit(
   let generics = "";
   /** In JS, the component's `@template` tags, written right above `$$render`. */
   let templateDoc = "";
+  /**
+   * In JS, `generics="…"` as type parameters and `@template` tags, for a
+   * runes component's type. `@template` alone doesn't make the component
+   * generic, as in svelte-check.
+   */
+  const jsGenerics = {
+    params: [] as string[],
+    names: [] as string[],
+    tags: [] as string[],
+  };
   if (instance) {
     const tags: string[] = [];
     const attr = instance.attributes.find((a: Node) => a.name === "generics");
@@ -537,7 +547,16 @@ export function emit(
                 : out.copy(base + start, base + end),
         ),
       );
-    } else if (attr) tags.push(...jsdocTemplates(params));
+    } else if (attr) {
+      tags.push(...jsdocTemplates(params));
+      if (parsedGenerics?.parsed) {
+        jsGenerics.params = params.map(({ start, end }) =>
+          attrText.slice(start, end),
+        );
+        jsGenerics.names = params.map(({ name }) => name);
+        jsGenerics.tags = jsdocTemplates(params);
+      }
+    }
     const text = source.slice(instance.content.start, instance.content.end);
     for (const m of text.matchAll(JSDOC_BLOCK)) {
       const start = instance.content.start + (m.index ?? 0);
@@ -1834,6 +1853,23 @@ export function emit(
         `class $$Render${generics} { ${method("props")} ${method("events")} ${method("slots")} bindings() { return ${bindable}; } ${method("exports")} }\n` +
           `interface $$Generic { new ${generics}(options: import("svelte").ComponentConstructorOptions<${part("props")}>): import("svelte").SvelteComponent<${part("props")}, ${part("events")}, ${part("slots")}> & { $$bindings?: ${part("bindings")} } & ${part("exports")}; ${generics}(internal: unknown, props: ${part("props")} & {}): ${part("exports")}; z_$$bindings?: ReturnType<$$Render<${names.map(() => "any").join(", ")}>["bindings"]>; }\n` +
           `const $$Component: $$Generic = null as any;\ntype $$Component${generics} = InstanceType<typeof $$Component${args}>;\n`,
+      );
+    } else if (!isTs && jsGenerics.params.length > 0) {
+      // The TS form above, as JSDoc. `$$render<T>` names the props a use
+      // infers, so the default export stays generic.
+      const { names } = jsGenerics;
+      const params = `<${jsGenerics.params.join(", ")}>`;
+      const args = `<${names.join(", ")}>`;
+      const render = (typeArgs: string) =>
+        topLevelAwait
+          ? `Awaited<ReturnType<typeof $$render${typeArgs}>>`
+          : `ReturnType<typeof $$render${typeArgs}>`;
+      const part = (name: string) => `${render(args)}["${name}"]`;
+      const anyArgs = `<${names.map(() => "any").join(", ")}>`;
+      out.raw(
+        `/** @typedef {{ new ${params}(options: import("svelte").ComponentConstructorOptions<${part("props")}>): import("svelte").SvelteComponent<${part("props")}, ${part("events")}, ${part("slots")}> & { $$bindings?: ${part("bindings")} } & ${part("exports")}; ${params}(internal: unknown, props: ${part("props")} & {}): ${part("exports")}; z_$$bindings?: ${render(anyArgs)}["bindings"]; }} $$Generic */\n` +
+          "const $$Component = /** @type {$$Generic} */ (/** @type {unknown} */ (null));\n" +
+          `/**\n${jsGenerics.tags.join("\n")}\n * @typedef {InstanceType<typeof $$Component${args}>} $$Component\n */\n`,
       );
     } else {
       if (topLevelAwait) out.raw("const $$$render = await $$render();\n");

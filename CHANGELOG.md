@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- A JS runes component with `generics="…"` is generic to its users, as
+  in svelte-check. `<Pick value="a" items={[1]} />` infers `T` as `"a"`;
+  it was the constraint, so a prop typed by `T` could report an error
+  that svelte-check doesn't, or miss one.
+
 ## 0.1.17 — 2026-11-12
 
 **Fixes**
