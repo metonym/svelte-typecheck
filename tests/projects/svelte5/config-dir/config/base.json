@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "noEmit": true,
+    "rootDir": "${configDir}",
+    "typeRoots": ["${configDir}/types"],
+    "types": ["env"],
+    "paths": {
+      "$lib/*": ["${configDir}/src/lib/*"]
+    }
+  },
+  "include": ["${configDir}/src/**/*"],
+  "exclude": ["${configDir}/src/ignored"]
+}

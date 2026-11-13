@@ -81,13 +81,46 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // Svelte's types declare every `*.svelte` module; svelte-check hides
+  // that, so an import of a component that isn't there is an error.
+  it("matches svelte-check with imports of components that aren't there", () => {
+    const cwd = join(svelte5, "missing");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check with generic components", () => {
     const cwd = join(svelte5, "generic");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // A deprecated option stops tsc before it type-checks, and svelte-check
+  // checks anyway and warns of the option, at it or at `compilerOptions`.
+  it("matches svelte-check with deprecated options in a tsconfig and its base", () => {
+    const cwd = join(svelte5, "deprecated");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check with a generic JS component", () => {
     const cwd = join(svelte5, "generic-js");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  // svelte-check raises `target: "es5"` to ES2015 and `module: "commonjs"`
+  // to ESNext, so a component's `import.meta` and `for...of` are valid.
+  it("matches svelte-check with an ES5 target and a CommonJS module", () => {
+    const cwd = join(svelte5, "old-module");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  // A `@typedef` moves to the top level, but a `@type` in its block
+  // stays on the declaration below.
+  it("keeps a `@type` beside a `@typedef` on its declaration", () => {
+    const cwd = join(svelte5, "typedef-js");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check on a component's bind: directives", () => {
+    const cwd = join(svelte5, "bind-shorthand");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
@@ -146,10 +179,25 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check on an element's on: directives", () => {
+    const cwd = join(svelte5, "on-directive");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check on an element's repeated on: directives", () => {
+    const cwd = join(svelte5, "repeated-on-directive");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // Each helper the generated code calls, failing, and a TS file that
   // uses components wrongly: every name the shims' types print.
   it("matches svelte-check where a message prints the shims' types", () => {
     const cwd = join(svelte5, "helpers");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check on a component's CSS custom properties", () => {
+    const cwd = join(svelte5, "css-props");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
@@ -159,9 +207,158 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // `${configDir}` is the folder of the tsconfig compiled, not of the
+  // base that sets it.
+  it("matches svelte-check with ${configDir} in an extended tsconfig", () => {
+    const cwd = join(svelte5, "config-dir");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check with ${configDir} in the tsconfig", () => {
+    const cwd = join(svelte5, ".tmp/config-dir");
+    mkdirSync(join(cwd, "src"), { recursive: true });
+    writeFileSync(
+      join(cwd, "tsconfig.json"),
+      JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          module: "esnext",
+          moduleResolution: "bundler",
+        },
+        include: ["${configDir}/src"],
+      }),
+    );
+    writeFileSync(
+      join(cwd, "src/App.svelte"),
+      '<script lang="ts">\n  let n: number = "a";\n</script>\n\n{n}\n',
+    );
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  // TypeScript turns `allowJs` on with `checkJs`.
+  it("matches svelte-check with checkJs and no allowJs", () => {
+    const cwd = join(svelte5, "checkjs");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  // A package with a JS entry, and types the import can't use: TypeScript
+  // says where they are, and svelte-check's TypeScript doesn't know.
+  it.each([
+    [
+      "types only in exports, under moduleResolution node",
+      "untyped-node10",
+      { moduleResolution: "node", ignoreDeprecations: "6.0" },
+      "pkg",
+      {
+        "package.json": {
+          name: "pkg",
+          version: "1.0.0",
+          exports: {
+            ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
+          },
+        },
+        "index.js": "export const c = 1;\n",
+        "dist/index.d.ts": "export declare const c: number;\n",
+        "dist/index.js": "export const c = 1;\n",
+      },
+    ],
+    [
+      "types outside exports, in a scoped package",
+      "untyped-bundler",
+      { moduleResolution: "bundler" },
+      "@scope/pkg",
+      {
+        "package.json": {
+          name: "@scope/pkg",
+          version: "1.0.0",
+          exports: { ".": { import: "./dist/index.js" } },
+        },
+        "index.d.ts": "export declare const c: number;\n",
+        "dist/index.js": "export const c = 1;\n",
+      },
+    ],
+  ])(
+    "matches svelte-check on an untyped package import with %s",
+    (_, name, options, pkg, files) => {
+      const cwd = join(svelte5, ".tmp", name);
+      const write = (file: string, content: unknown) => {
+        mkdirSync(dirname(join(cwd, file)), { recursive: true });
+        writeFileSync(
+          join(cwd, file),
+          typeof content === "string" ? content : JSON.stringify(content),
+        );
+      };
+      write("tsconfig.json", {
+        // Without skipLibCheck, Svelte's own types fail to resolve under
+        // `node`; that's #74.
+        compilerOptions: {
+          strict: true,
+          module: "esnext",
+          skipLibCheck: true,
+          ...options,
+        },
+      });
+      for (const [file, content] of Object.entries(files))
+        write(`node_modules/${pkg}/${file}`, content);
+      write("y.ts", `import { c } from "${pkg}";\nexport const d = c;\n`);
+      write(
+        "App.svelte",
+        `<script lang="ts">\n  import { c } from "${pkg}";\n</script>\n\n{c}\n`,
+      );
+      const expected = svelteCheck([], cwd);
+      expect(
+        expected.filter((line) => line.includes("Try `npm i")),
+      ).toHaveLength(2);
+      expect(ours([], cwd)).toEqual(expected);
+    },
+    60_000,
+  );
+
   it("matches svelte-check's message rewrites and filters", () => {
     const cwd = join(svelte5, "filters");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  it("matches svelte-check with @ts-expect-error above an import", () => {
+    const cwd = join(svelte5, "ts-comments");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
+  // Under `moduleResolution: node`, TypeScript adds where it found types
+  // that the import can't use.
+  it("matches svelte-check on an import that finds types only in exports", () => {
+    const cwd = join(svelte5, ".tmp/exports-only-types");
+    const files = {
+      "tsconfig.json": JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          module: "esnext",
+          moduleResolution: "node",
+          ignoreDeprecations: "6.0",
+        },
+      }),
+      "node_modules/pkg/package.json": JSON.stringify({
+        name: "pkg",
+        exports: { "./sub": { types: "./dist/sub.d.ts" } },
+      }),
+      "node_modules/pkg/dist/sub.d.ts": "export const a: number;\n",
+      "x.ts": 'import { a } from "pkg/sub";\nexport const b = a;\n',
+      "App.svelte": [
+        '<script lang="ts">',
+        '  import { a } from "pkg/sub";',
+        "</script>",
+        "{a}",
+      ].join("\n"),
+    };
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(cwd, file)), { recursive: true });
+      writeFileSync(join(cwd, file), content);
+    }
+    const unresolved = (lines: string[]) =>
+      lines.filter((line) => line.includes("pkg/sub"));
+    const expected = unresolved(svelteCheck([], cwd));
+    expect(expected).toHaveLength(2);
+    expect(unresolved(ours([], cwd))).toEqual(expected);
   }, 60_000);
 
   // A Svelte library's `exports` can name a component as its types.
@@ -263,6 +460,11 @@ describe("svelte-check parity, machine output", () => {
     ["an include that matches nothing", "no-inputs", { include: ["scr"] }],
     // TypeScript reads `my.app` as a file, so "." includes nothing.
     ["a folder whose name has a dot", "my.app", { include: ["."] }],
+    [
+      "an include with ${configDir}",
+      "no-inputs-config-dir",
+      { include: ["${configDir}/lib"] },
+    ],
     // An inherited include is named from the extending tsconfig; with no
     // exclude, outDir is excluded.
     [

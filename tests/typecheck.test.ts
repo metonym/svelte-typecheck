@@ -1,6 +1,7 @@
 import {
   existsSync,
   mkdirSync,
+  readFileSync,
   rmSync,
   symlinkSync,
   writeFileSync,
@@ -50,6 +51,65 @@ describe("typecheck", () => {
           ),
       ).toEqual(EXPECTED);
       expect(result.dropped).toEqual([]);
+    },
+    30_000,
+  );
+
+  // A run learns which `ignoreDeprecations` the tsconfig needs, and the
+  // next runs tsc once, with it, for the same result.
+  it("reuses what a run learned of a tsconfig's deprecated options", async () => {
+    const options = {
+      cwd: svelte5,
+      workspace: "deprecated",
+      checker: "tsc" as const,
+      outDir: "node_modules/.cache/svelte-typecheck/test-deprecated-cache",
+    };
+    rmSync(join(svelte5, options.outDir), { recursive: true, force: true });
+    const first = await typecheck(options);
+    expect(existsSync(join(svelte5, options.outDir, "deprecations.json"))).toBe(
+      true,
+    );
+    const count = join(svelte5, "deprecated/src/lib/Count.svelte");
+    const text = readFileSync(count, "utf-8");
+    // A change to a component, so the result isn't reused whole.
+    writeFileSync(count, `${text}\n`);
+    try {
+      const second = await typecheck(options);
+      expect(second.diagnostics).toEqual(first.diagnostics);
+      expect(first.diagnostics.map((d) => `${d.code} ${d.severity}`)).toEqual([
+        "TS2322 error",
+        "TS2322 error",
+        "TS5101 warning",
+        "TS5101 warning",
+      ]);
+    } finally {
+      writeFileSync(count, text);
+    }
+  }, 60_000);
+
+  // TypeScript 7 removed what TypeScript 6 deprecates, and won't check.
+  it.each<Checker>(["bun", "tsrs", "tsgo"])(
+    "reports a removed option on the project's tsconfig, with %s",
+    async (checker) => {
+      const result = await typecheck({
+        cwd: svelte5,
+        workspace: "deprecated",
+        checker,
+        outDir: `node_modules/.cache/svelte-typecheck/test-deprecated-${checker}`,
+      });
+      expect(
+        result.diagnostics.map(
+          (d) =>
+            `${relative(svelte5, d.file).replaceAll("\\", "/")}:${d.line}:${d.column} ${d.code} ${d.severity}`,
+        ),
+      ).toEqual([
+        "deprecated/tsconfig.json:3:3 TS5102 error",
+        "deprecated/tsconfig.json:7:5 TS5102 error",
+      ]);
+      // The hint names the folder `baseUrl` did, from the project's tsconfig.
+      expect(result.diagnostics[0]?.message).toContain(
+        `"paths": {"*": ["./src/*"]}`,
+      );
     },
     30_000,
   );
@@ -347,6 +407,67 @@ describe("typecheck", () => {
       expect(
         diagnostics.map((d) => `${relative(dir, d.file)}:${d.line} ${d.code}`),
       ).toEqual(["Box.svelte:2 TS2322"]);
+    },
+    30_000,
+  );
+
+  // A repeated `on:` repeats its key in the element's object, as
+  // svelte2tsx writes it. Each checker reports the last handler's error
+  // at each key, and that the key repeats (TS1117) at none.
+  it.each<Checker>(["bun", "tsrs", "tsgo", "tsc"])(
+    "reports a repeated on: as svelte-check does, with %s",
+    async (checker) => {
+      const { diagnostics } = await typecheck({
+        cwd: svelte5,
+        workspace: "repeated-on-directive",
+        diagnosticSources: ["js"],
+        checker,
+        incremental: false,
+        outDir: `node_modules/.cache/svelte-typecheck/test-repeated-on-${checker}`,
+      });
+      expect(diagnostics.map((d) => `${d.line}:${d.column} ${d.code}`)).toEqual(
+        [
+          "5:12 TS2322",
+          "5:37 TS2322",
+          "8:12 TS2322",
+          "8:37 TS2322",
+          "8:62 TS2322",
+          "9:12 TS2322",
+          "9:54 TS2322",
+          "11:9 TS2353",
+          "12:19 TS2322",
+          "12:47 TS2322",
+        ],
+      );
+    },
+    30_000,
+  );
+
+  // With no type error to show it type-checked, TS1117 alone isn't taken
+  // for a syntax error in the generated code.
+  it.each<Checker>(["bun", "tsrs", "tsgo", "tsc"])(
+    "passes a repeated on: with no error, with %s",
+    async (checker) => {
+      const dir = join(svelte5, `.tmp/repeated-on-${checker}`);
+      rmSync(dir, { recursive: true, force: true });
+      mkdirSync(dir, { recursive: true });
+      writeFileSync(
+        join(dir, "tsconfig.json"),
+        JSON.stringify({
+          compilerOptions: { strict: true },
+          include: ["*.svelte"],
+        }),
+      );
+      writeFileSync(
+        join(dir, "App.svelte"),
+        '<script lang="ts">\n  let x = 0;\n</script>\n<button on:click={() => (x = 1)} on:click={() => (x = 2)}>{x}</button>\n',
+      );
+      const { diagnostics } = await typecheck({
+        cwd: dir,
+        checker,
+        incremental: false,
+      });
+      expect(diagnostics).toEqual([]);
     },
     30_000,
   );
