@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- The `agent` output is the default under Codex (`CODEX_CI` or
+  `CODEX_THREAD_ID`) and when `AGENT` is set, which `bun check` reads.
+  A variable set to `0` or to nothing no longer counts, as in
+  `bun check`. 0.1.16 read only `AI_AGENT` and `CLAUDECODE`.
+
 ## 0.1.16 — 2026-11-12
 
 **Features**

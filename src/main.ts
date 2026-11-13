@@ -29,7 +29,8 @@ svelte-check's options:
   --workspace <dir>         Project folder (default: the current one)
   --output <format>         human, human-verbose, machine, machine-verbose
                             or agent (default: human-verbose, or agent when
-                            AI_AGENT or CLAUDECODE is set)
+                            AGENT, AI_AGENT, CLAUDECODE, CODEX_CI or
+                            CODEX_THREAD_ID is set, and not to 0)
   --tsconfig <path>         tsconfig or jsconfig, relative to the workspace;
                             its TS and JS files' errors are reported too
                             (default: the nearest from the workspace up)
@@ -249,15 +250,31 @@ export function cliOptions(argv: string[]): TypecheckOptions {
 }
 
 /**
- * svelte-check's default, human-verbose, or agent for a coding agent, as
- * `bun check` picks it.
+ * Set by a coding agent: `AGENT` and `CLAUDECODE`, which `bun check`
+ * reads; `AI_AGENT`, the shared name; and `CODEX_CI` and
+ * `CODEX_THREAD_ID`, which Codex sets.
+ */
+export const AGENT_ENV = [
+  "AGENT",
+  "AI_AGENT",
+  "CLAUDECODE",
+  "CODEX_CI",
+  "CODEX_THREAD_ID",
+];
+
+/**
+ * svelte-check's default, human-verbose, or agent when an `AGENT_ENV`
+ * variable is set to a value other than empty or `0`, as `bun check`
+ * reads its own.
  */
 function formatOf(output: string | undefined): OutputFormat {
   if (output && (OUTPUT_FORMATS as string[]).includes(output))
     return output as OutputFormat;
-  return process.env.AI_AGENT || process.env.CLAUDECODE
-    ? "agent"
-    : "human-verbose";
+  const agent = AGENT_ENV.some((name) => {
+    const value = process.env[name];
+    return value !== undefined && value !== "" && value !== "0";
+  });
+  return agent ? "agent" : "human-verbose";
 }
 
 function parse(argv: string[]) {
