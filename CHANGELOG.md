@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+**Fixes**
+
+- On Svelte 3 and 4, TypeScript in markup, as `{x as number}`, and
+  Svelte 5 syntax, as `{#snippet}`, passed. They are parse errors, as
+  in svelte-check and the build. With no svelte.config, a component
+  with a `lang="ts"` script now gets the compiler's warnings, such as a
+  missing `alt`. Checks more
+  ([#93](https://github.com/metonym/svelte-typecheck/issues/93)).
+
 **Performance**
 
 - Reads and writes of generated code run 4 at a time, not all at once.
