@@ -1066,6 +1066,13 @@ export async function typecheck(
           ...(project.tsconfig ? { extends: rel(project.tsconfig) } : {}),
           compilerOptions: {
             ...(project.tsconfig ? {} : DEFAULT_COMPILER_OPTIONS),
+            // Expanded here, `${configDir}` would be this folder.
+            ...Object.fromEntries(
+              Object.entries(project.configDirOptions).map(([name, value]) => [
+                name,
+                typeof value === "string" ? rel(value) : value.map(rel),
+              ]),
+            ),
             rootDirs: [rel(root), "svelte", ...rootDirs.map(rel)],
             ...(Object.keys(paths).length > 0
               ? {
