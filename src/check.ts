@@ -66,6 +66,11 @@ const JS_FILE = /\.[cm]?jsx?$/;
 /** Errors that stop a checker before it type-checks anything. */
 const SYNTAX_CODE = /^TS[18]\d{3}$/;
 const STOPPED = /Stopped before type checking/;
+/** A deprecated option's error, and the `ignoreDeprecations` that silences it. */
+const IGNORE_DEPRECATIONS =
+  /is deprecated .*"ignoreDeprecations": "(\d+\.\d+)"/;
+/** The option an option's error names: `baseUrl`, `target=ES5`. */
+const OPTION_NAME = /^Option '([^'=]+)/;
 const TS_SCRIPT = /<script\b[^>]*\blang=["']?(ts|typescript)\b/;
 /** `A.d.svelte`, `A.d.svelte.ts`, `++A.svelte.ts` and `A.svelte.js`: `A.svelte`'s code. */
 const GENERATED_NAME =
@@ -236,6 +241,19 @@ function parseDiagnostics(text: string): RawDiagnostic[] {
       m !== null || global !== null || (continues && line.trim() !== "");
   }
   return found;
+}
+
+/**
+ * Where TypeScript puts an option's error in a tsconfig: at the option,
+ * else, when a base sets it, at `compilerOptions`, else at the start.
+ */
+function optionOffset(tsconfig: string, message: string): number {
+  const name = OPTION_NAME.exec(message)?.[1];
+  for (const key of name ? [name, "compilerOptions"] : ["compilerOptions"]) {
+    const at = new RegExp(`"${escapeRegExp(key)}"\\s*:`).exec(tsconfig);
+    if (at) return at.index;
+  }
+  return 0;
 }
 
 const STATIC_IMPORT = /(?:\bfrom\s*|^\s*import\s*)["']([^"']+)["']/gm;
@@ -1215,9 +1233,36 @@ export async function typecheck(
     }
   const compiledAt = (await compiledOffThreadAt) ?? performance.now();
   ordering.add(listedFiles);
-  const { output: text, code, at: checked } = await checking;
+  let { output: text, code, at: checked } = await checking;
 
-  const raw = parseDiagnostics(text);
+  // An error on the generated tsconfig is about an option the project set:
+  // ours extends its tsconfig.
+  const onOptions = (d: RawDiagnostic) =>
+    d.file !== "" && resolve(cwd, d.file) === tsconfig;
+  let raw = parseDiagnostics(text);
+  // A deprecated option stops tsc before it type-checks. svelte-check's
+  // language service checks anyway and warns of the option, so the checker
+  // runs again, told to ignore it.
+  const ignore = new Set(
+    raw.map((d) => onOptions(d) && IGNORE_DEPRECATIONS.exec(d.message)?.[1]),
+  );
+  const [ignored] = ignore;
+  if (checker && launch && ignore.size === 1 && ignored) {
+    const deprecated = raw;
+    ({ output: text, code } = await run(
+      launch.command,
+      [
+        ...launch.prefix,
+        ...checkerArgs(checker, tsconfig),
+        "--ignoreDeprecations",
+        ignored,
+      ],
+      cwd,
+      launch.shell,
+    ));
+    checked = performance.now();
+    raw = [...deprecated, ...parseDiagnostics(text)];
+  }
   const inOutput = (file: string) =>
     resolve(cwd, file).startsWith(`${outDir}${sep}`);
   // A syntax error in generated code stops the checker before it
@@ -1234,7 +1279,8 @@ export async function typecheck(
           !outputs.get(resolve(cwd, d.file))?.kit &&
           !outputs.get(resolve(cwd, d.file))?.userSyntax,
       );
-  if (syntax.length > 0 || STOPPED.test(text))
+  // `bun check` stops on an option's error too, which is the project's.
+  if (syntax.length > 0 || (STOPPED.test(text) && !raw.some(onOptions)))
     throw new EmitError(
       `Generated code has syntax errors:\n${syntax
         .slice(0, 20)
@@ -1278,6 +1324,25 @@ export async function typecheck(
         ...d,
         file: project.tsconfig ?? workspace,
         severity: "error",
+        source: "ts",
+      });
+      continue;
+    }
+    if (onOptions(d)) {
+      // As svelte-check reports it: at the option in the project's
+      // tsconfig, else at its `compilerOptions`. A deprecated one, which
+      // didn't stop the check, warns.
+      const file = project.tsconfig ?? workspace;
+      const content = project.tsconfig
+        ? readFileSync(project.tsconfig, "utf-8")
+        : "";
+      const offset = optionOffset(content, d.message);
+      diagnostics.push({
+        ...d,
+        file,
+        ...locator(file, () => content).position(offset),
+        ...endOf(content, offset, file),
+        severity: IGNORE_DEPRECATIONS.test(d.message) ? "warning" : "error",
         source: "ts",
       });
       continue;

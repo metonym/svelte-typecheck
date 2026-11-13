@@ -86,6 +86,13 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // A deprecated option stops tsc before it type-checks, and svelte-check
+  // checks anyway and warns of the option, at it or at `compilerOptions`.
+  it("matches svelte-check with deprecated options in a tsconfig and its base", () => {
+    const cwd = join(svelte5, "deprecated");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   it("matches svelte-check with a generic JS component", () => {
     const cwd = join(svelte5, "generic-js");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));

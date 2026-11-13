@@ -54,6 +54,29 @@ describe("typecheck", () => {
     30_000,
   );
 
+  // TypeScript 7 removed what TypeScript 6 deprecates, and won't check.
+  it.each<Checker>(["bun", "tsrs", "tsgo"])(
+    "reports a removed option on the project's tsconfig, with %s",
+    async (checker) => {
+      const result = await typecheck({
+        cwd: svelte5,
+        workspace: "deprecated",
+        checker,
+        outDir: `node_modules/.cache/svelte-typecheck/test-deprecated-${checker}`,
+      });
+      expect(
+        result.diagnostics.map(
+          (d) =>
+            `${relative(svelte5, d.file)}:${d.line}:${d.column} ${d.code} ${d.severity}`,
+        ),
+      ).toEqual([
+        "deprecated/tsconfig.json:3:3 TS5102 error",
+        "deprecated/tsconfig.json:7:5 TS5102 error",
+      ]);
+    },
+    30_000,
+  );
+
   // A shell keeps `$PWD` as the path it was given, symlinks and all (macOS's
   // `/tmp` is `/private/tmp`). Go's `os.Getwd` trusts it, so tsgo prints
   // its paths relative to it, not to the folder's real path.
