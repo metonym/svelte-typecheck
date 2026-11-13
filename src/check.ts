@@ -70,6 +70,13 @@ const JS_FILE = /\.[cm]?jsx?$/;
 /** Errors that stop a checker before it type-checks anything. */
 const SYNTAX_CODE = /^TS[18]\d{3}$/;
 const STOPPED = /Stopped before type checking/;
+/** A deprecated option's error, and the `ignoreDeprecations` that silences it. */
+const IGNORE_DEPRECATIONS =
+  /is deprecated .*"ignoreDeprecations": "(\d+\.\d+)"/;
+/** tsgo's hint for a removed `baseUrl`: its folder, relative to our tsconfig. */
+const BASE_URL_HINT = /"paths": \{"\*": \["(.*?)(\/\*)"\]\}/;
+/** The option an option's error names: `baseUrl`, `target=ES5`. */
+const OPTION_NAME = /^Option '([^'=]+)/;
 const TS_SCRIPT = /<script\b[^>]*\blang=["']?(ts|typescript)\b/;
 /** `A.d.svelte`, `A.d.svelte.ts`, `++A.svelte.ts` and `A.svelte.js`: `A.svelte`'s code. */
 const GENERATED_NAME =
@@ -258,6 +265,19 @@ function parseDiagnostics(text: string): RawDiagnostic[] {
       m !== null || global !== null || (continues && line.trim() !== "");
   }
   return found;
+}
+
+/**
+ * Where TypeScript puts an option's error in a tsconfig: at the option,
+ * else, when a base sets it, at `compilerOptions`, else at the start.
+ */
+function optionOffset(tsconfig: string, message: string): number {
+  const name = OPTION_NAME.exec(message)?.[1];
+  for (const key of name ? [name, "compilerOptions"] : ["compilerOptions"]) {
+    const at = new RegExp(`"${escapeRegExp(key)}"\\s*:`).exec(tsconfig);
+    if (at) return at.index;
+  }
+  return 0;
 }
 
 const STATIC_IMPORT = /(?:\bfrom\s*|^\s*import\s*)["']([^"']+)["']/gm;
@@ -1225,9 +1245,12 @@ export async function typecheck(
             ...(Object.keys(paths).length > 0
               ? {
                   paths: Object.fromEntries(
+                    // Against the `baseUrl` ours inherits, if any.
                     Object.entries(paths).map(([key, targets]) => [
                       key,
-                      targets.map(rel),
+                      targets.map((t) =>
+                        relativeTo(project.baseUrl ?? outDir, t),
+                      ),
                     ]),
                   ),
                 }
@@ -1278,11 +1301,30 @@ export async function typecheck(
   // The compiler pass runs while the checker's process works.
   const launch =
     checker && native && sources.has("js") ? await native : undefined;
+  // What a last run learned of the tsconfig's deprecated options, so this
+  // one runs the checker once, not twice.
+  const deprecationsPath = join(outDir, DEPRECATIONS_CACHE);
+  const deprecationsKey = hash(
+    JSON.stringify([
+      checker,
+      statsOf([...project.configFiles, ...packageFilesOf(projectDir)]),
+    ]),
+  );
+  const known = incremental
+    ? await readFile(deprecationsPath, "utf-8")
+        .then((text) => JSON.parse(text) as DeprecationsCache)
+        .then((c) => (c.key === deprecationsKey ? c : undefined))
+        .catch(() => undefined)
+    : undefined;
   const checking =
     checker && launch
       ? run(
           launch.command,
-          [...launch.prefix, ...checkerArgs(checker, tsconfig)],
+          [
+            ...launch.prefix,
+            ...checkerArgs(checker, tsconfig),
+            ...(known ? ["--ignoreDeprecations", known.ignore] : []),
+          ],
           cwd,
           launch.shell,
         ).then(({ output, code }) => ({ output, code, at: performance.now() }))
@@ -1370,9 +1412,45 @@ export async function typecheck(
     }
   const compiledAt = (await compiledOffThreadAt) ?? performance.now();
   ordering.add(listedFiles);
-  const { output: text, code, at: checked } = await checking;
+  let { output: text, code, at: checked } = await checking;
 
-  const raw = parseDiagnostics(text);
+  // An error on the generated tsconfig is about an option the project set:
+  // ours extends its tsconfig.
+  const onOptions = (d: RawDiagnostic) =>
+    d.file !== "" && resolve(cwd, d.file) === tsconfig;
+  let raw = [...(known?.diagnostics ?? []), ...parseDiagnostics(text)];
+  // A deprecated option stops tsc before it type-checks. svelte-check's
+  // language service checks anyway and warns of the option, so the checker
+  // runs again, told to ignore it.
+  const ignore = new Set(
+    raw.map((d) => onOptions(d) && IGNORE_DEPRECATIONS.exec(d.message)?.[1]),
+  );
+  const [ignored] = ignore;
+  if (checker && launch && !known && ignore.size === 1 && ignored) {
+    const deprecated = raw;
+    ({ output: text, code } = await run(
+      launch.command,
+      [
+        ...launch.prefix,
+        ...checkerArgs(checker, tsconfig),
+        "--ignoreDeprecations",
+        ignored,
+      ],
+      cwd,
+      launch.shell,
+    ));
+    checked = performance.now();
+    raw = [...deprecated, ...parseDiagnostics(text)];
+    if (incremental)
+      await writeFile(
+        deprecationsPath,
+        JSON.stringify({
+          key: deprecationsKey,
+          ignore: ignored,
+          diagnostics: deprecated,
+        } satisfies DeprecationsCache),
+      );
+  }
   const inOutput = (file: string) =>
     resolve(cwd, file).startsWith(`${outDir}${sep}`);
   // A syntax error in generated code stops the checker before it
@@ -1391,7 +1469,8 @@ export async function typecheck(
           !outputs.get(resolve(cwd, d.file))?.kit &&
           !outputs.get(resolve(cwd, d.file))?.userSyntax,
       );
-  if (syntax.length > 0 || STOPPED.test(text))
+  // `bun check` stops on an option's error too, which is the project's.
+  if (syntax.length > 0 || (STOPPED.test(text) && !raw.some(onOptions)))
     throw new EmitError(
       `Generated code has syntax errors:\n${syntax
         .slice(0, 20)
@@ -1435,6 +1514,31 @@ export async function typecheck(
         ...d,
         file: project.tsconfig ?? workspace,
         severity: "error",
+        source: "ts",
+      });
+      continue;
+    }
+    if (onOptions(d)) {
+      // As svelte-check reports it: at the option in the project's
+      // tsconfig, else at its `compilerOptions`. A deprecated one, which
+      // didn't stop the check, warns.
+      const file = project.tsconfig ?? workspace;
+      const content = project.tsconfig
+        ? readFileSync(project.tsconfig, "utf-8")
+        : "";
+      const offset = optionOffset(content, d.message);
+      diagnostics.push({
+        ...d,
+        // `baseUrl`'s replacement, which names a folder from ours.
+        message: d.message.replace(
+          BASE_URL_HINT,
+          (_, target: string, rest: string) =>
+            `"paths": {"*": ["${relativeTo(dirname(file), resolve(dirname(tsconfig), target))}${rest}"]}`,
+        ),
+        file,
+        ...locator(file, () => content).position(offset),
+        ...endOf(content, offset, file),
+        severity: IGNORE_DEPRECATIONS.test(d.message) ? "warning" : "error",
         source: "ts",
       });
       continue;
@@ -1776,6 +1880,15 @@ export async function typecheck(
 }
 
 const FACTS_CACHE = "files.json";
+const DEPRECATIONS_CACHE = "deprecations.json";
+interface DeprecationsCache {
+  /** The checker, and the stats of the tsconfigs and package files. */
+  key: string;
+  /** The `ignoreDeprecations` the checker asked for. */
+  ignore: string;
+  /** The checker's errors for the deprecated options. */
+  diagnostics: RawDiagnostic[];
+}
 interface Facts {
   /** Its size and modification time. */
   stat: string;
