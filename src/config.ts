@@ -11,6 +11,11 @@ export interface SvelteConfig {
   preprocess?: Preprocessor[];
   /** As svelte-check compiles: `dev`, then the config's. */
   compilerOptions: Record<string, unknown>;
+  /**
+   * Whether a config loaded. Without one, svelte-check strips a
+   * `lang="ts"` script's types before it compiles.
+   */
+  found?: boolean;
 }
 
 interface RawConfig {
@@ -44,13 +49,14 @@ export async function svelteConfigOf(
   dir: string,
   explicit?: string,
 ): Promise<SvelteConfig> {
-  const config =
-    (explicit ? await fromFile(explicit) : await fromDir(dir)) ?? {};
+  const loaded = explicit ? await fromFile(explicit) : await fromDir(dir);
+  const config = loaded ?? {};
   const { preprocess } = config;
   return {
     preprocess:
       preprocess && (Array.isArray(preprocess) ? preprocess : [preprocess]),
     compilerOptions: { dev: true, ...config.compilerOptions },
+    found: loaded !== undefined,
   };
 }
 

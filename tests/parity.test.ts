@@ -590,6 +590,49 @@ describe("svelte-check parity, machine output", () => {
     }, 60_000);
   });
 
+  // svelte-check from the Svelte 5 project loads each fixture's Svelte.
+  const legacy = (fixture: string) => {
+    const cwd = join(root, "tests/projects", fixture);
+    const theirs = machine(
+      [...svelteCheckBin(svelte5), "--output", "machine"],
+      cwd,
+    );
+    return { theirs, mine: ours([], cwd) };
+  };
+
+  it.each(["svelte3", "svelte4"])(
+    "matches svelte-check on %s with TypeScript and no svelte.config",
+    (svelte) => {
+      // Compiler warnings from the stripped script, and parse errors for
+      // TypeScript and Svelte 5 syntax in markup. Svelte 4's come from
+      // its own parser; Svelte 3's from Svelte 5's, as in svelte-check.
+      const { theirs, mine } = legacy(`${svelte}/markup`);
+      expect(theirs).toContainEqual(
+        expect.stringContaining("Unused CSS selector"),
+      );
+      expect(mine).toEqual(theirs);
+    },
+    60_000,
+  );
+
+  it("matches svelte-check on Svelte 4 with a svelte.config and no preprocess", () => {
+    // svelte-check strips no types here, so the compiler fails on the
+    // script and its warnings are lost. Only the type error remains.
+    const { theirs, mine } = legacy("svelte4/config");
+    expect(theirs).toContainEqual(expect.stringContaining("not assignable"));
+    expect(mine).toEqual(theirs);
+  }, 60_000);
+
+  it("reports no false error for a Svelte 4 enum it can't strip", () => {
+    // svelte-check transpiles the enum and warns; we can't, so we skip
+    // the compile, rather than report the compiler's error on it.
+    const { theirs, mine } = legacy("svelte4/enum");
+    expect(theirs).toContainEqual(expect.stringContaining("A11y"));
+    expect(mine).toContainEqual(
+      "COMPLETED 0 ERRORS 0 WARNINGS 0 FILES_WITH_PROBLEMS",
+    );
+  }, 60_000);
+
   it("matches svelte-check with preprocessors", () => {
     const cwd = join(root, "tests/projects/preprocess");
     // svelte-check's css source (not supported) flags the custom style.

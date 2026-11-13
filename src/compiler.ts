@@ -31,6 +31,8 @@ interface Compiler {
     source: string,
     options: { filename: string; generate: false; dev?: boolean },
   ): { warnings: Warning[] };
+  /** Svelte 4's, for svelte2tsx's markup parse. */
+  parse(source: string): unknown;
   preprocess(
     source: string,
     preprocessors: Preprocessor | Preprocessor[],
@@ -178,6 +180,8 @@ async function preprocessedDiagnostics(
   config: SvelteConfig,
   /** Whether the config has preprocessors, when they're left out of `config`. */
   preprocessed = Boolean(config.preprocess),
+  /** Whether no config loaded, when `config` is only its compiler options. */
+  unconfigured = config.found === false,
 ): Promise<CompilerDiagnostic[]> {
   const compiler = compilerOf(svelteDir);
   const { preprocess, compilerOptions } = config;
@@ -185,9 +189,18 @@ async function preprocessedDiagnostics(
   const processed = preprocess
     ? await compiler.preprocess(source, preprocess, { filename })
     : undefined;
-  if (!processed || processed.code === source)
-    diagnostics = diagnosticsOf(compiler, source, filename, compilerOptions);
-  else {
+  if (!processed || processed.code === source) {
+    // With no config, svelte-check strips a TS script's types, so Svelte
+    // 3 and 4, which read only JavaScript, compile the whole component.
+    // Svelte 5 reads TypeScript itself.
+    const code =
+      unconfigured && !compiler.compileModule ? blankScripts(source) : source;
+    // svelte-check transpiles TypeScript blanking can't remove, such as an
+    // `enum`, and compiles it. The compiler can't read it here, so it
+    // reports nothing, rather than a false error.
+    if (code === undefined) return [];
+    diagnostics = diagnosticsOf(compiler, code, filename, compilerOptions);
+  } else {
     const map =
       typeof processed.map === "string"
         ? (JSON.parse(processed.map) as { mappings: string })
@@ -208,6 +221,58 @@ async function preprocessedDiagnostics(
 }
 
 /**
+ * The component with each `lang="ts"` script's types blanked, so every
+ * position stays the source's; undefined for TypeScript with a runtime
+ * meaning, such as an `enum`.
+ */
+function blankScripts(source: string): string | undefined {
+  const lexed = lexComponent(source);
+  let out = source;
+  for (const script of [lexed.instance, lexed.module]) {
+    if (!script) continue;
+    const lang = script.attributes.find((a) => a.name === "lang")?.value;
+    if (lang !== "ts" && lang !== "typescript") continue;
+    const { start, end } = script.content;
+    const blanked = blankTypes(source.slice(start, end));
+    if (blanked === undefined) return;
+    out = out.slice(0, start) + blanked + out.slice(end);
+  }
+  return out;
+}
+
+/** svelte2tsx's script and style tags, which a comment hides. */
+const VERBATIM =
+  /(<!--[^]*?-->)|(<(script|style)((?:\s+[^=>'"/\s]+=(?:"[^"]*"|'[^']*'|[^>\s]+)|\s+[^=>'"/\s]+)*\s*)>)([\S\s]*?)<\/\3>/g;
+
+/**
+ * Throws the error Svelte 4's parser finds in a component's markup,
+ * as svelte2tsx parses it for svelte-check: each script and style
+ * blanked, so TypeScript in the markup (`{x as number}`) or
+ * Svelte 5 syntax (`{#snippet}`) is an error, as in that Svelte's build.
+ */
+export function parseAsLegacy(source: string, svelteDir: string): void {
+  const blanked = source.replace(
+    VERBATIM,
+    (
+      match,
+      comment: string | undefined,
+      open: string,
+      _tag,
+      _attrs,
+      body: string,
+    ) =>
+      comment
+        ? match
+        : open +
+          body
+            .replace(/[^\n]/g, " ")
+            .replace(/[^\n][^\n][^\n][^\n]\n/g, "/**/\n") +
+          match.slice(open.length + body.length),
+  );
+  compilerOf(svelteDir).parse(blanked);
+}
+
+/**
  * What a later run needs to know of a config to compile a component
  * without loading it: its preprocessors, by name and the tags they read,
  * and its compiler options.
@@ -215,6 +280,7 @@ async function preprocessedDiagnostics(
 export interface ConfigShape {
   preprocess: { name: string; hooks: Hook[] }[];
   preprocessed: boolean;
+  unconfigured: boolean;
   compilerOptions: Record<string, unknown>;
 }
 type Hook = "markup" | "script" | "style";
@@ -252,6 +318,7 @@ function shapeOf(config: SvelteConfig): ConfigShape | undefined {
   return {
     preprocess: readersOf(config.preprocess),
     preprocessed: Boolean(config.preprocess),
+    unconfigured: config.found === false,
     compilerOptions: config.compilerOptions,
   };
 }
@@ -307,6 +374,7 @@ export async function compileAll(
             svelteDir,
             { compilerOptions: shape.compilerOptions },
             shape.preprocessed,
+            shape.unconfigured,
           ),
         ),
       ),
@@ -316,7 +384,10 @@ export async function compileAll(
   // A component no preprocessor can change compiles as it is: Svelte's
   // `preprocess` would hand none of it to a hook, and parse it for nothing.
   const readers = readersOf(config.preprocess);
-  const unprocessed = { compilerOptions: config.compilerOptions };
+  const unprocessed = {
+    compilerOptions: config.compilerOptions,
+    found: config.found,
+  };
   return {
     shape: shapeOf(config),
     results: await Promise.all(
