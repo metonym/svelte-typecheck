@@ -91,6 +91,21 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // svelte-check reports an error at each use of a JS legacy component
+  // with generics, even a valid one. Here it's generic, as the same
+  // component in TS is in svelte-check.
+  it("checks a generic JS legacy component as svelte-check does its TS form", () => {
+    const cwd = join(svelte5, "generic-js-legacy");
+    const errors = (lines: string[], file: string) =>
+      lines
+        .filter((line) => line.startsWith(`ERROR "${file}"`))
+        .map((line) => line.replace(/^ERROR "\w+\.svelte" \d+:\d+ /, ""));
+    const js = errors(ours([], cwd), "Use.svelte");
+    expect(js.length).toBe(3);
+    expect(js).toEqual(errors(svelteCheck([], cwd), "UseTs.svelte"));
+    expect(errors(ours([], cwd), "UseTs.svelte")).toEqual(js);
+  }, 60_000);
+
   // svelte-check reports more syntax errors here, from the broken
   // generics it pastes in more places, and the type errors they cause.
   it("reports svelte-check's first syntax errors in generics that don't parse", () => {
