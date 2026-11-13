@@ -46,6 +46,7 @@ What svelte-typecheck does that svelte-check doesn't:
 - **A tsconfig without `moduleResolution`** resolves with `bundler`, or with TypeScript's default under a `node*` module. svelte-check uses `node10`, which TypeScript 6 deprecates and TypeScript 7 removed, so it warns about an option the tsconfig doesn't set.
 - **`--out-dir` outside the project** can't find its packages from the generated code; the default is inside `node_modules`.
 - **`<svelte:element this={tag}>` whose tag may be any element**, such as a component's generic `Tag extends keyof HTMLElementTagNameMap`: svelte-check reports TypeScript's "union type too complex" and checks none of the element's attributes; here its attributes are checked as an element's. An attribute error on it names the attributes' type with the tag widened: `keyof HTMLElementTagNameMap extends Tag ? string : Tag`.
+- **A repeated `on:` on `<svelte:document>`**, such as two `on:click`s: svelte-check reports TypeScript's "An object literal cannot have multiple properties with the same name" about its generated code, as it drops that error on other elements only. Here it isn't reported on any element.
 
 ## Limitations
 

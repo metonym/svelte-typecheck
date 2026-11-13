@@ -1,5 +1,23 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- "Could not find a declaration file" for a package with types the
+  import can't use ends with svelte-check's second line, "Try
+  `npm i --save-dev @types/…`". It was TypeScript's "There are types
+  at …". One such package has types only in `exports`, under
+  `moduleResolution: node`.
+- A `// @ts-expect-error` or `// @ts-ignore` above an import in a
+  component applies to it, as in svelte-check. The import moves out of
+  the render function, and its comments now move with it.
+- In a JS component, a `@type` in the same JSDoc block as a `@typedef`
+  or `@callback` applies to the declaration below it, as in
+  svelte-check. The whole block moved to the top level with the
+  `@typedef`, so the declaration lost its type
+  ([#73](https://github.com/metonym/svelte-typecheck/issues/73)).
+
 ## 0.1.18 — 2026-11-13
 
 **Features**
