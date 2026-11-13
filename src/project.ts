@@ -21,8 +21,13 @@ const WILDCARD = /[*?{]/;
 const HAS_EXTENSION = /\.[^/\\]+$/;
 const NODE_MODULES_JS = /\/node_modules\/.+\.[cm]?js$/;
 const DEFAULT_EXCLUDE = ["node_modules", "bower_components", "jspm_packages"];
-/** A spec TypeScript resolves from the tsconfig it's read from, not rebased. */
-const CONFIG_DIR = "${configDir}";
+/**
+ * A path TypeScript resolves from the folder of the tsconfig it compiles,
+ * not of the one that sets it, and doesn't rebase.
+ */
+const CONFIG_DIR = /^\$\{configDir\}/i;
+/** Path options to write expanded where the generated tsconfig extends the project's. */
+const CONFIG_DIR_OPTIONS = ["baseUrl", "rootDir", "typeRoots"] as const;
 
 /** A tsconfig's JSON, comments and trailing commas allowed. */
 function parseJsonc(text: string): unknown {
@@ -44,11 +49,14 @@ interface RawConfig {
   references?: unknown[];
   compilerOptions?: {
     rootDirs?: string[];
+    rootDir?: string;
+    typeRoots?: string[];
     baseUrl?: string;
     paths?: Record<string, string[]>;
     checkJs?: boolean;
     allowJs?: boolean;
     skipLibCheck?: boolean;
+    noUncheckedSideEffectImports?: boolean;
     moduleResolution?: string;
     outDir?: string;
     declarationDir?: string;
@@ -67,20 +75,35 @@ interface Inputs {
   checkJs?: boolean;
   allowJs?: boolean;
   skipLibCheck?: boolean;
+  noUncheckedSideEffectImports?: boolean;
   moduleResolution?: string;
   /** `include` and `exclude` as written, relative to the tsconfig read first. */
   includeSpecs?: string[];
   excludeSpecs?: string[];
   outDir?: string;
   declarationDir?: string;
+  /** The options in `CONFIG_DIR_OPTIONS` set with `${configDir}`, as absolute paths. */
+  configDirOptions?: ConfigDirOptions;
 }
 
-function readInputs(path: string, read: string[] = []): Inputs {
+type ConfigDirOptions = Partial<
+  Record<(typeof CONFIG_DIR_OPTIONS)[number], string | string[]>
+>;
+
+/** A tsconfig's inputs; `${configDir}` is the folder of the one read first. */
+function readInputs(
+  path: string,
+  read: string[] = [],
+  configDir = dirname(path),
+): Inputs {
   read.push(path);
   const config = parseJsonc(readFileSync(path, "utf-8")) as RawConfig;
   const dir = dirname(path);
-  const absolute = (list: string[] | undefined) =>
-    list?.map((p) => resolve(dir, p));
+  const at = (from: string, p: string) =>
+    CONFIG_DIR.test(p)
+      ? resolve(configDir, p.replace(CONFIG_DIR, "./"))
+      : resolve(from, p);
+  const absolute = (list: string[] | undefined) => list?.map((p) => at(dir, p));
   let inputs: Inputs = {};
   const bases =
     typeof config.extends === "string" ? [config.extends] : config.extends;
@@ -88,12 +111,12 @@ function readInputs(path: string, read: string[] = []): Inputs {
     const basePath = base.startsWith(".")
       ? resolve(dir, base)
       : createRequire(path).resolve(base);
-    const baseInputs = readInputs(basePath, read);
+    const baseInputs = readInputs(basePath, read, configDir);
     // As TypeScript rewrites them: from the base's folder to this one's.
     const difference = toPosix(relative(dir, dirname(basePath)));
     const rebase = (specs: string[] | undefined) =>
       specs?.map((spec) =>
-        difference && !isAbsolute(spec) && !spec.startsWith(CONFIG_DIR)
+        difference && !isAbsolute(spec) && !CONFIG_DIR.test(spec)
           ? `${difference}/${spec}`
           : spec,
       );
@@ -107,8 +130,19 @@ function readInputs(path: string, read: string[] = []): Inputs {
     };
   }
   const options = config.compilerOptions;
-  const baseUrl = options?.baseUrl ? resolve(dir, options.baseUrl) : undefined;
+  const baseUrl = options?.baseUrl ? at(dir, options.baseUrl) : undefined;
   const pathsBase = baseUrl ?? inputs.baseUrl ?? dir;
+  // Set here, an option replaces the one inherited.
+  const configDirOptions = { ...inputs.configDirOptions };
+  for (const name of CONFIG_DIR_OPTIONS) {
+    const value = options?.[name];
+    if (value === undefined) continue;
+    delete configDirOptions[name];
+    if (typeof value === "string") {
+      if (CONFIG_DIR.test(value)) configDirOptions[name] = at(dir, value);
+    } else if (value.some((p) => CONFIG_DIR.test(p)))
+      configDirOptions[name] = value.map((p) => at(dir, p));
+  }
   return {
     ...inputs,
     ...defined({
@@ -119,19 +153,21 @@ function readInputs(path: string, read: string[] = []): Inputs {
       checkJs: options?.checkJs,
       allowJs: options?.allowJs,
       skipLibCheck: options?.skipLibCheck,
+      noUncheckedSideEffectImports: options?.noUncheckedSideEffectImports,
       moduleResolution: options?.moduleResolution,
       includeSpecs: config.include,
       excludeSpecs: config.exclude,
-      outDir: options?.outDir && resolve(dir, options.outDir),
+      outDir: options?.outDir && at(dir, options.outDir),
       declarationDir:
-        options?.declarationDir && resolve(dir, options.declarationDir),
+        options?.declarationDir && at(dir, options.declarationDir),
       baseUrl,
+      configDirOptions,
       paths:
         options?.paths &&
         Object.fromEntries(
           Object.entries(options.paths).map(([key, targets]) => [
             key,
-            targets.map((t) => resolve(pathsBase, t)),
+            targets.map((t) => at(pathsBase, t)),
           ]),
         ),
     }),
@@ -217,11 +253,18 @@ export interface Project {
   allowJs: boolean;
   /** Whether a declaration file's errors go unreported. */
   skipLibCheck: boolean;
+  /** Whether a side-effect import must resolve, or the checker's default. */
+  noUncheckedSideEffectImports?: boolean;
   /**
    * The package's `exports`, as `paths`: what an import of its own name
    * finds, once `paths` finds nothing.
    */
   selfExports: Record<string, string[]>;
+  /**
+   * `baseUrl`, `rootDir` and `typeRoots` with `${configDir}`, expanded: a
+   * tsconfig that extends the project's from elsewhere expands it there.
+   */
+  configDirOptions: ConfigDirOptions;
   /** The tsconfig's own `include` and `exclude`, as written. */
   raw: { include?: string[]; exclude?: string[] };
   /**
@@ -273,6 +316,7 @@ export function projectOf(options: ProjectOptions): Project {
       allowJs: true,
       skipLibCheck: true,
       selfExports: {},
+      configDirOptions: {},
       raw: {},
       reports: () => false,
     };
@@ -324,13 +368,17 @@ export function projectOf(options: ProjectOptions): Project {
     paths: { ...importsOf(dirname(tsconfig)), ...inputs.paths },
     baseUrl: inputs.baseUrl,
     checkJs: inputs.checkJs ?? false,
-    // A jsconfig.json allows JS by default.
-    allowJs: inputs.allowJs ?? basename(tsconfig) === "jsconfig.json",
+    // A jsconfig.json allows JS by default, and `checkJs` does too.
+    allowJs:
+      inputs.allowJs ??
+      (basename(tsconfig) === "jsconfig.json" || inputs.checkJs === true),
     skipLibCheck: inputs.skipLibCheck ?? false,
+    noUncheckedSideEffectImports: inputs.noUncheckedSideEffectImports,
     // Resolution from before `exports` doesn't read them.
     selfExports: LEGACY_RESOLUTION.test(inputs.moduleResolution ?? "")
       ? {}
       : exportsOf(dirname(tsconfig)),
+    configDirOptions: inputs.configDirOptions ?? {},
     raw,
     inputSpecs:
       inputs.files || raw.references
