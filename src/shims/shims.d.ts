@@ -81,7 +81,10 @@ declare namespace $$check {
 
   /** A value of any type, after checking what it's given. */
   function any(...checked: any[]): any;
-  /** Nothing, after checking what it's given: a `data-` attribute. */
+  /**
+   * Nothing, after checking what it's given: a `data-` attribute, or a
+   * component's CSS custom property.
+   */
   function none(...checked: any[]): {};
   /**
    * Slot content, as Svelte 5 passes it: svelte2tsx's `() => any` arrow,
