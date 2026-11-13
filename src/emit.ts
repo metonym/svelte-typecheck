@@ -982,8 +982,9 @@ export function emit(
         } else if (a.type === "SpreadAttribute")
           out.raw("...").copy(a.expression.start, a.expression.end).raw(",");
         else if (a.type === "BindDirective" && a.name !== "this") {
-          // An error on a bound prop points at its name, after `bind:`.
-          out.from(nameAt(a), () => out.raw(JSON.stringify(a.name))).raw(":");
+          // An error on a bound prop points at its name, after `bind:`, and
+          // prints it bare, as svelte2tsx writes it.
+          out.from(nameAt(a), () => out.raw(keyOf(a.name))).raw(":");
           if (isGetSet(a.expression)) bound(a.expression).raw(",");
           else out.copy(a.expression.start, a.expression.end).raw(",");
         } else if (a.type === "AttachTag") attach(a);
