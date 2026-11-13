@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- In a JS component, a `@type` in the same JSDoc block as a `@typedef`
+  or `@callback` applies to the declaration below it, as in
+  svelte-check. The whole block moved to the top level with the
+  `@typedef`, so the declaration lost its type
+  ([#73](https://github.com/metonym/svelte-typecheck/issues/73)).
+
 ## 0.1.18 — 2026-11-13
 
 **Features**

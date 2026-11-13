@@ -153,6 +153,49 @@ function jsdocTemplates(params: GenericParam[]) {
 }
 
 const JSDOC_TYPE = /@type\b/;
+/** A JSDoc tag that starts a line, and its name. */
+const JSDOC_TAG = /(?:^|\n)[ \t]*(?:\*[ \t]*)?@(\w+)/g;
+/**
+ * The tags a `@typedef` or `@callback` reads after it. A `@typedef`
+ * reads tags only when it has no type or `{object}`, and then a
+ * `@type` is its own.
+ */
+const TYPEDEF_CHILDREN: Record<string, RegExp> = {
+  typedef: /^(property|prop|type)$/,
+  callback: /^(param|arg|argument|returns?)$/,
+};
+const TYPEDEF_READS_TAGS =
+  /^@typedef\s+(?:\{\s*[Oo]bject(?:\[\])?\s*\}|[^{\s])/;
+
+/**
+ * A JSDoc block's `@typedef` and `@callback` tags, with the tags they
+ * read and any `@template`, as offsets from `offset`. `others` is
+ * whether the block holds any other tag, such as a `@type` for the
+ * declaration below it.
+ */
+function typedefTags(block: string, offset: number) {
+  const close = block.length - 2;
+  const tags = [...block.slice(3, close).matchAll(JSDOC_TAG)].map((m) => ({
+    name: m[1] ?? "",
+    at: 3 + (m.index ?? 0) + m[0].length - (m[1] ?? "").length - 1,
+  }));
+  const owned: [number, number][] = [];
+  let others = false;
+  let parent = "";
+  for (const [i, { name, at }] of tags.entries()) {
+    if (name === "callback") parent = name;
+    else if (name === "typedef")
+      parent = TYPEDEF_READS_TAGS.test(block.slice(at)) ? name : "";
+    else if (name !== "template" && !TYPEDEF_CHILDREN[parent]?.test(name)) {
+      parent = "";
+      others = true;
+      continue;
+    }
+    owned.push([offset + at, offset + (tags[i + 1]?.at ?? close)]);
+  }
+  return { owned, others };
+}
+
 const TS_WRAPPER = /^TS(As|Satisfies|NonNull)Expression$/;
 const FUNCTION =
   /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|MethodDefinition|PropertyDefinition)$/;
@@ -563,9 +606,17 @@ export function emit(
       // A `@typedef` or `@callback` (which owns its `@template`) moves to the
       // top level, where TS 7 lets the component's `@template` see it.
       if (OWNS_TEMPLATE.test(m[0])) {
+        const { owned, others } = typedefTags(m[0], start);
+        // Its other tags, such as a `@type`, stay on the declaration
+        // below, as in svelte2tsx, which leaves the block in place.
+        if (others) {
+          templateBlocks.push(...owned);
+          out.raw("/**");
+          for (const [s, e] of owned) out.copy(s, e).raw("\n");
+          out.raw("*/\n;\n");
+          continue;
+        }
         templateBlocks.push([start, start + m[0].length]);
-        // The `;` keeps its other tags (sveld's `@type` for an event) off
-        // the next declaration.
         out.copy(start, start + m[0].length).raw("\n;\n");
         continue;
       }
