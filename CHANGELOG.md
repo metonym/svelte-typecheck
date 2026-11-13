@@ -8,6 +8,11 @@ passed when it shouldn't have.
 
 **Fixes**
 
+- In `<script lang="ts">`, `let x = a<b>=c;` and a parameter modifier
+  in a method, as `m(readonly x: number)`, gave a false syntax error
+  that stopped the component from being checked. They parse as in
+  svelte-check. A type annotation in a JS component's template no
+  longer adds a "failed to parse" line. Both come from sveast 0.9.9.
 - A deprecated tsconfig option, like `baseUrl` or `target: "es5"`,
   stopped tsc on TypeScript 6 before it type-checked, and the run
   passed. tsgo, tsrs and Bun passed too, or Bun failed with an empty
