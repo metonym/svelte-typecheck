@@ -159,6 +159,79 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // A package with a JS entry, and types the import can't use: TypeScript
+  // says where they are, and svelte-check's TypeScript doesn't know.
+  it.each([
+    [
+      "types only in exports, under moduleResolution node",
+      "untyped-node10",
+      { moduleResolution: "node", ignoreDeprecations: "6.0" },
+      "pkg",
+      {
+        "package.json": {
+          name: "pkg",
+          version: "1.0.0",
+          exports: {
+            ".": { types: "./dist/index.d.ts", default: "./dist/index.js" },
+          },
+        },
+        "index.js": "export const c = 1;\n",
+        "dist/index.d.ts": "export declare const c: number;\n",
+        "dist/index.js": "export const c = 1;\n",
+      },
+    ],
+    [
+      "types outside exports, in a scoped package",
+      "untyped-bundler",
+      { moduleResolution: "bundler" },
+      "@scope/pkg",
+      {
+        "package.json": {
+          name: "@scope/pkg",
+          version: "1.0.0",
+          exports: { ".": { import: "./dist/index.js" } },
+        },
+        "index.d.ts": "export declare const c: number;\n",
+        "dist/index.js": "export const c = 1;\n",
+      },
+    ],
+  ])(
+    "matches svelte-check on an untyped package import with %s",
+    (_, name, options, pkg, files) => {
+      const cwd = join(svelte5, ".tmp", name);
+      const write = (file: string, content: unknown) => {
+        mkdirSync(dirname(join(cwd, file)), { recursive: true });
+        writeFileSync(
+          join(cwd, file),
+          typeof content === "string" ? content : JSON.stringify(content),
+        );
+      };
+      write("tsconfig.json", {
+        // Without skipLibCheck, Svelte's own types fail to resolve under
+        // `node`; that's #74.
+        compilerOptions: {
+          strict: true,
+          module: "esnext",
+          skipLibCheck: true,
+          ...options,
+        },
+      });
+      for (const [file, content] of Object.entries(files))
+        write(`node_modules/${pkg}/${file}`, content);
+      write("y.ts", `import { c } from "${pkg}";\nexport const d = c;\n`);
+      write(
+        "App.svelte",
+        `<script lang="ts">\n  import { c } from "${pkg}";\n</script>\n\n{c}\n`,
+      );
+      const expected = svelteCheck([], cwd);
+      expect(
+        expected.filter((line) => line.includes("Try `npm i")),
+      ).toHaveLength(2);
+      expect(ours([], cwd)).toEqual(expected);
+    },
+    60_000,
+  );
+
   it("matches svelte-check's message rewrites and filters", () => {
     const cwd = join(svelte5, "filters");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));

@@ -71,6 +71,16 @@ const TS_SCRIPT = /<script\b[^>]*\blang=["']?(ts|typescript)\b/;
 const GENERATED_NAME =
   /(?:\+\+)?([^/\\]+?)(?:\.d\.svelte(?:\.ts)?|\.svelte\.[jt]s)$/;
 const DRIVE_PATH = /\b[A-Z]:\//g;
+/**
+ * An untyped package's import (TS7016), whose package has types the
+ * import can't use: TypeScript says where. svelte-check's resolver
+ * passes on only what an import resolved to, so its TypeScript gives
+ * the line for a package with no types.
+ */
+const UNUSABLE_TYPES =
+  /^(Could not find a declaration file for module '([^']*)'\..*)\n {2}There are types at .*$/;
+/** A package's name in a module specifier: `@scope/name` or `name`. */
+const PACKAGE_NAME = /^(?:@[^/]+\/)?[^/]+/;
 const toPosix = (path: string) => path.split(sep).join("/");
 const escapeRegExp = (text: string) =>
   text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -1413,6 +1423,21 @@ export async function typecheck(
     );
     if (process.platform === "win32")
       d.message = d.message.replace(DRIVE_PATH, (drive) => drive.toLowerCase());
+    // TypeScript gives another line when the program has the package's
+    // types, or its `@types`, from another import. Rare, and the checker
+    // doesn't say, so this is the usual one.
+    if (d.code === "TS7016")
+      d.message = d.message.replace(
+        UNUSABLE_TYPES,
+        (_, head: string, specifier: string) => {
+          // `@scope/name`'s `@types` package is `@types/scope__name`.
+          const pkg = PACKAGE_NAME.exec(specifier)?.[0] ?? specifier;
+          const name = pkg.includes("/")
+            ? pkg.slice(1).replace("/", "__")
+            : pkg;
+          return `${head}\n  Try \`npm i --save-dev @types/${name}\` if it exists or add a new declaration (.d.ts) file containing \`declare module '${specifier}';\``;
+        },
+      );
   }
   diagnostics.push(...compiled);
   if (sources.has("js")) diagnostics.push(...parseErrors);
