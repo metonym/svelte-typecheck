@@ -80,6 +80,7 @@ export default defineConfig({
     "tests/dropped.test.ts": "tests/projects/**",
     "tests/typecheck.test.ts": [
       fixtures,
+      "tests/projects/svelte5/modules/**",
       "tests/projects/{preprocess/**,svelte3/package.json,svelte4/package.json}",
     ],
     // Generated projects in the Svelte 5 project's `.tmp/`.

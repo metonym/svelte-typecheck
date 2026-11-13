@@ -12,6 +12,7 @@ import {
 } from "./config.ts";
 import { createLocator } from "./output.ts";
 import { originalPosition } from "./sourcemap.ts";
+import { blankTypes } from "./strip.ts";
 import type { CompilerDiagnostic } from "./types.ts";
 
 interface Warning {
@@ -22,6 +23,11 @@ interface Warning {
 }
 interface Compiler {
   compile(
+    source: string,
+    options: { filename: string; generate: false; dev?: boolean },
+  ): { warnings: Warning[] };
+  /** Svelte 5's, for `.svelte.js` and `.svelte.ts` modules. */
+  compileModule?(
     source: string,
     options: { filename: string; generate: false; dev?: boolean },
   ): { warnings: Warning[] };
@@ -69,6 +75,50 @@ function diagnosticsOf(
       ...compilerOptions,
       filename,
       generate: false,
+    });
+    return warnings.map((w) => ({
+      severity: "warning",
+      code: w.code,
+      message: w.message,
+      ...positionsOf(w),
+    }));
+  } catch (error) {
+    const e = error as Warning;
+    return [
+      {
+        severity: "error",
+        code: e.code ?? "compile_error",
+        message: e.message,
+        ...positionsOf(e),
+      },
+    ];
+  }
+}
+
+/** Whether a file is a Svelte module, which can use runes. */
+export const isSvelteModule = (path: string) => /\.svelte\.[jt]s$/.test(path);
+
+/**
+ * What `compileModule` reports for a `.svelte.js` or `.svelte.ts` module
+ * (`state_referenced_locally`, a misplaced rune), as a build would. A
+ * `.svelte.ts` module's types are blanked first, as Svelte parses only
+ * JavaScript. Nothing before Svelte 5, which has no modules, or for
+ * TypeScript that isn't only types, as an `enum` is.
+ */
+function moduleDiagnostics(
+  source: string,
+  filename: string,
+  svelteDir: string,
+): CompilerDiagnostic[] {
+  const compiler = compilerOf(svelteDir);
+  if (!compiler.compileModule) return [];
+  const code = filename.endsWith(".ts") ? blankTypes(source) : source;
+  if (code === undefined) return [];
+  try {
+    const { warnings } = compiler.compileModule(code, {
+      filename,
+      generate: false,
+      dev: true,
     });
     return warnings.map((w) => ({
       severity: "warning",
@@ -372,6 +422,36 @@ export function compileOffThread(
     return post({ request }, () => compileAll(request)).wait();
   } catch {
     return;
+  }
+}
+
+/** Svelte modules to compile with the project's compiler. */
+export interface CompileModulesRequest {
+  svelteDir: string;
+  modules: { source: string; filename: string }[];
+}
+
+export function compileModules({
+  svelteDir,
+  modules,
+}: CompileModulesRequest): CompilerDiagnostic[][] {
+  return modules.map(({ source, filename }) =>
+    moduleDiagnostics(source, filename, svelteDir),
+  );
+}
+
+/**
+ * `compileModules` on the worker, while the checker runs, so this thread
+ * doesn't load the compiler; here when there's no worker.
+ */
+export function compileModulesOffThread(
+  request: CompileModulesRequest,
+): Promise<CompilerDiagnostic[][]> {
+  const here = async () => compileModules(request);
+  try {
+    return post({ modules: request }, here).wait();
+  } catch {
+    return here();
   }
 }
 

@@ -207,6 +207,72 @@ describe("typecheck", () => {
       });
       expect(diagnostics.map((d) => d.code)).toContain(code);
     });
+
+    describe("in .svelte.js and .svelte.ts modules", () => {
+      const modules = join(svelte5, "modules");
+      const checkModules = (options: Parameters<typeof typecheck>[0] = {}) =>
+        typecheck({
+          cwd: modules,
+          outDir: "node_modules/.cache/svelte-typecheck/test-modules",
+          ...options,
+        });
+      const LOCAL = "https://svelte.dev/e/state_referenced_locally";
+
+      it("reports them, svelte-ignore applied, at the source's positions", async () => {
+        const { diagnostics } = await checkModules();
+        expect(
+          diagnostics.map((d) => [
+            relative(modules, d.file),
+            d.line,
+            d.column,
+            d.source,
+            d.code,
+            d.message.endsWith(LOCAL),
+          ]),
+        ).toEqual([
+          [
+            "counter.svelte.ts",
+            5,
+            25,
+            "svelte",
+            "state_referenced_locally",
+            true,
+          ],
+          [
+            "plain.svelte.js",
+            2,
+            22,
+            "svelte",
+            "state_referenced_locally",
+            true,
+          ],
+        ]);
+      });
+
+      it("ignores or raises them by code, and only with the svelte source", async () => {
+        const ignored = await checkModules({
+          compilerWarnings: { state_referenced_locally: "ignore" },
+        });
+        expect(ignored.diagnostics).toEqual([]);
+        const raised = await checkModules({
+          compilerWarnings: { state_referenced_locally: "error" },
+        });
+        expect(raised.diagnostics.map((d) => d.severity)).toEqual([
+          "error",
+          "error",
+        ]);
+        const typesOnly = await checkModules({ diagnosticSources: ["js"] });
+        expect(typesOnly.diagnostics).toEqual([]);
+      });
+
+      it("reports none before Svelte 5, which has no modules", async () => {
+        const { diagnostics } = await checkModules({
+          diagnosticSources: ["svelte"],
+          svelte: "../../svelte4/node_modules/svelte",
+        });
+        expect(diagnostics).toEqual([]);
+      });
+    });
   });
 
   it("reports the project's TS and JS errors with declarations off", async () => {

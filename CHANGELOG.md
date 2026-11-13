@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+**Features**
+
+- Compiler warnings in `.svelte.js` and `.svelte.ts` modules, such as
+  `state_referenced_locally`, are reported as they are for components.
+  svelte-check reports none
+  ([sveltejs/language-tools#2891](https://github.com/sveltejs/language-tools/issues/2891)).
+  `// svelte-ignore` and `--compiler-warnings` apply. A module with an
+  `enum` or a parameter property isn't compiled, as its types can't be
+  removed in place.
+
 **Fixes**
 
 - A JS runes component with `generics="…"` is generic to its users, as
