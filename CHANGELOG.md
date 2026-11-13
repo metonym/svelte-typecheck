@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+**Fixes**
+
+- In a JS component, a JSDoc block with two `@typedef` tags and another
+  tag, such as `@restProps`, lost the second type on TypeScript 7 and
+  Bun. A use of it gave a false "Cannot find name" error. A regression
+  in 0.1.19.
+
 ## 0.1.19 — 2026-11-13
 
 Some projects that passed may now fail. Each fix below marked "Checks
