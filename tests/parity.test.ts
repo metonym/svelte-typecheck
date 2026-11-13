@@ -91,6 +91,11 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  it("matches svelte-check on a component's bind: directives", () => {
+    const cwd = join(svelte5, "bind-shorthand");
+    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+  }, 60_000);
+
   // svelte-check reports an error at each use of a JS legacy component
   // with generics, even a valid one. Here it's generic, as the same
   // component in TS is in svelte-check.
