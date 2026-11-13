@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.1.19 — 2026-11-13
 
 Some projects that passed may now fail. Each fix below marked "Checks
 more" found a case where a run checked less than svelte-check does, and
