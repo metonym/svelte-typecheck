@@ -3,6 +3,7 @@ import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { SERVE, wantsDaemon } from "../src/daemon.ts";
+import { AGENT_ENV } from "../src/main.ts";
 
 const root = join(import.meta.dir, "..");
 const cli = join(root, "src/cli.ts");
@@ -32,8 +33,7 @@ interface Run {
 const environment = (env: Record<string, string | undefined> = {}) => {
   const base: Record<string, string | undefined> = { ...process.env };
   delete base.CI;
-  delete base.AI_AGENT;
-  delete base.CLAUDECODE;
+  for (const name of AGENT_ENV) delete base[name];
   delete base.SVELTE_TYPECHECK_DAEMON;
   return { ...base, SVELTE_TYPECHECK_DAEMON_DIR: dir, ...env };
 };
