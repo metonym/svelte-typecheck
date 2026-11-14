@@ -116,7 +116,10 @@ describe("svelte-check parity, machine output", () => {
   // stays on the declaration below.
   it("keeps a `@type` beside a `@typedef` on its declaration", () => {
     const cwd = join(svelte5, "typedef-js");
-    expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
+    const expected = svelteCheck([], cwd);
+    expect(ours([], cwd)).toEqual(expected);
+    // TS 7 skips a tag on a JSDoc line with no `*`.
+    expect(ours(["--checker", "tsgo"], cwd)).toEqual(expected);
   }, 60_000);
 
   it("matches svelte-check on a component's bind: directives", () => {

@@ -633,9 +633,11 @@ export function emit(
         // below, as in svelte2tsx, which leaves the block in place.
         if (others) {
           templateBlocks.push(...owned);
+          // Each tag starts its own ` * ` line: TS 7 skips a tag on a
+          // line with no `*`.
           out.raw("/**");
-          for (const [s, e] of owned) out.copy(s, e).raw("\n");
-          out.raw("*/\n;\n");
+          for (const [s, e] of owned) out.raw("\n * ").copy(s, e);
+          out.raw("\n */\n;\n");
           continue;
         }
         templateBlocks.push([start, start + m[0].length]);

@@ -33,6 +33,14 @@
   const dispatch = createEventDispatcher();
   dispatch("highlight", { language: 1 });
 
+  /**
+   * @typedef {1 | 2} Scale
+   * @typedef {Scale | "auto"} Spacing
+   * @restProps {hr}
+   */
+  /** @type {Spacing} */
+  export let spacing = 1;
+
   /** @typedef {{ ok: boolean }} Alone */
   /** @type {Alone} */
   const alone = { ok: "yes" };
@@ -40,3 +48,4 @@
 
 {format(sum({ x: 1, y: 2 }))}
 {alone.ok}
+{spacing}
