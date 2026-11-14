@@ -8,6 +8,12 @@
   tag, such as `@restProps`, lost the second type on TypeScript 7 and
   Bun. A use of it gave a false "Cannot find name" error. A regression
   in 0.1.19.
+- An import of the package's own name, from a folder outside the
+  tsconfig's, read the `exports` of the package.json beside the
+  tsconfig. When that package.json had none, a component the package
+  exports gave a false "Cannot find module". It now reads the
+  package.json above the importing file, as TypeScript does. A
+  regression in 0.1.19.
 
 ## 0.1.19 — 2026-11-13
 

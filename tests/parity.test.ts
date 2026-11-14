@@ -88,6 +88,54 @@ describe("svelte-check parity, machine output", () => {
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));
   }, 60_000);
 
+  // An import of the package's own name reads the package.json above the
+  // importing file, not the one beside the tsconfig.
+  it("matches svelte-check on an import of the package's own name from another folder", () => {
+    const cwd = join(svelte5, ".tmp/self-exports");
+    const files = {
+      "package.json": JSON.stringify({
+        name: "lib",
+        type: "module",
+        exports: { "./src/*.svelte": { types: "./src/*.svelte.d.ts" } },
+      }),
+      "src/Button.svelte": "<button>x</button>\n",
+      "src/Button.svelte.d.ts": [
+        'import { SvelteComponent } from "svelte";',
+        "export default class Button extends SvelteComponent<{ size: number }> {}",
+      ].join("\n"),
+      "check/package.json": JSON.stringify({ name: "check", private: true }),
+      "check/tsconfig.json": JSON.stringify({
+        compilerOptions: {
+          strict: true,
+          moduleResolution: "bundler",
+          paths: { "lib/*": ["../src/*"] },
+        },
+        include: ["../tests"],
+      }),
+      "tests/App.svelte": [
+        '<script lang="ts">',
+        '  import Button from "lib/src/Button.svelte";',
+        '  import Missing from "lib/src/Missing.svelte";',
+        "</script>",
+        '<Button size="l" />',
+        "<Missing />",
+      ].join("\n"),
+    };
+    for (const [file, content] of Object.entries(files)) {
+      mkdirSync(dirname(join(cwd, file)), { recursive: true });
+      writeFileSync(join(cwd, file), content);
+    }
+    const args = [
+      "--workspace",
+      join(cwd, "tests"),
+      "--tsconfig",
+      join(cwd, "check/tsconfig.json"),
+    ];
+    const expected = svelteCheck(args, cwd);
+    expect(expected.filter((line) => line.startsWith("ERROR"))).toHaveLength(2);
+    expect(ours(args, cwd)).toEqual(expected);
+  }, 60_000);
+
   it("matches svelte-check with generic components", () => {
     const cwd = join(svelte5, "generic");
     expect(ours([], cwd)).toEqual(svelteCheck([], cwd));

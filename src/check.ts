@@ -461,6 +461,28 @@ function importResolver(
   });
 }
 
+/**
+ * A resolver for an import of a package's own name, as TypeScript has it:
+ * through the `exports` of the package.json above the importing file,
+ * not the tsconfig's.
+ */
+function selfResolver(
+  readsExports: boolean,
+  candidates?: (target: string) => string[],
+) {
+  const byDir = new Map<string, ReturnType<typeof importResolver>>();
+  return (from: string, specifier: string): string | undefined => {
+    if (!readsExports) return;
+    const dir = dirname(from);
+    let resolver = byDir.get(dir);
+    if (!resolver) {
+      resolver = importResolver([], exportsOf(dir), candidates);
+      byDir.set(dir, resolver);
+    }
+    return resolver(from, specifier);
+  };
+}
+
 /** What a `paths` or `exports` key's `*` stands for in a specifier it matches. */
 function starOf(key: string, specifier: string): string | undefined {
   const star = key.indexOf("*");
@@ -913,7 +935,7 @@ export async function typecheck(
       project.paths,
     );
     // An import of the package's own name, which `paths` didn't find.
-    const resolveSelf = importResolver([], project.selfExports);
+    const resolveSelf = selfResolver(project.readsExports);
     const tsComponents = new Map(
       files.flatMap((path, i) => {
         const text = texts[i] ?? "";
@@ -1006,11 +1028,7 @@ export async function typecheck(
       componentCandidates,
     );
     // An import of the package's own name, which `paths` didn't find.
-    const resolveSelf = importResolver(
-      [],
-      project.selfExports,
-      componentCandidates,
-    );
+    const resolveSelf = selfResolver(project.readsExports, componentCandidates);
     const absent = [...components.keys(), ...checkedModules].flatMap((path) =>
       fileFacts
         .of(
