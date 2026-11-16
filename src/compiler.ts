@@ -10,6 +10,7 @@ import {
   type SvelteConfig,
   svelteConfigOf,
 } from "./config.ts";
+import { limited } from "./limit.ts";
 import { createLocator } from "./output.ts";
 import { originalPosition } from "./sourcemap.ts";
 import { blankTypes } from "./strip.ts";
@@ -479,7 +480,7 @@ export async function compileFiles(
   const { files, ...source } = request;
   const components = await Promise.all(
     files.map(async ({ path, filename }) => ({
-      source: await readFile(path, "utf-8"),
+      source: await limited(() => readFile(path, "utf-8")),
       filename,
     })),
   );
