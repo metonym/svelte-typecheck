@@ -39,6 +39,7 @@ import {
 import { configFingerprint, realPath } from "./config.ts";
 import type { emit } from "./emit.ts";
 import { glob } from "./glob.ts";
+import { limited } from "./limit.ts";
 import { createLocator, type Output } from "./output.ts";
 import {
   asTypeScriptPath,
@@ -747,7 +748,9 @@ export async function typecheck(
     hash(JSON.stringify(statsOf(last.inputs))) === last.inputsKey
   )
     return { ...last.result, timings: { emit: 0, check: 0, compile: 0 } };
-  const texts = await Promise.all(files.map((path) => readFile(path, "utf-8")));
+  const texts = await Promise.all(
+    files.map((path) => limited(() => readFile(path, "utf-8"))),
+  );
   // Generated code mirrors the sources under one root, so `rootDirs` maps
   // a relative import between them.
   // The tsconfig's folder, where its `rootDirs` (SvelteKit's) start.
@@ -835,7 +838,9 @@ export async function typecheck(
       )
     : [];
   const moduleTexts = await Promise.all(
-    modules.map((path) => readFile(path, "utf-8").catch(() => "")),
+    modules.map((path) =>
+      limited(() => readFile(path, "utf-8")).catch(() => ""),
+    ),
   );
   const moduleKeys = modules.map((path, i) =>
     compileKey(relative(cwd, path), moduleTexts[i] ?? ""),
@@ -899,10 +904,10 @@ export async function typecheck(
     written.add(path);
     generated.set(path, content);
     writes.push(
-      (incremental
-        ? readFile(path, "utf-8").catch(() => undefined)
-        : Promise.resolve(undefined)
-      ).then(async (old) => {
+      limited(async () => {
+        const old = incremental
+          ? await readFile(path, "utf-8").catch(() => undefined)
+          : undefined;
         if (old === content) return;
         await folder(dirname(path));
         await writeFile(path, content);
@@ -1479,7 +1484,7 @@ export async function typecheck(
     // by another path.
     for (const path of previous)
       if (!written.has(path) && !written.has(realPath(path)))
-        writes.push(rm(path, { force: true }));
+        writes.push(limited(() => rm(path, { force: true })));
   }
   await Promise.all(writes);
   // The caches go here, generated code or not.
@@ -2285,7 +2290,9 @@ async function factsCache(path: string, enabled: boolean) {
           const facts = used[file] ?? entries[file];
           if (facts?.stat === statOf(file) && facts[kind]) return;
           if (texts.has(file)) return;
-          const text = await readFile(file, "utf-8").catch(() => undefined);
+          const text = await limited(() => readFile(file, "utf-8")).catch(
+            () => undefined,
+          );
           if (text !== undefined) texts.set(file, text);
         }),
       );

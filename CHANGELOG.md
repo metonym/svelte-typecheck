@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+**Performance**
+
+- Reads and writes of generated code run 4 at a time, not all at once.
+  Thousands at once queued on Bun's file threads, which then waited on
+  each other in the kernel. A cold run on 400 components is about 15%
+  faster. On 8,000 components it uses about 15 s less system time and
+  about 50 MB less memory.
+
 ## 0.1.20 — 2026-11-13
 
 **Fixes**
