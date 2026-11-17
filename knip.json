@@ -18,6 +18,7 @@
         "@sveltejs/kit",
         "@typescript/native",
         "svelte",
+        "svelte4",
         "tsrs",
         "vite"
       ]

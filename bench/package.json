@@ -6,6 +6,7 @@
     "@sveltejs/kit": "catalog:",
     "@typescript/native": "catalog:",
     "svelte": "catalog:",
+    "svelte4": "npm:svelte@^4.2.20",
     "tsrs": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:"

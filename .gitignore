@@ -4,6 +4,8 @@ dist
 *.tgz
 bench/corpus
 bench/corpus-vite
+bench/corpus-jsdoc
+bench/corpus-svelte4
 bench/scale
 eval/.projects
 .ostia
