@@ -6,12 +6,14 @@
 // - unchanged: nothing changed since the last run, so it's replayed;
 // - compile: the compiler pass alone, cold;
 // - vite: cold, on the corpus with a SvelteKit vite.config, from its folder;
-// - vite-changed: there, one component edited since the last run.
+// - vite-changed: there, one component edited since the last run;
+// - svelte4: cold, on the corpus's legacy components, with Svelte 4;
+// - jsdoc: cold, on JS components with JSDoc types.
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { typecheck } from "../src/check.ts";
 import type { Checker, TypecheckOptions } from "../src/types.ts";
-import { corpus, viteCorpus } from "./corpus.ts";
+import { corpus, jsdocCorpus, svelte4Corpus, viteCorpus } from "./corpus.ts";
 
 const MODES = [
   "cold",
@@ -20,6 +22,8 @@ const MODES = [
   "compile",
   "vite",
   "vite-changed",
+  "svelte4",
+  "jsdoc",
 ] as const;
 const [mode, checker] = process.argv.slice(2) as [
   (typeof MODES)[number],
@@ -28,12 +32,19 @@ const [mode, checker] = process.argv.slice(2) as [
 if (!MODES.includes(mode))
   throw new Error(`mode is one of ${MODES.join(", ")}`);
 
-const outDir = resolve(
-  `node_modules/.cache/svelte-typecheck/bench-${mode}-${checker}`,
-);
 // Run from a project's folder, as its vite.config is loaded.
 const vite = mode.startsWith("vite");
-const workspace = vite ? await viteCorpus() : await corpus();
+const corpora: Record<string, () => Promise<string>> = {
+  svelte4: svelte4Corpus,
+  jsdoc: jsdocCorpus,
+};
+const workspace = await (vite ? viteCorpus : (corpora[mode] ?? corpus))();
+// Svelte 4's corpus keeps its output in its own node_modules, so its
+// imports of svelte resolve to the Svelte 4 linked there.
+const outDir =
+  mode === "svelte4"
+    ? join(workspace, `node_modules/.cache/svelte-typecheck/bench-${checker}`)
+    : resolve(`node_modules/.cache/svelte-typecheck/bench-${mode}-${checker}`);
 if (vite) process.chdir(workspace);
 if (mode.endsWith("changed")) {
   // A new comment in one component, each run.
@@ -50,6 +61,11 @@ const options: TypecheckOptions = {
   outDir,
   incremental: mode.endsWith("changed") || mode === "unchanged",
   diagnosticSources: mode === "compile" ? ["svelte"] : undefined,
+  // bench/package.json installs Svelte 4 as svelte4.
+  svelte:
+    mode === "svelte4"
+      ? join(import.meta.dirname, "node_modules/svelte4")
+      : undefined,
 };
 const result = await typecheck(options);
 if (result.diagnostics.length > 0 || result.failed.length > 0)

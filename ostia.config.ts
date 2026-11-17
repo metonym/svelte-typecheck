@@ -34,6 +34,10 @@ export default defineConfig({
     // With the config loaded through Vite, as for a SvelteKit project.
     run("vite", "tsrs"),
     run("vite-changed", "tsrs"),
+    // Svelte 4, which parses markup again and compiles each component.
+    run("svelte4", "tsrs"),
+    // JS components with JSDoc types, checked with checkJs.
+    run("jsdoc", "tsrs"),
     // 8,000 components, the most connected shapes: an index.ts that
     // re-exports them all, and one component they all import.
     scale("barrel", 8000, "cold"),
