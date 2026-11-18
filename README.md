@@ -66,6 +66,10 @@ svelte-typecheck --fail-on-warnings
 # Ignore one compiler warning
 svelte-typecheck --compiler-warnings a11y_missing_attribute:ignore
 
+# Check types only, without compiling, when a linter such as svelte-lint
+# reports the compiler's warnings
+svelte-typecheck --diagnostic-sources js
+
 # Report only files changed from HEAD, or since the branch left main, and the files that import them
 svelte-typecheck --changed
 svelte-typecheck --since origin/main
