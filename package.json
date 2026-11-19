@@ -23,15 +23,19 @@
   },
   "scripts": {
     "build": "bun scripts/build.ts",
-    "test": "bun test ./tests",
-    "test:changed": "bivium run --suite unit",
+    "test": "bun run test:unit && bun run test:timing",
+    "test:unit": "bun test --parallel --timeout 30000 --path-ignore-patterns='tests/timing/**' ./tests",
+    "test:timing": "bun test --timeout 30000 ./tests/timing",
+    "test:changed": "bivium run --suite unit && bivium run --suite timing",
     "test:package": "bun scripts/test-package.ts",
     "bench": "ostia ci",
     "bench:baseline": "ostia baseline save",
     "typecheck": "bun check",
     "knip": "knip-bun",
     "fmt": "bun fmt",
-    "lint": "bun fmt --check && bun lint --no-script --max-warnings 0"
+    "lint": "bun fmt --check && bun lint --no-script --max-warnings 0",
+    "check": "bun run lint && bun run knip && bun run typecheck && bivium check --max-unknown 0",
+    "prepare": "git config core.hooksPath .githooks || true"
   },
   "workspaces": {
     "packages": [

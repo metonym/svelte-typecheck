@@ -8,10 +8,22 @@ export default defineConfig({
   suites: {
     unit: {
       tests: "tests/*.test.ts",
-      run: "bun test {files}",
+      // Files at once, one process each; a slow machine still finishes a
+      // test that spawns svelte-check.
+      run: "bun test --parallel --timeout 30000 {files}",
       root: "tests",
       // `bun test` runs the code: an `import type` or a declaration file
       // can't change what a test does.
+      types: false,
+      // The timing suite's files, which no unit test runs.
+      nonInputs: ["tests/timing/**", "tests/generate.ts"],
+    },
+    // Tests that time a run: they run alone, after the unit tests, so other
+    // files' work doesn't count against them.
+    timing: {
+      tests: "tests/timing/*.test.ts",
+      run: "bun test --timeout 30000 {files}",
+      root: "tests/timing",
       types: false,
     },
     package: {
@@ -33,6 +45,7 @@ export default defineConfig({
     "ostia.config.ts",
     ".github/workflows/release.yml",
     ".github/workflows/parity.yml",
+    ".githooks/**",
   ],
   // Inputs that aren't imports: the CLI a test runs as a user would, the
   // fixtures it checks or copies to a temp workspace. A key that names one
@@ -84,7 +97,7 @@ export default defineConfig({
       "tests/projects/{preprocess/**,svelte3/package.json,svelte4/package.json}",
     ],
     // Generated projects in the Svelte 5 project's `.tmp/`.
-    "tests/scale.test.ts": "tests/projects/svelte5/package.json",
+    "tests/timing/scale.test.ts": "tests/projects/svelte5/package.json",
     "tests/watch.test.ts": fixtures,
     "scripts/test-package.ts": fixtures,
   },

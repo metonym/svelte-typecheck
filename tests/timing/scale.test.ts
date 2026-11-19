@@ -1,11 +1,11 @@
 import { readdirSync, statSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join, relative } from "node:path";
-import { typecheck } from "../src/check.ts";
-import type { TypecheckOptions } from "../src/types.ts";
-import { generate, type Shape } from "./generate.ts";
+import { typecheck } from "../../src/check.ts";
+import type { TypecheckOptions } from "../../src/types.ts";
+import { generate, type Shape } from "../generate.ts";
 
-const root = join(import.meta.dir, "..");
+const root = join(import.meta.dir, "../..");
 /** Generated projects go here, where Svelte and tsrs resolve. */
 const svelte5 = join(root, "tests/projects/svelte5");
 const SHAPES: Shape[] = ["pairs", "chain", "hub", "barrel"];

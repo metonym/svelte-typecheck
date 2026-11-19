@@ -68,7 +68,7 @@ At 8,000 components, where svelte-check runs out of Node's default heap
 From 2,000 to 8,000 components, svelte-check's time grows 40 to 50
 times, as it asks the language service for each file's diagnostics in
 turn, and with `--tsgo` 5 to 7 times. svelte-typecheck's grows 3 to 5
-times with each checker, about in proportion, which `tests/scale.test.ts`
+times with each checker, about in proportion, which `tests/timing/scale.test.ts`
 checks. Peak memory at 8,000 is 2.3 to 2.8 GB for svelte-check and 0.4
 GB for svelte-typecheck with tsrs. The components are small and alike,
 so a real project's factors differ: see carbon-components-svelte's above.
