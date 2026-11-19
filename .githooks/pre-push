@@ -2,4 +2,4 @@
 # The checks CI runs before any test, about two seconds: format, lint,
 # unused exports, types, and that bivium knows what each test reads.
 # `git push --no-verify` skips them.
-exec bun run check
+exec bun run verify
