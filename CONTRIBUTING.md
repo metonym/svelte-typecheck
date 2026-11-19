@@ -10,7 +10,7 @@ This guide covers how svelte-typecheck is built, the rules every change must kee
 bun ci
 bun run test           # unit and parity tests, files in parallel, then the timing tests alone
 bun run test:changed   # only the tests your changes can reach (bivium)
-bun run check          # lint, knip, typecheck and bivium check, as CI runs them; also the pre-push hook
+bun run verify         # lint, knip, typecheck and bivium check, as CI runs them; also the pre-push hook
 bun run typecheck      # bun check
 bun run lint           # bun fmt --check and bun lint; `bun run fmt` formats
 bun run knip           # unused files, exports and dependencies
@@ -52,7 +52,7 @@ The SvelteKit project needs SvelteKit's generated files; its parity test runs `s
 
 | File                                           | Covers                                                                                                                                                                                                                                                                                                                       |
 | :--------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `tests/parity.test.ts`                         | Our machine output against svelte-check's, line for line, on each fixture, and the human and verbose formats                                                                                                                                                                                                                 |
+| `tests/parity*.test.ts`                        | Our machine output against svelte-check's, line for line, on each fixture, and the human and verbose formats, one file per group of fixtures (helpers in `tests/parity.ts`)                                                                                                                                                  |
 | `tests/typecheck.test.ts`                      | The pinned errors with each checker, the compiler pass, preprocessors                                                                                                                                                                                                                                                        |
 | `tests/emit.test.ts`                           | Generating code: mapping, widened props, repeated handlers, JSDoc generics, Svelte 3 classes                                                                                                                                                                                                                                 |
 | `tests/watch.test.ts`                          | Incremental runs (a changed import, replay, the project's own build info) and `--watch`                                                                                                                                                                                                                                      |
@@ -82,7 +82,7 @@ A pull request runs only the tests its changes can reach, which [bivium](https:/
 
 Test files run in parallel, each in its own process. Two runs on one project share its output folder unless one passes its own `outDir`, so a test that checks a fixture another file checks too passes one. A test that times a run goes in `tests/timing/`, which runs alone after the rest.
 
-`bun install` points git's hooks at `.githooks/`, whose pre-push hook runs `bun run check`. `git push --no-verify` skips it.
+`bun install` points git's hooks at `.githooks/`, whose pre-push hook runs `bun run verify`. `git push --no-verify` skips it.
 
 To test config loading, run the CLI in a process of its own: within one process, Node caches an imported config, so a second load proves nothing.
 
