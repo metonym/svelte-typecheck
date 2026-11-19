@@ -8,7 +8,12 @@
         "ostia.config.ts",
         "bivium.config.ts"
       ],
-      "project": ["src/**/*.ts", "tests/*.ts", "scripts/**/*.ts"],
+      "project": [
+        "src/**/*.ts",
+        "tests/*.ts",
+        "tests/timing/*.ts",
+        "scripts/**/*.ts"
+      ],
       "ignoreDependencies": ["bun-types"]
     },
     "bench": {

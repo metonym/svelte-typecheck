@@ -8,8 +8,9 @@ This guide covers how svelte-typecheck is built, the rules every change must kee
 
 ```sh
 bun ci
-bun run test           # unit and parity tests
+bun run test           # unit and parity tests, files in parallel, then the timing tests alone
 bun run test:changed   # only the tests your changes can reach (bivium)
+bun run check          # lint, knip, typecheck and bivium check, as CI runs them; also the pre-push hook
 bun run typecheck      # bun check
 bun run lint           # bun fmt --check and bun lint; `bun run fmt` formats
 bun run knip           # unused files, exports and dependencies
@@ -62,7 +63,7 @@ The SvelteKit project needs SvelteKit's generated files; its parity test runs `s
 | `tests/checker.test.ts`                        | Finding a checker, `PATHEXT` on Windows, the default, a project's own TypeScript 7                                                                                                                                                                                                                                           |
 | `tests/compiler.test.ts`, `tests/glob.test.ts` | `compilerDiagnostics`, the glob walker                                                                                                                                                                                                                                                                                       |
 | `tests/api.test.ts`                            | The exports, and their signatures against `src/types.ts`                                                                                                                                                                                                                                                                     |
-| `tests/scale.test.ts`                          | Generated projects (`tests/generate.ts`) of 500 to 2,000 components in four shapes: time outside the checker grows in proportion to the components, every planted error is reported where it was planted, an edit regenerates and rewrites only the edited component, and a run with nothing changed returns the last result |
+| `tests/timing/scale.test.ts`                   | Generated projects (`tests/generate.ts`) of 500 to 2,000 components in four shapes: time outside the checker grows in proportion to the components, every planted error is reported where it was planted, an edit regenerates and rewrites only the edited component, and a run with nothing changed returns the last result |
 | `scripts/test-package.ts`                      | `bun run test:package`: the packed tarball installs, imports only builtins and Svelte's compiler, checks the fixtures from Node and Bun, runs the compiler's diagnostics with no checker installed, and its `index.d.ts` type-checks                                                                                         |
 
 Each folder in `tests/projects/` is a project with its own `package.json`, and a test runs from it as a user runs from theirs: Svelte comes from the working folder, and a checker from the workspace up.
@@ -78,6 +79,10 @@ Each folder in `tests/projects/` is a project with its own `package.json`, and a
 A new variant, such as another version of a dependency, is a new folder with a `package.json`, added to bivium's `reads` for the tests that use it. A behavior fix needs a test that fails before the fix and passes after; for a parity fix, that's usually a line in a fixture.
 
 A pull request runs only the tests its changes can reach, which [bivium](https://github.com/metonym/bivium) finds from `bivium.config.ts`. A new test that reads a fixture or runs the CLI says so there; `bunx bivium check` lists a fixture no test reads, and a test that reads the disk without saying what.
+
+Test files run in parallel, each in its own process. Two runs on one project share its output folder unless one passes its own `outDir`, so a test that checks a fixture another file checks too passes one. A test that times a run goes in `tests/timing/`, which runs alone after the rest.
+
+`bun install` points git's hooks at `.githooks/`, whose pre-push hook runs `bun run check`. `git push --no-verify` skips it.
 
 To test config loading, run the CLI in a process of its own: within one process, Node caches an imported config, so a second load proves nothing.
 

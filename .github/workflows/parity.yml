@@ -17,6 +17,10 @@ on:
       - ".github/workflows/parity.yml"
   workflow_dispatch:
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   parity:
     # svelte-check and svelte-typecheck on real projects at pinned commits

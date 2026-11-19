@@ -56,13 +56,19 @@ describe("dropped errors", () => {
       }
       if (dirname(dir) === dir) throw new Error("no @sveltejs/kit");
     }
-  });
+  }, 60_000);
 
   it.each(DROPPED)(
     "drops only the known errors in %s",
     async (folder, expected) => {
       const cwd = realpathSync(join(projects, folder));
-      const result = await typecheck({ cwd, incremental: false });
+      // Its own output folder: the parity test checks these projects with
+      // the CLI's, maybe at the same time.
+      const result = await typecheck({
+        cwd,
+        incremental: false,
+        outDir: "node_modules/.cache/svelte-typecheck/test-dropped",
+      });
       expect(unprinted(cwd, result)).toEqual(expected);
     },
     60_000,

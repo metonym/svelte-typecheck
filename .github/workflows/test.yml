@@ -3,6 +3,11 @@ on:
   push:
     branches: [master]
 
+# A new push to a pull request cancels the run on its last one.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   test:
     # Windows for paths, PATHEXT shims and line endings; the checks that
@@ -60,7 +65,12 @@ jobs:
 
       - name: Run unit tests
         if: steps.plan.outputs.unit-tests != 'none'
-        run: bun test ${{ steps.plan.outputs.unit-tests != 'all' && steps.plan.outputs.unit-tests || './tests' }}
+        run: ${{ steps.plan.outputs.unit-tests && steps.plan.outputs.unit-tests != 'all' && format('bun test --parallel --timeout 30000 {0}', steps.plan.outputs.unit-tests) || 'bun run test:unit' }}
+
+      # Alone, so no other test's work counts against the times they compare.
+      - name: Run timing tests
+        if: steps.plan.outputs.timing-tests != 'none'
+        run: bun run test:timing
 
       - name: Build
         run: bun run build
