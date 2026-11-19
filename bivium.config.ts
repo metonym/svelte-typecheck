@@ -3,6 +3,9 @@ import { defineConfig } from "bivium";
 // The test projects: each a folder with its own package.json, whose
 // dependencies a test sees as a user's project would.
 const fixtures = "tests/projects/svelte5/{package.json,basic/**}";
+/** Folders of the Svelte 5 project, with its package.json. */
+const svelte5Projects = (...folders: string[]) =>
+  `tests/projects/svelte5/{package.json,${folders.map((f) => `${f}/**`).join(",")}}`;
 
 export default defineConfig({
   suites: {
@@ -57,7 +60,8 @@ export default defineConfig({
     "tests/daemon.test.ts": "src/cli.ts",
     // The compiler's pass runs this on a worker thread.
     "src/compiler.ts": "src/compile-worker.ts",
-    "tests/parity.test.ts": "src/cli.ts",
+    // The parity tests run the CLI through it.
+    "tests/parity.ts": "src/cli.ts",
     // Builds and packs the package, then checks the fixtures with it.
     "scripts/test-package.ts": "scripts/build.ts",
     "scripts/build.ts": [
@@ -89,7 +93,43 @@ export default defineConfig({
       "tests/projects/preprocess/**",
       "tests/projects/kit/{package.json,vite.config.ts}",
     ],
-    "tests/parity.test.ts": "tests/projects/**",
+    // Each parity file checks its own projects, with the Svelte 5
+    // project's svelte-check.
+    "tests/parity.test.ts": fixtures,
+    "tests/parity-components.test.ts": svelte5Projects(
+      "typed",
+      "missing",
+      "generic",
+      "generic-js",
+      "generic-js-legacy",
+      "generic-invalid",
+      "typedef-js",
+      "bind-shorthand",
+      "runes",
+      "edge",
+      "on-directive",
+      "repeated-on-directive",
+      "helpers",
+      "css-props",
+    ),
+    "tests/parity-tsconfig.test.ts": svelte5Projects(
+      "deprecated",
+      "old-module",
+      "config-dir",
+      "checkjs",
+      "untyped",
+      "filters",
+      "ts-comments",
+    ),
+    "tests/parity-packages.test.ts": [
+      "tests/projects/svelte5/package.json",
+      "tests/projects/kit/**",
+    ],
+    "tests/parity-no-inputs.test.ts": "tests/projects/svelte5/package.json",
+    "tests/parity-legacy.test.ts": [
+      "tests/projects/svelte5/package.json",
+      "tests/projects/{svelte3,svelte4,preprocess}/**",
+    ],
     "tests/dropped.test.ts": "tests/projects/**",
     "tests/typecheck.test.ts": [
       fixtures,
