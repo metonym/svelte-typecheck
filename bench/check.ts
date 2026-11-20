@@ -8,7 +8,8 @@
 // - vite: cold, on the corpus with a SvelteKit vite.config, from its folder;
 // - vite-changed: there, one component edited since the last run;
 // - svelte4: cold, on the corpus's legacy components, with Svelte 4;
-// - jsdoc: cold, on JS components with JSDoc types.
+// - jsdoc: cold, on JS components with JSDoc types;
+// - fast: cold, with tsrs's fast mode (`--fast`).
 import { readFile, writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { typecheck } from "../src/check.ts";
@@ -24,6 +25,7 @@ const MODES = [
   "vite-changed",
   "svelte4",
   "jsdoc",
+  "fast",
 ] as const;
 const [mode, checker] = process.argv.slice(2) as [
   (typeof MODES)[number],
@@ -58,6 +60,7 @@ const options: TypecheckOptions = {
   cwd: vite ? workspace : import.meta.dirname,
   workspace,
   checker,
+  checkerArgs: mode === "fast" ? ["--fast"] : undefined,
   outDir,
   incremental: mode.endsWith("changed") || mode === "unchanged",
   diagnosticSources: mode === "compile" ? ["svelte"] : undefined,

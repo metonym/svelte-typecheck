@@ -21,6 +21,7 @@ import {
   checkerArgs,
   checkerCommand,
   CHECKERS,
+  forwardedArgs,
   nativeCommand,
 } from "./checker.ts";
 import {
@@ -661,6 +662,10 @@ export async function typecheck(
     throw new Error(
       `No type checker found: install \`typescript\` (or one of ${CHECKERS.slice(1).join(", ")}), or name one with \`checker\`.`,
     );
+  // Checked before any work, so a blocked flag fails at once.
+  const extraArgs = checker
+    ? forwardedArgs(checker, options.checkerArgs ?? [])
+    : [];
 
   const started = performance.now();
   const incremental = options.incremental ?? true;
@@ -1505,6 +1510,8 @@ export async function typecheck(
   const deprecationsKey = hash(
     JSON.stringify([
       checker,
+      // A forwarded compiler option can be a deprecated one.
+      extraArgs,
       statsOf([...project.configFiles, ...packageFilesOf(projectDir)]),
     ]),
   );
@@ -1521,6 +1528,7 @@ export async function typecheck(
           [
             ...launch.prefix,
             ...checkerArgs(checker, tsconfig),
+            ...extraArgs,
             ...(known ? ["--ignoreDeprecations", known.ignore] : []),
           ],
           cwd,
@@ -1627,6 +1635,7 @@ export async function typecheck(
       [
         ...launch.prefix,
         ...checkerArgs(checker, tsconfig),
+        ...extraArgs,
         "--ignoreDeprecations",
         ignored,
       ],

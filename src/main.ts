@@ -21,7 +21,7 @@ import type {
 } from "./types.ts";
 import { watch } from "./watch.ts";
 
-const HELP = `Usage: svelte-typecheck [options]
+const HELP = `Usage: svelte-typecheck [options] [-- checker args]
 
 Type-checks Svelte components, as svelte-check does.
 
@@ -79,6 +79,9 @@ svelte-typecheck's own:
                             started if none runs (SVELTE_TYPECHECK_DAEMON=1
                             for every run; not on CI or with --watch)
   --no-daemon               Run here, whatever SVELTE_TYPECHECK_DAEMON says
+  -- <args>                 Pass the rest to the checker, after its own:
+                            -- --fast for tsrs's fast mode, or
+                            -- --checkers 8 for tsgo's or tsrs's threads
 
 The daemon:
   svelte-typecheck start    Start it for this folder
@@ -95,8 +98,9 @@ export async function main(argv: string[]): Promise<0 | 1> {
     return new Promise(() => {});
   }
   let values: ReturnType<typeof parse>["values"];
+  let rest: string[];
   try {
-    values = parse(argv).values;
+    ({ values, rest } = parse(argv));
   } catch (error) {
     console.error(`${(error as Error).message}\n\n${HELP}`);
     return 1;
@@ -116,7 +120,7 @@ export async function main(argv: string[]): Promise<0 | 1> {
     (text) => process.stdout.write(text),
     colors(colorFlag(values.color, values["no-color"])),
   );
-  const options = optionsOf(values);
+  const options = optionsOf(values, rest);
   if (values.changed || values.since) {
     try {
       options.only = changedFiles(process.cwd(), values.since);
@@ -223,6 +227,7 @@ export async function main(argv: string[]): Promise<0 | 1> {
 /** The run's options from parsed flags, as the CLI passes them to `typecheck`. */
 function optionsOf(
   values: ReturnType<typeof parse>["values"],
+  rest: string[],
 ): TypecheckOptions {
   return {
     workspace: values.workspace ?? ".",
@@ -232,6 +237,7 @@ function optionsOf(
     checker: (values.checker ??
       (values.tsgo || values["tsgo-experimental-api"] ? "tsgo" : undefined)) as
       Checker | undefined,
+    checkerArgs: rest.length > 0 ? rest : undefined,
     components: values.components,
     outDir: values["out-dir"],
     declarations: !values["no-declarations"],
@@ -247,7 +253,8 @@ function optionsOf(
 
 /** The options the CLI runs with for `argv`: the parity eval runs the same check. */
 export function cliOptions(argv: string[]): TypecheckOptions {
-  return optionsOf(parse(argv).values);
+  const { values, rest } = parse(argv);
+  return optionsOf(values, rest);
 }
 
 /**
@@ -278,9 +285,15 @@ function formatOf(output: string | undefined): OutputFormat {
   return agent ? "agent" : "human-verbose";
 }
 
+/**
+ * svelte-typecheck's flags, and the checker's: whatever follows `--`, as
+ * `npm run` and `cargo test` take theirs.
+ */
 function parse(argv: string[]) {
-  return parseArgs({
-    args: argv,
+  const end = argv.indexOf("--");
+  const rest = end === -1 ? [] : argv.slice(end + 1);
+  const { values } = parseArgs({
+    args: end === -1 ? argv : argv.slice(0, end),
     options: {
       workspace: { type: "string" },
       output: { type: "string" },
@@ -318,6 +331,7 @@ function parse(argv: string[]) {
       version: { type: "boolean", short: "v", default: false },
     },
   });
+  return { values, rest };
 }
 
 /** `a11y_missing_attribute:ignore,css_unused_selector:error`, as svelte-check takes it. */

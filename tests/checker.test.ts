@@ -5,10 +5,12 @@ import { join } from "node:path";
 import { typecheck } from "../src/check.ts";
 import {
   checkerCommand,
+  forwardedArgs,
   nativeCommand,
   onPath,
   runtimeBun,
 } from "../src/checker.ts";
+import { cliOptions } from "../src/main.ts";
 
 const root = join(import.meta.dir, "..");
 /** The project with every checker installed. */
@@ -95,6 +97,46 @@ describe("checkerCommand", () => {
     expect(checkerCommand("tsc", join(svelte5, "basic"))?.version).toBe(
       checkerCommand("tsc", svelte5)?.version,
     );
+  });
+});
+
+describe("forwardedArgs", () => {
+  it("passes flags that leave the run and its output as they are", () => {
+    expect(forwardedArgs("tsrs", ["--fast", "--checkers", "8"])).toEqual([
+      "--fast",
+      "--checkers",
+      "8",
+    ]);
+    expect(forwardedArgs("bun", ["--threads", "4"])).toEqual([
+      "--threads",
+      "4",
+    ]);
+  });
+
+  it("throws on one that changes how the checker runs or what it prints", () => {
+    expect(() => forwardedArgs("tsc", ["--watch"])).toThrow(
+      "Can't pass --watch to tsc: it changes how the checker runs",
+    );
+    // tsc's names are case-insensitive, and take a value after `=` too.
+    expect(() => forwardedArgs("tsgo", ["--Pretty"])).toThrow("--Pretty");
+    expect(() => forwardedArgs("tsrs", ["--outDir=dist"])).toThrow(
+      "it writes files",
+    );
+    expect(() => forwardedArgs("bun", ["--no-pretty"])).toThrow(
+      "svelte-typecheck sets it",
+    );
+    // Bun's own, which tsc doesn't have.
+    expect(forwardedArgs("tsc", ["--aot"])).toEqual(["--aot"]);
+  });
+});
+
+describe("--", () => {
+  it("passes the rest to the checker, and nothing before it", () => {
+    expect(
+      cliOptions(["--checker", "tsrs", "--", "--fast", "--watch"]).checkerArgs,
+    ).toEqual(["--fast", "--watch"]);
+    expect(cliOptions(["--checker", "tsrs"]).checkerArgs).toBeUndefined();
+    expect(() => cliOptions(["stray"])).toThrow("stray");
   });
 });
 

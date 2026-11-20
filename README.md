@@ -84,6 +84,15 @@ svelte-typecheck --baseline errors.json --strict-baseline
 # Check again on every change
 svelte-typecheck --watch
 
+# Pass the checker its own flags after --
+svelte-typecheck --checker tsrs -- --fast             # tsrs's fast mode
+svelte-typecheck --checker tsrs -- --maxMemory 4G     # cap tsrs's memory
+svelte-typecheck --checker tsgo -- --checkers 8       # 8 checker threads
+svelte-typecheck --checker bun -- --threads 4         # 4 bun check threads
+svelte-typecheck -- --noUncheckedIndexedAccess        # a stricter option, without editing the tsconfig
+svelte-typecheck -- --generateTrace trace             # a trace of where the checker spends its time
+svelte-typecheck --checker tsrs -- --fast --checkers 8  # several flags, in order
+
 # Run on a process kept alive between runs, for agents and hooks
 svelte-typecheck --daemon
 

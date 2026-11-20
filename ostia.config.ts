@@ -38,6 +38,8 @@ export default defineConfig({
     run("svelte4", "tsrs"),
     // JS components with JSDoc types, checked with checkJs.
     run("jsdoc", "tsrs"),
+    // tsrs's fast mode: more checkers, lazy members, extra caches.
+    run("fast", "tsrs"),
     // 8,000 components, the most connected shapes: an index.ts that
     // re-exports them all, and one component they all import.
     scale("barrel", 8000, "cold"),

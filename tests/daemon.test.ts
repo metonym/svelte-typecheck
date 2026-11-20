@@ -2,7 +2,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { cp, mkdir, rm, writeFile } from "node:fs/promises";
 import { createServer } from "node:net";
 import { join } from "node:path";
-import { SERVE, wantsDaemon } from "../src/daemon.ts";
+import { runArguments, SERVE, wantsDaemon } from "../src/daemon.ts";
 import { AGENT_ENV } from "../src/main.ts";
 
 const root = join(import.meta.dir, "..");
@@ -102,6 +102,21 @@ describe("wantsDaemon", () => {
     expect(
       wantsDaemon([SERVE, "socket"], { SVELTE_TYPECHECK_DAEMON: "1" }),
     ).toBe(false);
+    // After `--`, the checker's: not svelte-typecheck's.
+    expect(wantsDaemon(["--", "--daemon"], {})).toBe(false);
+    expect(wantsDaemon(["--daemon", "--", "--watch"], {})).toBe(true);
+  });
+});
+
+describe("runArguments", () => {
+  it("drops the daemon's flags, and keeps the checker's after --", () => {
+    expect(
+      runArguments(["--daemon", "--checker", "tsrs", "--", "--fast"]),
+    ).toEqual(["--checker", "tsrs", "--", "--fast"]);
+    expect(runArguments(["--no-daemon", "--", "--daemon"])).toEqual([
+      "--",
+      "--daemon",
+    ]);
   });
 });
 

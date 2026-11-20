@@ -55,6 +55,67 @@ describe("typecheck", () => {
     30_000,
   );
 
+  // tsrs's fast mode (`--fast`, after `--` on the CLI) assigns files to
+  // more checkers and resolves members lazily. tsrs says that can add,
+  // drop or move a diagnostic in rare cases; these fixtures must not hit
+  // one.
+  it.each([
+    "basic",
+    "typed",
+    "generic",
+    "filters",
+    "runes",
+    "helpers",
+    "untyped",
+    "edge",
+    "missing",
+    "checkjs",
+    "typedef-js",
+  ])(
+    "reports the same diagnostics for %s with tsrs's fast mode",
+    async (workspace) => {
+      const run = async (fast: boolean) => {
+        const { diagnostics } = await typecheck({
+          cwd: svelte5,
+          workspace,
+          checker: "tsrs",
+          checkerArgs: fast ? ["--fast"] : undefined,
+          incremental: false,
+          diagnosticSources: ["js"],
+          outDir: `node_modules/.cache/svelte-typecheck/test-fast-${workspace}-${fast}`,
+        });
+        return diagnostics;
+      };
+      const fast = await run(true);
+      expect(fast).toEqual(await run(false));
+      expect(fast.length).toBeGreaterThan(0);
+    },
+    30_000,
+  );
+
+  // An unknown flag shows the checker got the arguments; the second run
+  // must not replay the first's result, which had none.
+  it("passes checkerArgs to the checker, and runs again when they change", async () => {
+    const options = {
+      cwd: svelte5,
+      workspace: "basic",
+      checker: "tsc" as const,
+      diagnosticSources: ["js" as const],
+      outDir: "node_modules/.cache/svelte-typecheck/test-checker-args",
+    };
+    rmSync(join(svelte5, options.outDir), { recursive: true, force: true });
+    const unknown = (d: { message: string }) =>
+      d.message.includes("--notAnOption");
+    expect((await typecheck(options)).diagnostics.some(unknown)).toBe(false);
+    const { diagnostics } = await typecheck({
+      ...options,
+      checkerArgs: ["--notAnOption"],
+    });
+    expect(diagnostics.filter(unknown)).toMatchObject([
+      { file: join(svelte5, "basic/tsconfig.json"), severity: "error" },
+    ]);
+  }, 30_000);
+
   // A run learns which `ignoreDeprecations` the tsconfig needs, and the
   // next runs tsc once, with it, for the same result.
   it("reuses what a run learned of a tsconfig's deprecated options", async () => {
