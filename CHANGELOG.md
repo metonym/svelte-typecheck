@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.2.0 — 2026-11-20
+
+**Features**
+
+- Arguments after `--` go to the checker, after svelte-typecheck's
+  own. They pass the checker a flag svelte-typecheck has no option for,
+  such as tsrs's fast mode (`-- --fast`), tsgo's thread count
+  (`-- --checkers 8`), or a stricter compiler option without editing
+  the tsconfig (`-- --noUncheckedIndexedAccess`). The API takes them
+  as `checkerArgs`. Flags that svelte-typecheck sets, or that change
+  how the checker runs, prints or writes files, such as `--pretty`,
+  `--watch` or `--outDir`, fail the run with a message. Changing the
+  arguments runs the checker again rather than returning the last
+  result.
+
 ## 0.1.21 — 2026-11-16
 
 **Fixes**
