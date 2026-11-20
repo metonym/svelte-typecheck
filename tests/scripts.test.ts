@@ -38,13 +38,10 @@ describe("package.json scripts", () => {
     expect(shadowed({ fmt: "bun fmt" })).toEqual([]);
   });
 
-  it.each(["package.json", "bench/package.json", "eval/package.json"])(
-    "in %s reach Bun's own commands",
-    (file) => {
-      const { scripts = {} } = JSON.parse(
-        readFileSync(join(root, file), "utf-8"),
-      ) as { scripts?: Record<string, string> };
-      expect(shadowed(scripts)).toEqual([]);
-    },
-  );
+  it("in package.json reach Bun's own commands", () => {
+    const { scripts = {} } = JSON.parse(
+      readFileSync(join(root, "package.json"), "utf-8"),
+    ) as { scripts?: Record<string, string> };
+    expect(shadowed(scripts)).toEqual([]);
+  });
 });

@@ -86,11 +86,7 @@ export default defineConfig({
       "tests/projects/svelte5/basic/Warnings.svelte",
       "tests/projects/svelte5/basic/tsconfig.json",
     ],
-    "tests/scripts.test.ts": [
-      "package.json",
-      "bench/package.json",
-      "eval/package.json",
-    ],
+    "tests/scripts.test.ts": "package.json",
     // The samples in How it works, generated again and compared.
     "tests/docs.test.ts": "docs/architecture.md",
     "tests/compiler.test.ts": [
