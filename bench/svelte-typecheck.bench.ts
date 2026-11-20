@@ -1,6 +1,6 @@
 import { group, task } from "ostia";
-import { parse } from "sveast";
-import { analyzeScopes } from "sveast/scope";
+import { parse } from "svelte-ast";
+import { analyzeScopes } from "svelte-ast/scope";
 import { emit } from "../src/emit.ts";
 import { sources } from "./corpus.ts";
 
@@ -8,7 +8,7 @@ const components = await sources();
 
 group(`per component (${components.length} components)`, () => {
   task(
-    "sveast: parse and scopes",
+    "svelte-ast: parse and scopes",
     () => {
       for (const [, source] of components)
         analyzeScopes(parse(source, { css: false }));

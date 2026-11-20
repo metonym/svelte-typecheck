@@ -19,7 +19,7 @@ bun run test:package   # build, pack, install, and use it as a consumer would
 bun src/cli.ts         # the CLI from source, in the current folder
 ```
 
-The repo is a Bun workspace. The root `package.json` installs only what the source and its tools need: sveast, which the build bundles, `bun-types`, bivium, knip and ostia. Each test project, `bench/` and `eval/` is a workspace package that installs its own Svelte and checkers, so a test sees what a user's project would and nothing hoisted from the root. Versions they share are pinned once, in the root's `workspaces.catalog`, and taken with `"catalog:"`.
+The repo is a Bun workspace. The root `package.json` installs only what the source and its tools need: svelte-ast, which the build bundles, `bun-types`, bivium, knip and ostia. Each test project, `bench/` and `eval/` is a workspace package that installs its own Svelte and checkers, so a test sees what a user's project would and nothing hoisted from the root. Versions they share are pinned once, in the root's `workspaces.catalog`, and taken with `"catalog:"`.
 
 The SvelteKit project needs SvelteKit's generated files; its parity test runs `svelte-kit sync` first, and so can you: `bunx svelte-kit sync` in `tests/projects/kit`.
 
@@ -43,10 +43,10 @@ The SvelteKit project needs SvelteKit's generated files; its parity test runs `s
 - **Never pass silently.** Generated code that doesn't parse fails the run as our bug, and a checker error that names no file is reported on the tsconfig. A run that checked nothing must not look like a clean one.
 - **Never write the project's files.** Everything goes to the output folder; the generated tsconfig sets its own `incremental`, `composite` and `tsBuildInfoFile` so the project's never come into play.
 - **Bump `CACHE_FORMAT`** (`src/check.ts`) when a cache's shape changes, so a new run misses an old file instead of reading the wrong shape. A change to the generated code needs no bump: run from source, every cache is kept by a hash of the source, and a release by its version.
-- **Zero runtime dependencies.** sveast is bundled, and Svelte is loaded from the project, so the package doesn't declare it, even as a peer; `src/` imports `node:` builtins otherwise and runs on Node ≥ 22 and Bun. `test:package` checks the bundle's imports.
+- **Zero runtime dependencies.** svelte-ast is bundled, and Svelte is loaded from the project, so the package doesn't declare it, even as a peer; `src/` imports `node:` builtins otherwise and runs on Node ≥ 22 and Bun. `test:package` checks the bundle's imports.
 - **Keep the public API small.** `src/index.ts` is the public API, and `src/types.ts` declares it by hand: its types and each function's signature, with their JSDoc. It imports nothing, and the build copies it as `index.d.ts`. Change a function's signature in both; `tests/api.test.ts` fails to type-check until they match.
 - **Paths through `node:path`.** Never split a path on `/`: on Windows a `.tmp` folder read as an extension once dropped every component. Messages print paths `/`-separated, with a lowercase drive letter on Windows, as svelte-check's TypeScript does.
-- **Comments say why.** JSDoc is for the public API; elsewhere a comment states a reason or a constraint the code can't. sveast's AST is untyped, so `any` stays on its nodes in `emit.ts` and `kit.ts`, with a disable comment, and nowhere else.
+- **Comments say why.** JSDoc is for the public API; elsewhere a comment states a reason or a constraint the code can't. svelte-ast's AST is untyped, so `any` stays on its nodes in `emit.ts` and `kit.ts`, with a disable comment, and nowhere else.
 
 ## Tests
 

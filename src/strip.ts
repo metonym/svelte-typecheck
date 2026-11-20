@@ -1,6 +1,6 @@
-import { parseModule } from "sveast";
+import { parseModule } from "svelte-ast";
 
-// eslint-disable-next-line typescript/no-explicit-any -- sveast's TypeScript nodes
+// eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's TypeScript nodes
 type AnyNode = any;
 
 /** Syntax that has a runtime meaning, so it can't be blanked to JavaScript. */

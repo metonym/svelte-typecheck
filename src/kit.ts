@@ -1,7 +1,7 @@
-import { parseModule } from "sveast";
+import { parseModule } from "svelte-ast";
 import { Output } from "./output.ts";
 
-// eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+// eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
 type Node = any;
 
 /**

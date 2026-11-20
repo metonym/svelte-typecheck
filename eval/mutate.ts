@@ -7,7 +7,7 @@
 //   bun eval/mutate.ts <dir>
 import { readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { parse, walk } from "sveast";
+import { parse, walk } from "svelte-ast";
 
 const TS_LANG = /\blang=["']?ts\b/;
 
