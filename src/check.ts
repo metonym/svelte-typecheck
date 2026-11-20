@@ -42,6 +42,7 @@ import { configFingerprint, realPath } from "./config.ts";
 import type { emit } from "./emit.ts";
 import { glob } from "./glob.ts";
 import { limited } from "./limit.ts";
+import { lockOutDir } from "./lock.ts";
 import { createLocator, type Output } from "./output.ts";
 import {
   asTypeScriptPath,
@@ -620,17 +621,36 @@ export async function typecheck(
   // too, symlinks or not (macOS's `/tmp` is `/private/tmp`).
   const cwd = realPath(resolve(options.cwd ?? process.cwd()));
   const workspace = resolve(cwd, options.workspace ?? ".");
+  const outDir = resolve(
+    cwd,
+    options.outDir ??
+      join("node_modules/.cache/svelte-typecheck", relative(cwd, workspace)),
+  );
+  // From the first read of the last run's code to the last of the
+  // checker's output: another run in the folder waits.
+  const release = await lockOutDir(outDir);
+  try {
+    return await typecheckIn(options, { cwd, workspace, outDir });
+  } finally {
+    await release();
+  }
+}
+
+/** `typecheck`, in the output folder the run holds. */
+async function typecheckIn(
+  options: TypecheckOptions,
+  {
+    cwd,
+    workspace,
+    outDir,
+  }: { cwd: string; workspace: string; outDir: string },
+): Promise<TypecheckResult> {
   const project = projectOf({
     workspace,
     tsconfig: options.tsconfig,
     ignore: options.ignore,
     components: options.components,
   });
-  const outDir = resolve(
-    cwd,
-    options.outDir ??
-      join("node_modules/.cache/svelte-typecheck", relative(cwd, workspace)),
-  );
   const genDir = join(outDir, "svelte");
   /** Generated code for the components packages export, not reported. */
   const packagesDir = join(outDir, "packages");

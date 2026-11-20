@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { cpSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 
 const root = join(import.meta.dir, "..");
 const dir = join(root, "tests/projects/svelte5/.tmp/baseline");
@@ -15,8 +15,10 @@ const cli = (...args: string[]) =>
 describe("--baseline", () => {
   it("reports only what's new since the baseline, through edits that move lines", () => {
     rmSync(dir, { recursive: true, force: true });
+    // Not the cache, which another test's run can be writing.
     cpSync(join(root, "tests/projects/svelte5/basic"), dir, {
       recursive: true,
+      filter: (from) => basename(from) !== "node_modules",
     });
     const written = cli("--baseline", "baseline.json", "--update-baseline");
     expect(written.status).toBe(0);
