@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { typecheck } from "../src/check.ts";
 import {
   checkerCommand,
+  checkerEnv,
   forwardedArgs,
   nativeCommand,
   onPath,
@@ -97,6 +98,17 @@ describe("checkerCommand", () => {
     expect(checkerCommand("tsc", join(svelte5, "basic"))?.version).toBe(
       checkerCommand("tsc", svelte5)?.version,
     );
+  });
+});
+
+describe("checkerEnv", () => {
+  it("keys tsrs's runs on its TSRS_ settings, sorted", () => {
+    const env = { TSRS_FAST: "1", PATH: "/bin", TSRS_A: "x", TSGO: "y" };
+    expect(checkerEnv("tsrs", env)).toEqual([
+      ["TSRS_A", "x"],
+      ["TSRS_FAST", "1"],
+    ]);
+    expect(checkerEnv("tsgo", env)).toEqual([]);
   });
 });
 

@@ -116,6 +116,30 @@ describe("typecheck", () => {
     ]);
   }, 30_000);
 
+  // TSRS_FAST reaches tsrs through the environment, not the options.
+  it("runs tsrs again when a TSRS_ setting changes", async () => {
+    const options = {
+      cwd: svelte5,
+      workspace: "basic",
+      checker: "tsrs" as const,
+      diagnosticSources: ["js" as const],
+      outDir: "node_modules/.cache/svelte-typecheck/test-checker-env",
+    };
+    rmSync(join(svelte5, options.outDir), { recursive: true, force: true });
+    const before = process.env.TSRS_FAST;
+    try {
+      delete process.env.TSRS_FAST;
+      await typecheck(options);
+      // The same run again returns the last result without the checker.
+      expect((await typecheck(options)).timings.check).toBe(0);
+      process.env.TSRS_FAST = "1";
+      expect((await typecheck(options)).timings.check).toBeGreaterThan(0);
+    } finally {
+      if (before === undefined) delete process.env.TSRS_FAST;
+      else process.env.TSRS_FAST = before;
+    }
+  }, 30_000);
+
   // A run learns which `ignoreDeprecations` the tsconfig needs, and the
   // next runs tsc once, with it, for the same result.
   it("reuses what a run learned of a tsconfig's deprecated options", async () => {
