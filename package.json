@@ -33,7 +33,7 @@
     "typecheck": "bun check",
     "knip": "knip-bun",
     "fmt": "bun fmt",
-    "lint": "bun fmt --check && bun lint --no-script --max-warnings 0",
+    "lint": "bun fmt --no-script --check && bun lint --no-script --max-warnings 0",
     "verify": "bun run lint && bun run knip && bun run typecheck && bivium check --max-unknown 0",
     "prepare": "git config core.hooksPath .githooks || true"
   },
