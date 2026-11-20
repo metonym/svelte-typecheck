@@ -17,7 +17,7 @@ svelte-typecheck --checker tsgo     # or tsrs, or bun
 ```ts
 const result = await typecheck({ checker: "tsrs" });
 result.checker; // "tsrs"
-result.checkerVersion; // "0.20.1", from its package.json
+result.checkerVersion; // "7.1.0-beta.tsrs3", from its package.json
 ```
 
 ## How a checker is found and run
