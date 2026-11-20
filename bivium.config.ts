@@ -58,6 +58,7 @@ export default defineConfig({
     "tests/baseline.test.ts": "src/cli.ts",
     "tests/compile-cache.test.ts": "src/cli.ts",
     "tests/daemon.test.ts": "src/cli.ts",
+    "tests/lock.test.ts": "src/cli.ts",
     // The compiler's pass runs this on a worker thread.
     "src/compiler.ts": "src/compile-worker.ts",
     // The parity tests run the CLI through it.
@@ -76,6 +77,7 @@ export default defineConfig({
     "tests/baseline.test.ts": fixtures,
     "tests/changed.test.ts": fixtures,
     "tests/daemon.test.ts": fixtures,
+    "tests/lock.test.ts": fixtures,
     "tests/checker.test.ts": [fixtures, "tests/projects/ts7/**"],
     "tests/agent.test.ts": [
       "tests/projects/svelte5/package.json",
