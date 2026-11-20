@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.2.1 — 2026-11-20
+
+**Fixes**
+
+- Two runs on the same project, such as an editor task and a
+  pre-commit hook, could clear each other's files in the cache folder.
+  The checker then failed with `TS6053` on `shims.d.ts`. A run now
+  holds a lock beside the cache folder, and a second run waits for it.
+  A lock left by a run that died is taken over
+  ([#111](https://github.com/metonym/svelte-typecheck/pull/111)).
+- With tsrs, setting or changing a `TSRS_` variable such as
+  `TSRS_FAST=1` with nothing else changed returned the last result
+  without running tsrs. These variables are now part of what decides
+  whether anything changed
+  ([#109](https://github.com/metonym/svelte-typecheck/pull/109)).
+
 ## 0.2.0 — 2026-11-20
 
 **Features**
