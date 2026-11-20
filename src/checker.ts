@@ -168,6 +168,24 @@ export function checkerArgs(checker: Checker, tsconfig: string): string[] {
 }
 
 /**
+ * The environment variables that change what the checker reports, as
+ * sorted pairs: tsrs reads `TSRS_FAST` and other `TSRS_` settings. tsc
+ * and tsgo read only watch-mode ones.
+ */
+export function checkerEnv(
+  checker: Checker,
+  env: Record<string, string | undefined> = process.env,
+): [string, string][] {
+  if (checker !== "tsrs") return [];
+  return Object.entries(env)
+    .filter(
+      (entry): entry is [string, string] =>
+        entry[0].startsWith("TSRS_") && entry[1] !== undefined,
+    )
+    .sort(([a], [b]) => Number(a > b) - Number(a < b));
+}
+
+/**
  * Flags a user can't pass the checker, and why: each changes how it runs,
  * what it prints, or what it writes. `tsc`'s names are case-insensitive,
  * so they're kept lowercase.

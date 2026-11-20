@@ -20,6 +20,7 @@ import { version as TOOL_VERSION } from "../package.json";
 import {
   checkerArgs,
   checkerCommand,
+  checkerEnv,
   CHECKERS,
   forwardedArgs,
   nativeCommand,
@@ -728,6 +729,8 @@ export async function typecheck(
           command?.version,
           cwd,
           options,
+          // `TSRS_FAST` and the like change what tsrs reports.
+          checker ? checkerEnv(checker) : [],
           configFingerprint(configDir, configFile),
           statsOf([
             ...files,
