@@ -38,6 +38,29 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 | `--strict-baseline`   | Exit 1 when diagnostics in the baseline are fixed, until `--update-baseline` drops them, so the baseline only goes down                                        |
 | `--daemon`            | Run on a daemon kept alive for the folder; see [The daemon](#the-daemon)                                                                                       |
 | `--no-daemon`         | Run here, whatever `SVELTE_TYPECHECK_DAEMON` says                                                                                                              |
+| `-- <args>`           | Pass the rest to the checker; see [The checker's flags](#the-checkers-flags)                                                                                   |
+
+## The checker's flags
+
+Everything after `--` goes to the checker, after svelte-typecheck's own arguments, as `npm run` and `cargo test` pass theirs on:
+
+```sh
+svelte-typecheck --checker tsrs -- --fast            # tsrs's fast mode
+svelte-typecheck --checker tsgo -- --checkers 8      # 8 checker threads
+svelte-typecheck -- --noUncheckedIndexedAccess       # a stricter option, without editing the tsconfig
+svelte-typecheck --checker tsrs -- --fast --checkers 8 --maxMemory 4G  # several flags
+```
+
+A compiler option works with every checker. The rest are the checker's own:
+
+| Checker                    | Flags                                                                                                                                |
+| :------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
+| `tsc` (TypeScript 6)       | `--generateTrace <dir>`, `--generateCpuProfile <file>`                                                                               |
+| `tsc` (TypeScript 7), tsgo | `--checkers <n>`, `--singleThreaded`, `--pprofDir <dir>`, `--generateTrace <dir>`                                                    |
+| tsrs                       | TypeScript 7's, and `--fast`, `--maxMemory <size>`, `--checkerCostCache <file>`, `--checkerAssignment go\|locality`, `--lazyMembers` |
+| `bun check`                | `--threads <n>`                                                                                                                      |
+
+A flag that changes how the checker runs, what it prints or what it writes, such as `--watch`, `--pretty`, `--outDir` or `--extendedDiagnostics`, fails the run. A flag the checker doesn't know fails as the checker reports it: on your tsconfig for `tsc`, tsgo and tsrs. Through an npm script, npm takes the first `--`, so pass two (`npm run check -- -- --fast`), or write the flags into the script. The API takes them as an array, one item per word: `checkerArgs: ["--fast", "--checkers", "8"]`.
 
 ## The daemon
 

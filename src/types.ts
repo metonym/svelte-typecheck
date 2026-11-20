@@ -25,6 +25,13 @@ export interface TypecheckOptions {
    * then the first of `tsgo`, `tsrs` and `bun` that's installed.
    */
   checker?: Checker;
+  /**
+   * More arguments for the checker, after svelte-typecheck's own: the
+   * CLI's after `--`, such as tsrs's `["--fast"]` or tsgo's
+   * `["--checkers", "8"]`. Flags that change how the checker runs or
+   * what it prints, such as `--watch` or `--pretty`, throw.
+   */
+  checkerArgs?: string[];
   /** Globs of the components to check, relative to the workspace, instead of the tsconfig's. */
   components?: string[];
   /** Where to write the generated code. Default: `node_modules/.cache/svelte-typecheck/<workspace>`. */

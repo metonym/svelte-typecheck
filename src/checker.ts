@@ -166,3 +166,74 @@ export function checkerArgs(checker: Checker, tsconfig: string): string[] {
     ? ["check", "--no-script", "-p", tsconfig, "--no-pretty", "--all"]
     : ["-p", tsconfig, "--pretty", "false"];
 }
+
+/**
+ * Flags a user can't pass the checker, and why: each changes how it runs,
+ * what it prints, or what it writes. `tsc`'s names are case-insensitive,
+ * so they're kept lowercase.
+ */
+const BLOCKED: [reason: string, flags: string[]][] = [
+  [
+    "svelte-typecheck sets it",
+    [
+      "-p",
+      "--project",
+      "--pretty",
+      "--noemit",
+      "--incremental",
+      "--tsbuildinfofile",
+      "--ignoredeprecations",
+      "--ignoreconfig",
+    ],
+  ],
+  [
+    "it changes how the checker runs",
+    [
+      "-b",
+      "--build",
+      "-w",
+      "--watch",
+      "--init",
+      "--showconfig",
+      "--listfilesonly",
+      "-v",
+      "--version",
+      "-h",
+      "-?",
+      "--help",
+      "--all",
+    ],
+  ],
+  [
+    "it changes the output svelte-typecheck reads",
+    [
+      "--quiet",
+      "--listfiles",
+      "--explainfiles",
+      "--diagnostics",
+      "--extendeddiagnostics",
+    ],
+  ],
+  ["it writes files", ["--outdir", "--declaration"]],
+];
+const BLOCKED_BUN: [reason: string, flags: string[]][] = [
+  ["svelte-typecheck sets it", ["--no-pretty", "--no-script", "--cwd"]],
+  [
+    "it changes what bun check checks",
+    ["--no-follow-imports", "--aot", "--timing"],
+  ],
+];
+
+/**
+ * The arguments a user passes the checker, as they are, or an error
+ * naming the first that would break the run.
+ */
+export function forwardedArgs(checker: Checker, args: string[]): string[] {
+  const blocked = checker === "bun" ? [...BLOCKED, ...BLOCKED_BUN] : BLOCKED;
+  for (const arg of args) {
+    const name = arg.split("=")[0]?.toLowerCase() ?? "";
+    const hit = blocked.find(([, flags]) => flags.includes(name));
+    if (hit) throw new Error(`Can't pass ${arg} to ${checker}: ${hit[0]}`);
+  }
+  return args;
+}

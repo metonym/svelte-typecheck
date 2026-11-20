@@ -82,14 +82,26 @@ export function wantsDaemon(
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (argv[0] === SERVE) return false;
-  if (argv.includes("--no-daemon") || argv.includes("--watch")) return false;
+  const own = ownArguments(argv);
+  if (own.includes("--no-daemon") || own.includes("--watch")) return false;
   if (truthy(env.CI)) return false;
-  return argv.includes("--daemon") || truthy(env[ENABLE]);
+  return own.includes("--daemon") || truthy(env[ENABLE]);
 }
 
+/** svelte-typecheck's arguments: those before `--`, the checker's after. */
+const ownArguments = (argv: string[]) => {
+  const end = argv.indexOf("--");
+  return end === -1 ? argv : argv.slice(0, end);
+};
+
 /** The arguments without the daemon's own flags, as the run takes them. */
-export const runArguments = (argv: string[]) =>
-  argv.filter((arg) => arg !== "--daemon" && arg !== "--no-daemon");
+export const runArguments = (argv: string[]) => {
+  const own = ownArguments(argv);
+  return [
+    ...own.filter((arg) => arg !== "--daemon" && arg !== "--no-daemon"),
+    ...argv.slice(own.length),
+  ];
+};
 
 /** The CLI that runs, and when it was built: a daemon serves only its own. */
 function buildKey(): string {
