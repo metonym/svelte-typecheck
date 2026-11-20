@@ -3,7 +3,9 @@ import {
   mkdirSync,
   readFileSync,
   rmSync,
+  statSync,
   symlinkSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { join, relative } from "node:path";
@@ -230,13 +232,16 @@ describe("typecheck", () => {
             (d) => `${relative(basic, d.file)}:${d.line}:${d.column} ${d.code}`,
           );
       expect(await run(svelte5)).toEqual(EXPECTED);
-      // A new component, so the next run can't reuse the last result.
-      const extra = join(basic, `Extra-${checker}.svelte`);
-      writeFileSync(extra, "<p>extra</p>\n");
+      // A new mtime, so the next run can't reuse the last result. A new
+      // file in basic would reach the parity tests' svelte-check, which
+      // runs there at the same time.
+      const clean = join(basic, "Clean.svelte");
+      const { atime, mtime } = statSync(clean);
+      utimesSync(clean, atime, new Date(mtime.getTime() + 1000));
       try {
         expect(await run(link)).toEqual(EXPECTED);
       } finally {
-        rmSync(extra, { force: true });
+        utimesSync(clean, atime, mtime);
       }
     },
     30_000,
