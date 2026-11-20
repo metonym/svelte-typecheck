@@ -5,8 +5,8 @@ import {
   parseModule,
   SKIP,
   walk,
-} from "sveast";
-import { analyzeScopes } from "sveast/scope";
+} from "svelte-ast";
+import { analyzeScopes } from "svelte-ast/scope";
 import {
   isKitErrorFile,
   isKitRouteFile,
@@ -120,7 +120,7 @@ function parseGenerics(generics: string): {
     ],
     parsed: false,
   });
-  // eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+  // eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
   let declaration: any;
   try {
     declaration = parseModule(code, { typescript: true }).body[0];
@@ -132,7 +132,7 @@ function parseGenerics(generics: string): {
   if (list?.end !== GENERICS_HEAD.length + generics.length + 2) return whole();
   const text = (node: { start: number; end: number } | null) =>
     node ? code.slice(node.start, node.end) : undefined;
-  // eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+  // eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
   const params = list.params.map((p: any) => ({
     start: p.start - GENERICS_HEAD.length,
     end: p.end - GENERICS_HEAD.length,
@@ -201,7 +201,7 @@ const FUNCTION =
   /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|MethodDefinition|PropertyDefinition)$/;
 
 /** The type svelte2tsx infers for a prop from its default. */
-// eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+// eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
 function typeOfDefault(init: any, source: string): string {
   if (init.type === "TSAsExpression")
     return source.slice(init.typeAnnotation.start, init.typeAnnotation.end);
@@ -220,7 +220,7 @@ function typeOfDefault(init: any, source: string): string {
 }
 
 /** The `$props()` declarator of a statement, if it has one. */
-// eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+// eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
 function propsDeclaratorOf(s: any) {
   if (s.type !== "VariableDeclaration") return;
   return s.declarations.find(
@@ -232,7 +232,7 @@ function propsDeclaratorOf(s: any) {
   );
 }
 
-// eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+// eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
 type AnyNode = any;
 
 /** TypeScript-only syntax in a JS script, as TypeScript reports it. */
@@ -408,7 +408,7 @@ export function emit(
     checkJs = true,
   }: EmitOptions = {},
 ) {
-  // eslint-disable-next-line typescript/no-explicit-any -- sveast's AST is untyped here
+  // eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
   type Node = any;
   const { ast, tsInJs } = parseComponent(source);
   const scopes: Node = analyzeScopes(ast);

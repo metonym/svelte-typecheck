@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
-import { lexComponent } from "sveast/lexer";
+import { lexComponent } from "svelte-ast/lexer";
 import {
   configNeedsChdir,
   type Preprocessor,

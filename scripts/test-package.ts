@@ -11,8 +11,8 @@ import {
 import { readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
-import { parseImportsExports } from "sveast";
-import { lexDynamicImports } from "sveast/lexer";
+import { parseImportsExports } from "svelte-ast";
+import { lexDynamicImports } from "svelte-ast/lexer";
 
 const root = resolve(import.meta.dir, "..");
 const dist = join(root, "dist");
