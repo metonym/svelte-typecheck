@@ -1,7 +1,37 @@
 import { parseModule } from "svelte-ast";
 
-// eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's TypeScript nodes
-type AnyNode = any;
+// The fields the walk reads. TypeScript's syntax rides on nodes of every
+// kind, a `declare` or an `abstract` on a class or a member, so the walk
+// reads them off any node it meets instead of narrowing to each type.
+interface AnyNode {
+  type: string;
+  start: number;
+  end: number;
+  name?: string;
+  declare?: boolean;
+  abstract?: boolean;
+  optional?: boolean;
+  definite?: boolean;
+  computed?: boolean;
+  importKind?: string;
+  exportKind?: string;
+  key?: AnyNode;
+  value?: AnyNode;
+  expression?: AnyNode;
+  typeAnnotation?: AnyNode;
+  declaration?: AnyNode | null;
+  body?: AnyNode & { body?: AnyNode[] };
+  implements?: AnyNode[];
+  params?: AnyNode[];
+}
+
+function isNode(value: unknown): value is AnyNode {
+  return (
+    typeof value === "object" &&
+    value !== null &&
+    typeof Reflect.get(value, "type") === "string"
+  );
+}
 
 /** Syntax that has a runtime meaning, so it can't be blanked to JavaScript. */
 const UNSUPPORTED = new Set([
@@ -41,7 +71,7 @@ const MODIFIERS =
  * a module that isn't JavaScript once blanked.
  */
 export function blankTypes(source: string): string | undefined {
-  let program: AnyNode;
+  let program;
   try {
     program = parseModule(source, { typescript: true, comments: false });
   } catch {
@@ -64,14 +94,15 @@ export function blankTypes(source: string): string | undefined {
   };
   let supported = true;
 
-  const visit = (node: AnyNode, parent?: AnyNode) => {
-    if (!supported || !node || typeof node !== "object") return;
-    if (Array.isArray(node)) {
-      for (const child of node) visit(child, parent);
+  const visit = (value: unknown, parent?: AnyNode) => {
+    if (!supported || !value || typeof value !== "object") return;
+    if (Array.isArray(value)) {
+      for (const child of value) visit(child, parent);
       return;
     }
-    if (typeof node.type !== "string") return;
-    const type: string = node.type;
+    if (!isNode(value)) return;
+    const node = value;
+    const type = node.type;
     if (
       UNSUPPORTED.has(type) ||
       (type === "TSModuleDeclaration" && !node.declare && !typesOnly(node))
@@ -102,17 +133,19 @@ export function blankTypes(source: string): string | undefined {
       case "TSSatisfiesExpression":
       case "TSNonNullExpression":
       case "TSInstantiationExpression":
+        if (!node.expression) return;
         blank(node.expression.end, node.end);
         visit(node.expression, node);
         return;
       case "TSTypeAssertion":
+        if (!node.expression) return;
         blank(node.start, node.expression.start);
         visit(node.expression, node);
         return;
       case "Identifier":
         // `a?: T`, `a!: T`, and `this: T`, which the caller blanks.
         if (node.typeAnnotation || node.optional)
-          blank(node.start + node.name.length, node.end);
+          blank(node.start + (node.name?.length ?? 0), node.end);
         return;
       case "ObjectPattern":
       case "ArrayPattern":
@@ -121,6 +154,7 @@ export function blankTypes(source: string): string | undefined {
         break;
       case "PropertyDefinition":
       case "MethodDefinition":
+        if (!node.key) break;
         blankWords(node.start, node.key.start, MODIFIERS);
         if (node.optional || node.definite)
           blankNext(
@@ -130,12 +164,13 @@ export function blankTypes(source: string): string | undefined {
         break;
       case "ClassDeclaration":
       case "ClassExpression": {
-        if (node.abstract)
+        if (node.abstract && node.body)
           blankWords(node.start, node.body.start, /\babstract\b/g);
-        const implemented = node.implements;
-        if (implemented?.length) {
-          const from = source.lastIndexOf("implements", implemented[0].start);
-          blank(from, implemented[implemented.length - 1].end);
+        const first = node.implements?.[0];
+        const last = node.implements?.at(-1);
+        if (first && last) {
+          const from = source.lastIndexOf("implements", first.start);
+          blank(from, last.end);
         }
         break;
       }
@@ -150,9 +185,10 @@ export function blankTypes(source: string): string | undefined {
         break;
       }
     }
-    for (const field of TYPE_FIELDS)
-      if (node[field]?.start !== undefined)
-        blank(node[field].start, node[field].end);
+    for (const field of TYPE_FIELDS) {
+      const typed: unknown = Reflect.get(node, field);
+      if (isNode(typed)) blank(typed.start, typed.end);
+    }
     for (const [key, value] of Object.entries(node))
       if (key !== "loc" && !TYPE_FIELDS.includes(key)) visit(value, node);
   };

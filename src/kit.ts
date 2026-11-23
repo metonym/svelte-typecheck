@@ -1,9 +1,15 @@
-import { parseModule } from "svelte-ast";
+import {
+  type ArrowFunctionExpression,
+  type ExportNamedDeclaration,
+  type FunctionDeclaration,
+  type FunctionExpression,
+  parseModule,
+  type VariableDeclarator,
+} from "svelte-ast";
 
 import { Output } from "./output.ts";
 
-// eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
-type Node = any;
+type Fn = FunctionDeclaration | FunctionExpression | ArrowFunctionExpression;
 
 /**
  * SvelteKit's files, typed as svelte-check types them (svelte2tsx's
@@ -83,14 +89,14 @@ export function isKitFile(path: string): boolean {
   );
 }
 
-interface Export {
-  type: "function" | "var";
-  /** The function, or the variable's declarator. */
-  node: Node;
+/** An exported function, or an exported variable's declarator. */
+type Export = {
   /** The `export` statement. */
-  statement: Node;
+  statement: ExportNamedDeclaration;
   typed: boolean;
-}
+} & (
+  { type: "function"; node: Fn } | { type: "var"; node: VariableDeclarator }
+);
 
 /**
  * A SvelteKit file with the types svelte-check adds, mapped back to the
@@ -110,8 +116,8 @@ export function kitFile(
   const insert = (at: number, text: string) => inserts.push([at, text]);
   const exports = exportsOf(source, isTs);
 
-  const paramEnd = (fn: Node) => fn.params[0].end;
-  const returnAt = (fn: Node) =>
+  const paramEnd = (fn: Fn) => fn.params[0]?.end ?? fn.end;
+  const returnAt = (fn: Fn) =>
     fn.type === "ArrowFunctionExpression"
       ? source.lastIndexOf("=>", fn.body.start)
       : fn.body.start;
@@ -121,12 +127,16 @@ export function kitFile(
    */
   const jsdocAt = (e: Export) =>
     e.node.type === "FunctionDeclaration" ? e.statement.start : e.node.start;
-  const jsdocParam = (e: Export, type: string) => {
+  const jsdocParam = (e: Export & { type: "function" }, type: string) => {
     const p = e.node.params[0];
     const name = p?.type === "Identifier" ? p.name : "arg0";
     insert(jsdocAt(e), `/** @param {${type}} ${name} */ `);
   };
-  const wrap = (init: Node, before: string, after: string) => {
+  const wrap = (
+    init: { start: number; end: number },
+    before: string,
+    after: string,
+  ) => {
     insert(init.start, before);
     insert(init.end, after);
   };
@@ -243,7 +253,7 @@ function exportsOf(source: string, isTs: boolean): Map<string, Export> {
       [...source.slice(before, to).matchAll(JSDOC_BLOCK)].some((m) =>
         tags.test(m[0]),
       );
-    const typedParameter = (fn: Node) =>
+    const typedParameter = (fn: Fn) =>
       Boolean(paramType(fn.params[0])) || jsdoc(fn.start, JSDOC_FUNCTION);
     if (d?.type === "FunctionDeclaration" && d.id)
       exports.set(d.id.name, {
@@ -254,10 +264,12 @@ function exportsOf(source: string, isTs: boolean): Map<string, Export> {
       });
     if (d?.type !== "VariableDeclaration" || d.declarations.length !== 1)
       continue;
-    const declarator: Node = d.declarations[0];
+    const [declarator] = d.declarations;
+    if (!declarator) continue;
     const init = declarator.init;
     const typed =
-      Boolean(declarator.id.typeAnnotation) ||
+      ("typeAnnotation" in declarator.id &&
+        Boolean(declarator.id.typeAnnotation)) ||
       jsdoc(declarator.id.start, JSDOC_VARIABLE) ||
       init?.type === "TSSatisfiesExpression";
     const fn = init?.type === "TSSatisfiesExpression" ? init.expression : init;
@@ -283,11 +295,10 @@ function exportsOf(source: string, isTs: boolean): Map<string, Export> {
 }
 
 /** A parameter's type annotation, past a default value. */
-function paramType(p: Node): Node {
-  if (!p) return;
-  return p.type === "AssignmentPattern"
-    ? p.left.typeAnnotation
-    : p.typeAnnotation;
+function paramType(p: Fn["params"][number] | undefined): unknown {
+  if (!p) return undefined;
+  const typed = p.type === "AssignmentPattern" ? p.left : p;
+  return "typeAnnotation" in typed ? typed.typeAnnotation : undefined;
 }
 
 /** `data`'s, `form`'s or `snapshot`'s type in a route's component. */
