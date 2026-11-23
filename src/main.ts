@@ -4,6 +4,7 @@ import { parseArgs } from "node:util";
 
 import { applyBaseline, createBaseline } from "./baseline.ts";
 import { EmitError, typecheck } from "./check.ts";
+import { CHECKERS } from "./checker.ts";
 import { SERVE, serveDaemon } from "./daemon.ts";
 import {
   colors,
@@ -122,7 +123,13 @@ export async function main(argv: string[]): Promise<0 | 1> {
     (text) => process.stdout.write(text),
     colors(colorFlag(values.color, values["no-color"])),
   );
-  const options = optionsOf(values, rest);
+  let options: TypecheckOptions;
+  try {
+    options = optionsOf(values, rest);
+  } catch (error) {
+    console.error(`${messageOf(error)}\n\n${HELP}`);
+    return 1;
+  }
   if (values.changed || values.since) {
     try {
       options.only = changedFiles(process.cwd(), values.since);
@@ -226,6 +233,27 @@ export async function main(argv: string[]): Promise<0 | 1> {
   }
 }
 
+const SOURCES: readonly DiagnosticSource[] = ["js", "svelte", "css"];
+
+// Checked here, so a misspelled flag fails at once instead of finding no
+// checker, or no diagnostics, later.
+function checkerOf(name: string | undefined): Checker | undefined {
+  if (name === undefined) return undefined;
+  const checker = CHECKERS.find((c) => c === name);
+  if (!checker)
+    throw new Error(`--checker takes ${CHECKERS.join(", ")}, not ${name}`);
+  return checker;
+}
+
+function sourceOf(name: string): DiagnosticSource {
+  const source = SOURCES.find((s) => s === name);
+  if (!source)
+    throw new Error(
+      `--diagnostic-sources takes ${SOURCES.join(", ")}, not ${name}`,
+    );
+  return source;
+}
+
 /**
  * The run's options from parsed flags, as the CLI passes them to
  * `typecheck`.
@@ -239,9 +267,10 @@ function optionsOf(
     tsconfig: values["no-tsconfig"] ? false : values.tsconfig,
     ignore: values.ignore?.split(","),
     config: values.config,
-    checker: (values.checker ??
-      (values.tsgo || values["tsgo-experimental-api"] ? "tsgo" : undefined)) as
-      Checker | undefined,
+    checker: checkerOf(
+      values.checker ??
+        (values.tsgo || values["tsgo-experimental-api"] ? "tsgo" : undefined),
+    ),
     checkerArgs: rest.length > 0 ? rest : undefined,
     components: values.components,
     outDir: values["out-dir"],
@@ -249,7 +278,7 @@ function optionsOf(
     svelte: values.svelte,
     diagnosticSources: values["diagnostic-sources"]
       ?.split(",")
-      .map((source) => source.trim()) as DiagnosticSource[] | undefined,
+      .map((source) => sourceOf(source.trim())),
     compilerWarnings: parseCompilerWarnings(values["compiler-warnings"]),
     // On unless `--no-incremental`; `--incremental` is svelte-check's flag.
     incremental: !values["no-incremental"],
