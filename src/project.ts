@@ -193,7 +193,10 @@ function readInputs(
   };
 }
 
-function defined(inputs: Inputs): Inputs {
+// Loose, so a caller can pass fields it may lack; `defined` drops them.
+type Loose<T> = { [K in keyof T]?: T[K] | undefined };
+
+function defined(inputs: Loose<Inputs>): Inputs {
   return Object.fromEntries(
     Object.entries(inputs).filter(([, value]) => value !== undefined),
   );
@@ -263,7 +266,7 @@ function absoluteMatcher(patterns: string[]): (path: string) => boolean {
 /** What a run checks and reports, by svelte-check's rules. */
 export interface Project {
   /** The tsconfig, or `undefined` for none. */
-  tsconfig?: string;
+  tsconfig?: string | undefined;
   /** The components to check, as absolute paths. */
   components: string[];
   /**
@@ -280,7 +283,7 @@ export interface Project {
   /** The tsconfig's `paths`, with absolute targets. */
   paths: Record<string, string[]>;
   /** The tsconfig's `baseUrl`, as an absolute path. */
-  baseUrl?: string;
+  baseUrl?: string | undefined;
   /** Whether a JS component's types are checked. */
   checkJs: boolean;
   /** Whether a JS component is in the program at all, or untyped. */
@@ -288,10 +291,14 @@ export interface Project {
   /** Whether a declaration file's errors go unreported. */
   skipLibCheck: boolean;
   /** The tsconfig's `target`, `module` and `moduleResolution`, as written. */
-  options: { target?: string; module?: string; moduleResolution?: string };
+  options: {
+    target?: string | undefined;
+    module?: string | undefined;
+    moduleResolution?: string | undefined;
+  };
 
   /** Whether a side-effect import must resolve, or the checker's default. */
-  noUncheckedSideEffectImports?: boolean;
+  noUncheckedSideEffectImports?: boolean | undefined;
   /** Whether an import of a package reads its `exports`. */
   readsExports: boolean;
 
@@ -306,7 +313,7 @@ export interface Project {
    * What TypeScript's "No inputs were found" names, when it would report
    * one: not with a `files` list or project `references`.
    */
-  inputSpecs?: { include: string[]; exclude: string[] };
+  inputSpecs?: { include: string[]; exclude: string[] } | undefined;
   /** Whether a TS or JS file's errors are reported. */
   reports(path: string): boolean;
 }
@@ -317,14 +324,14 @@ interface ProjectOptions {
    * A path relative to the workspace, `false` for none, or found from the
    * workspace up.
    */
-  tsconfig?: string | false;
+  tsconfig?: string | false | undefined;
   /** With no tsconfig: folders and files to skip, relative to the workspace. */
-  ignore?: string[];
+  ignore?: string[] | undefined;
   /**
    * Globs of components relative to the workspace, instead of the
    * tsconfig's.
    */
-  components?: string[];
+  components?: string[] | undefined;
 }
 
 /**

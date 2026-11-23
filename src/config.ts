@@ -8,14 +8,14 @@ export type Preprocessor = Record<string, unknown>;
 
 /** What the compiler pass reads from the project's Svelte config. */
 export interface SvelteConfig {
-  preprocess?: Preprocessor[];
+  preprocess?: Preprocessor[] | undefined;
   /** As svelte-check compiles: `dev`, then the config's. */
   compilerOptions: Record<string, unknown>;
   /**
    * Whether a config loaded. Without one, svelte-check strips a
    * `lang="ts"` script's types before it compiles.
    */
-  found?: boolean;
+  found?: boolean | undefined;
 }
 
 interface RawConfig {

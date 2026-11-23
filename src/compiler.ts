@@ -343,16 +343,16 @@ function untouched(
 export interface CompileRequest {
   svelteDir: string;
   configDir: string;
-  configFile?: string;
+  configFile?: string | undefined;
   /** The config's shape, as the last run that loaded it found it. */
-  shape?: ConfigShape;
+  shape?: ConfigShape | undefined;
   components: { source: string; filename: string }[];
 }
 
 export interface CompileResult {
   results: CompilerDiagnostic[][];
   /** The shape of the config this run loaded, or used without loading. */
-  shape?: ConfigShape;
+  shape?: ConfigShape | undefined;
 }
 
 /**

@@ -6,80 +6,80 @@ export interface TypecheckOptions {
    * The project root the other paths resolve against. Default:
    * `process.cwd()`.
    */
-  cwd?: string;
+  cwd?: string | undefined;
   /** The project folder, relative to `cwd`. Default: `"."`. */
-  workspace?: string;
+  workspace?: string | undefined;
   /**
    * The tsconfig or jsconfig, relative to the workspace. With one, the
    * components it includes are checked, and its TS and JS files' errors are
    * reported too. Default: the nearest from the workspace up. `false`: none,
    * so every component under the workspace, and only theirs.
    */
-  tsconfig?: string | false;
+  tsconfig?: string | false | undefined;
   /**
    * With no tsconfig: paths to skip, relative to the workspace, as
    * svelte-check's `--ignore` (a prefix, or `**` at the start or end).
    */
-  ignore?: string[];
+  ignore?: string[] | undefined;
   /**
    * The svelte.config to read preprocessors from, relative to the
    * workspace. Default: the nearest.
    */
-  config?: string;
+  config?: string | undefined;
   /**
    * Default: the project's own TypeScript (`tsc`; native in TypeScript 7),
    * then the first of `tsgo`, `tsrs` and `bun` that's installed.
    */
-  checker?: Checker;
+  checker?: Checker | undefined;
   /**
    * More arguments for the checker, after svelte-typecheck's own: the
    * CLI's after `--`, such as tsrs's `["--fast"]` or tsgo's
    * `["--checkers", "8"]`. Flags that change how the checker runs or
    * what it prints, such as `--watch` or `--pretty`, throw.
    */
-  checkerArgs?: string[];
+  checkerArgs?: string[] | undefined;
   /**
    * Globs of the components to check, relative to the workspace, instead of
    * the tsconfig's.
    */
-  components?: string[];
+  components?: string[] | undefined;
   /**
    * Where to write the generated code. Default:
    * `node_modules/.cache/svelte-typecheck/<workspace>`.
    */
-  outDir?: string;
+  outDir?: string | undefined;
   /**
    * Whether an import of a checked component resolves to its generated
    * code (the default). With `false`, it resolves to the component's own
    * `.svelte.d.ts`, as a library's generated declarations are.
    */
-  declarations?: boolean;
+  declarations?: boolean | undefined;
   /**
    * The Svelte package to check against. Default: `svelte`, resolved from
    * `cwd`.
    */
-  svelte?: string;
+  svelte?: string | undefined;
   /**
    * What to report: `js` for type errors (in TS and JS), `svelte` for the
    * compiler's warnings and errors. `css` is accepted, as svelte-check
    * takes it, and reports nothing. Default: all.
    */
-  diagnosticSources?: DiagnosticSource[];
+  diagnosticSources?: DiagnosticSource[] | undefined;
   /** `error` reports errors only. Default: `warning`. */
-  threshold?: "warning" | "error";
+  threshold?: "warning" | "error" | undefined;
   /** Compiler warnings to drop (`ignore`) or report as errors, by code. */
-  compilerWarnings?: Record<string, "ignore" | "error">;
+  compilerWarnings?: Record<string, "ignore" | "error"> | undefined;
   /**
    * Keep the generated code between runs: rewrite only what changed, and
    * let `tsc`, tsgo and tsrs reuse their last run. Default `true`.
    */
-  incremental?: boolean;
+  incremental?: boolean | undefined;
   /**
    * Report only these files' diagnostics, and those of the files that
    * import them, relative to `cwd`. The whole program is still checked.
    * `--changed` and `--since` pass git's changed files.
    */
-  only?: string[];
+  only?: string[] | undefined;
 }
 
 /** A kind of check, as svelte-check's `--diagnostic-sources` names them. */
@@ -113,7 +113,7 @@ export interface TypecheckResult {
   /** The workspace, as an absolute path. */
   workspace: string;
   /** The tsconfig used, if any. */
-  tsconfig?: string;
+  tsconfig?: string | undefined;
   /** How many components were checked. */
   components: number;
   /** Diagnostics left out by `only`. */
@@ -126,9 +126,9 @@ export interface TypecheckResult {
    * The checker that ran. Unset when only the compiler's diagnostics were
    * asked for and no checker is installed.
    */
-  checker?: Checker;
+  checker?: Checker | undefined;
   /** The checker's version, when its package says. */
-  checkerVersion?: string;
+  checkerVersion?: string | undefined;
   /** Milliseconds spent emitting, type-checking and compiling. */
   timings: { emit: number; check: number; compile: number };
 }

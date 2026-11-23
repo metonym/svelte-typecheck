@@ -41,9 +41,9 @@ interface CheckerCommand {
   command: string;
   prefix: string[];
   /** The providing package's version, when it's known. */
-  version?: string;
+  version?: string | undefined;
   /** Run through the shell: a Windows `.cmd` or `.bat` shim needs it. */
-  shell?: boolean;
+  shell?: boolean | undefined;
 }
 
 const WINDOWS_SHIM = /\.(cmd|bat)$/i;

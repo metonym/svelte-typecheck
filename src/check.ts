@@ -185,8 +185,8 @@ interface CompileCache {
   /** Diagnostics, by a hash of a component's name and text. */
   entries: Record<string, CompilerDiagnostic[]>;
   /** The config's shape, and the packages it was read with. */
-  shape?: ConfigShape;
-  shapeKey?: string;
+  shape?: ConfigShape | undefined;
+  shapeKey?: string | undefined;
 }
 const hash = (text: string) => createHash("sha1").update(text).digest("hex");
 /**
