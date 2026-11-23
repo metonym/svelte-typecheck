@@ -22,6 +22,7 @@ import { tmpdir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 import { configFingerprint } from "./config.ts";
+import { codeOf, ownWrite } from "./unknown.ts";
 
 /** Turns `--daemon` on for every run, as the flag does. */
 const ENABLE = "SVELTE_TYPECHECK_DAEMON";
@@ -164,7 +165,7 @@ function request(
         at !== -1;
         at = buffer.indexOf("\n")
       ) {
-        const reply = JSON.parse(buffer.slice(0, at)) as Reply;
+        const reply = ownWrite<Reply>(JSON.parse(buffer.slice(0, at)));
         buffer = buffer.slice(at + 1);
         if (onReply(reply)) {
           finished = true;
@@ -393,7 +394,7 @@ export async function serveDaemon(
       buffer += chunk;
       const at = buffer.indexOf("\n");
       if (at === -1) return;
-      const message = JSON.parse(buffer.slice(0, at)) as Request;
+      const message = ownWrite<Request>(JSON.parse(buffer.slice(0, at)));
       buffer = "";
       queue = queue.then(() => handle(message, connection));
     });
@@ -469,7 +470,7 @@ export async function serveDaemon(
   } catch (error) {
     // Another daemon got there first, as two clients can start one at
     // once; or one that crashed left its socket, which goes.
-    if ((error as NodeJS.ErrnoException).code !== "EADDRINUSE") throw error;
+    if (codeOf(error) !== "EADDRINUSE") throw error;
     if (await statusOf(socket)) process.exit(0);
     await rm(socket, { force: true });
     await listen();
@@ -512,20 +513,29 @@ async function asClient(
     value: message.terminal.columns,
     configurable: true,
   });
-  stdout.write = ((chunk: string | Uint8Array) => {
-    reply({ out: String(chunk) });
-    return true;
-  }) as typeof stdout.write;
-  stderr.write = ((chunk: string | Uint8Array) => {
-    reply({ err: String(chunk) });
-    return true;
-  }) as typeof stderr.write;
+  // Defined, not assigned, since `write`'s overloads take more than this.
+  Object.defineProperty(stdout, "write", {
+    value: (chunk: string | Uint8Array) => {
+      reply({ out: String(chunk) });
+      return true;
+    },
+    configurable: true,
+  });
+  Object.defineProperty(stderr, "write", {
+    value: (chunk: string | Uint8Array) => {
+      reply({ err: String(chunk) });
+      return true;
+    },
+    configurable: true,
+  });
   console.log = (...args: unknown[]) => reply({ out: line(args) });
   console.error = (...args: unknown[]) => reply({ err: line(args) });
   try {
     return await main(message.run);
   } catch (error) {
-    reply({ err: `${(error as Error).stack ?? String(error)}\n` });
+    reply({
+      err: `${(error instanceof Error ? error.stack : undefined) ?? String(error)}\n`,
+    });
     return 1;
   } finally {
     process.env = saved.env;

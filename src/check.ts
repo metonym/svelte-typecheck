@@ -64,6 +64,14 @@ import type {
   TypecheckOptions,
   TypecheckResult,
 } from "./types.ts";
+import {
+  codeOf,
+  field,
+  messageOf,
+  ownWrite,
+  positionOf,
+  stringOf,
+} from "./unknown.ts";
 
 /**
  * `path(line,col): error TSxxxx: message`, as tsc, tsgo, tsrs and
@@ -623,10 +631,8 @@ function kitMajor(root: string): number {
     const path = createRequire(join(root, "package.json")).resolve(
       "@sveltejs/kit/package.json",
     );
-    const { version } = JSON.parse(readFileSync(path, "utf-8")) as {
-      version: string;
-    };
-    return Number.parseInt(version, 10);
+    const pkg: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    return Number.parseInt(stringOf(pkg, "version") ?? "", 10);
   } catch {
     return 0;
   }
@@ -695,9 +701,10 @@ async function typecheckIn(
   const svelteDir = svelteDirOf(cwd, options.svelte);
   const sources = new Set(options.diagnosticSources ?? ["js", "svelte"]);
   const errorsOnly = options.threshold === "error";
-  const { version } = JSON.parse(
+  const sveltePkg: unknown = JSON.parse(
     readFileSync(join(svelteDir, "package.json"), "utf-8"),
-  ) as { version: string };
+  );
+  const version = stringOf(sveltePkg, "version") ?? "";
   const svelteMajor = Number(version.split(".")[0]);
   // Svelte 4 and 5 ship element typings; Svelte 3 doesn't, so ours are
   // written beside the shims.
@@ -759,7 +766,14 @@ async function typecheckIn(
   // An incremental run keeps the last run's code and rewrites what changed.
   const previous = incremental
     ? await readFile(join(outDir, MANIFEST), "utf-8")
-        .then((text) => new Set(JSON.parse(text) as string[]))
+        .then((text) => {
+          const names: unknown = JSON.parse(text);
+          return new Set(
+            Array.isArray(names)
+              ? names.filter((n): n is string => typeof n === "string")
+              : [],
+          );
+        })
         .catch(() => new Set<string>())
     : new Set<string>();
   const cleared = incremental ? undefined : await clearOutDir(outDir);
@@ -775,7 +789,7 @@ async function typecheckIn(
   const projectDir = project.tsconfig ? dirname(project.tsconfig) : workspace;
   const last = incremental
     ? await readFile(resultPath, "utf-8")
-        .then((text) => JSON.parse(text) as ResultCache)
+        .then((text) => ownWrite<ResultCache>(JSON.parse(text)))
         .catch(() => undefined)
     : undefined;
   const runKey = incremental
@@ -843,7 +857,7 @@ async function typecheckIn(
   );
   const cache: CompileCache = incremental
     ? ((await readFile(cachePath, "utf-8")
-        .then((text) => JSON.parse(text) as CompileCache)
+        .then((text) => ownWrite<CompileCache>(JSON.parse(text)))
         .then((c) => (c.fingerprint === fingerprint ? c : undefined))
         .catch(() => undefined)) ?? { fingerprint, entries: {} })
     : { fingerprint, entries: {} };
@@ -1182,7 +1196,7 @@ async function typecheckIn(
     );
     const emitCache: EmitCache = (incremental
       ? await readFile(emitCachePath, "utf-8")
-          .then((text) => JSON.parse(text) as EmitCache)
+          .then((text) => ownWrite<EmitCache>(JSON.parse(text)))
           .then((c) => (c.fingerprint === emitFingerprint ? c : undefined))
           .catch(() => undefined)
       : undefined) ?? { fingerprint: emitFingerprint, entries: {} };
@@ -1263,9 +1277,10 @@ async function typecheckIn(
         if (svelteMajor === 4) parseAsLegacy(texts[i] ?? "", svelteDir);
         result = emitFor(i);
       } catch (error) {
-        const e = error as Error & { start?: { line: number; column: number } };
-        if (!e.start) {
-          failed.push({ file: path, message: e.message });
+        const start = positionOf(field(error, "start"));
+        const message = messageOf(error);
+        if (!start) {
+          failed.push({ file: path, message });
           delete nextEmitCache.entries[key];
           continue;
         }
@@ -1274,14 +1289,14 @@ async function typecheckIn(
         const isTs = TS_SCRIPT.test(texts[i] ?? "");
         effects.diagnostics.push({
           file: path,
-          line: e.start.line,
-          column: e.start.column + 1,
-          endLine: e.start.line,
-          endColumn: e.start.column + 1,
+          line: start.line,
+          column: start.column + 1,
+          endLine: start.line,
+          endColumn: start.column + 1,
           severity: "error",
           source: isTs ? "ts" : "js",
           code: "-1",
-          message: e.message,
+          message,
         });
         parseErrors.push(...effects.diagnostics);
         // Without `allowJs`, a JS component is an untyped JS module to its
@@ -1585,7 +1600,7 @@ async function typecheckIn(
   );
   const known = incremental
     ? await readFile(deprecationsPath, "utf-8")
-        .then((text) => JSON.parse(text) as DeprecationsCache)
+        .then((text) => ownWrite<DeprecationsCache>(JSON.parse(text)))
         .then((c) => (c.key === deprecationsKey ? c : undefined))
         .catch(() => undefined)
     : undefined;
@@ -2318,10 +2333,10 @@ async function factsCache(path: string, enabled: boolean) {
   const entries: Record<string, Facts> = enabled
     ? await readFile(path, "utf-8")
         .then((text) => {
-          const cache = JSON.parse(text) as {
+          const cache = ownWrite<{
             format: number;
             entries: Record<string, Facts>;
-          };
+          }>(JSON.parse(text));
           return cache.format === CACHE_FORMAT ? cache.entries : {};
         })
         .catch(() => ({}))
@@ -2351,12 +2366,12 @@ async function factsCache(path: string, enabled: boolean) {
       let facts = used[file] ?? entries[file];
       if (facts?.stat !== stat) facts = { stat };
       used[file] = facts;
-      facts[kind] ??= compute(
+      const value = (facts[kind] ??= compute(
         text ?? texts.get(file) ?? readFileSync(file, "utf-8"),
-      );
+      ));
       // A run reads `specifiers` last: `svelteImports` comes first, if at all.
       if (facts.specifiers) texts.delete(file);
-      return facts[kind] as NonNullable<Facts[K]>;
+      return value;
     },
     /**
      * Reads the files whose facts aren't kept, all at once, for `of`: one
@@ -2410,7 +2425,7 @@ async function clearOutDir(
     await rename(outDir, join(parent, `${prefix}${process.pid}-${Date.now()}`));
   } catch (error) {
     // Nothing to clear, or it can't move (Windows, while a file's open).
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT")
+    if (codeOf(error) !== "ENOENT")
       await rm(outDir, { recursive: true, force: true });
     return { deleted: Promise.resolve() };
   }

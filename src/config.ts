@@ -3,6 +3,8 @@ import { createRequire } from "node:module";
 import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+import { field, isRecord, stringOf } from "./unknown.ts";
+
 /** A `preprocess` entry from a Svelte config. */
 export type Preprocessor = Record<string, unknown>;
 
@@ -34,8 +36,7 @@ const SVELTE_CONFIGS = [
   "js",
   "cjs",
   "mjs",
-  ...(process.versions.bun ||
-  (process.features as { typescript?: unknown }).typescript
+  ...(process.versions.bun || field(process.features, "typescript")
     ? ["ts", "mts"]
     : []),
 ].map((ext) => `svelte.config.${ext}`);
@@ -220,12 +221,11 @@ async function importVite(root: string): Promise<Vite | undefined> {
     const pkgPath = createRequire(join(root, "package.json")).resolve(
       "vite/package.json",
     );
-    const pkg = JSON.parse(readFileSync(pkgPath, "utf-8")) as {
-      exports?: Record<string, unknown>;
-      module?: string;
-      main?: string;
-    };
-    const entry = importEntry(pkg.exports?.["."]) ?? pkg.module ?? pkg.main;
+    const pkg: unknown = JSON.parse(readFileSync(pkgPath, "utf-8"));
+    const entry =
+      importEntry(field(field(pkg, "exports"), ".")) ??
+      stringOf(pkg, "module") ??
+      stringOf(pkg, "main");
     if (!entry) return;
     return (await import(
       pathToFileURL(join(dirname(pkgPath), entry)).href
@@ -237,15 +237,10 @@ async function importVite(root: string): Promise<Vite | undefined> {
 
 function importEntry(entry: unknown): string | undefined {
   if (typeof entry === "string") return entry;
-  if (!entry || typeof entry !== "object") return;
-  const { import: imported, default: fallback } = entry as Record<
-    string,
-    unknown
-  >;
+  if (!isRecord(entry)) return;
+  const { import: imported, default: fallback } = entry;
   if (typeof imported === "string") return imported;
-  if (imported && typeof imported === "object") {
-    const nested = (imported as Record<string, unknown>).default;
-    if (typeof nested === "string") return nested;
-  }
+  const nested = stringOf(imported, "default");
+  if (nested !== undefined) return nested;
   return typeof fallback === "string" ? fallback : undefined;
 }

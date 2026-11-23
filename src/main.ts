@@ -20,6 +20,7 @@ import type {
   TypecheckOptions,
   TypecheckResult,
 } from "./types.ts";
+import { errorOf, messageOf } from "./unknown.ts";
 import { watch } from "./watch.ts";
 
 const HELP = `Usage: svelte-typecheck [options] [-- checker args]
@@ -103,7 +104,7 @@ export async function main(argv: string[]): Promise<0 | 1> {
   try {
     ({ values, rest } = parse(argv));
   } catch (error) {
-    console.error(`${(error as Error).message}\n\n${HELP}`);
+    console.error(`${messageOf(error)}\n\n${HELP}`);
     return 1;
   }
   if (values.help) {
@@ -126,7 +127,7 @@ export async function main(argv: string[]): Promise<0 | 1> {
     try {
       options.only = changedFiles(process.cwd(), values.since);
     } catch (error) {
-      out.failure(error as Error);
+      out.failure(errorOf(error));
       return 1;
     }
   }
@@ -221,7 +222,7 @@ export async function main(argv: string[]): Promise<0 | 1> {
   try {
     return report(await typecheck(options), false);
   } catch (error) {
-    return report(error as Error, false);
+    return report(errorOf(error), false);
   }
 }
 
@@ -283,8 +284,8 @@ export const AGENT_ENV: string[] = [
  * reads its own.
  */
 function formatOf(output: string | undefined): OutputFormat {
-  if (output && (OUTPUT_FORMATS as string[]).includes(output))
-    return output as OutputFormat;
+  const format = OUTPUT_FORMATS.find((f) => f === output);
+  if (format) return format;
   const agent = AGENT_ENV.some((name) => {
     const value = process.env[name];
     return value !== undefined && value !== "" && value !== "0";

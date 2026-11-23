@@ -11,6 +11,7 @@ import {
 } from "node:path";
 
 import { glob, matcher } from "./glob.ts";
+import { field, isRecord } from "./unknown.ts";
 
 const LINE_COMMENT = /\/\/[^\n]*/g;
 const BLOCK_COMMENT = /\/\*[\s\S]*?\*\//g;
@@ -458,9 +459,7 @@ function importsOf(dir: string): Record<string, string[]> {
   if (!path) return {};
   let imports: unknown;
   try {
-    ({ imports } = JSON.parse(readFileSync(path, "utf-8")) as {
-      imports?: unknown;
-    });
+    imports = field(JSON.parse(readFileSync(path, "utf-8")), "imports");
   } catch {
     return {};
   }
@@ -480,20 +479,17 @@ export function exportsOf(dir: string): Record<string, string[]> {
   let name: unknown;
   let exports: unknown;
   try {
-    ({ name, exports } = JSON.parse(readFileSync(path, "utf-8")) as {
-      name?: unknown;
-      exports?: unknown;
-    });
+    const pkg: unknown = JSON.parse(readFileSync(path, "utf-8"));
+    name = field(pkg, "name");
+    exports = field(pkg, "exports");
   } catch {
     return {};
   }
   if (typeof name !== "string" || exports == null) return {};
   // Subpaths start with `.`; anything else is one entry's conditions.
   const subpaths =
-    typeof exports === "object" &&
-    !Array.isArray(exports) &&
-    Object.keys(exports).some((key) => key.startsWith("."))
-      ? (exports as Record<string, unknown>)
+    isRecord(exports) && Object.keys(exports).some((key) => key.startsWith("."))
+      ? exports
       : { ".": exports };
   const paths: Record<string, string[]> = {};
   for (const [key, value] of Object.entries(subpaths)) {
@@ -523,8 +519,8 @@ const LEGACY_RESOLUTION = /^(node|node10|classic)$/i;
 function importTarget(value: unknown): string | undefined {
   if (typeof value === "string") return value;
   if (Array.isArray(value)) return importTarget(value[0]);
-  if (!value || typeof value !== "object") return;
-  const conditions = value as Record<string, unknown>;
+  if (!isRecord(value)) return;
+  const conditions = value;
   for (const condition of ["types", "import", "default"])
     if (condition in conditions) return importTarget(conditions[condition]);
   return importTarget(Object.values(conditions)[0]);

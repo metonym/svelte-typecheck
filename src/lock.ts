@@ -16,6 +16,8 @@ import {
 import { hostname } from "node:os";
 import { basename, dirname, join } from "node:path";
 
+import { codeOf, isRecord } from "./unknown.ts";
+
 /** How often a run touches its lock, to show it's still running. */
 const HEARTBEAT_MS = 5000;
 /** A lock not touched for this long is a stopped run's, wherever it ran. */
@@ -68,7 +70,7 @@ export async function lockOutDir(outDir: string): Promise<() => Promise<void>> {
       }
       break;
     } catch (error) {
-      const code = (error as NodeJS.ErrnoException).code;
+      const code = codeOf(error);
       // Windows can't make a file while the last one's delete is pending.
       if (code === "EPERM" && process.platform === "win32" && denied++ < 100) {
         // eslint-disable-next-line eslint/no-await-in-loop -- until it's gone
@@ -142,11 +144,13 @@ async function takeOver(path: string): Promise<boolean> {
 
 function parse(text: string): Holder | undefined {
   try {
-    const holder = JSON.parse(text) as Partial<Holder>;
-    return typeof holder.pid === "number" &&
-      typeof holder.host === "string" &&
-      typeof holder.started === "number"
-      ? (holder as Holder)
+    const holder: unknown = JSON.parse(text);
+    if (!isRecord(holder)) return undefined;
+    const { pid, host, started } = holder;
+    return typeof pid === "number" &&
+      typeof host === "string" &&
+      typeof started === "number"
+      ? { pid, host, started }
       : undefined;
   } catch {
     // Half-written, as a run writes it right after making it.
@@ -161,7 +165,7 @@ function alive(pid: number): boolean {
     return true;
   } catch (error) {
     // Another user's process, which this one can't signal.
-    return (error as NodeJS.ErrnoException).code === "EPERM";
+    return codeOf(error) === "EPERM";
   }
 }
 

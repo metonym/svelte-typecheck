@@ -3,6 +3,7 @@ import { resolve, sep } from "node:path";
 
 import { typecheck } from "./check.ts";
 import type { TypecheckOptions, TypecheckResult } from "./types.ts";
+import { errorOf } from "./unknown.ts";
 
 const WATCHED = /\.(?:svelte|[cm]?[jt]sx?|json)$/;
 const DEBOUNCE_MS = 100;
@@ -32,7 +33,7 @@ export function watch(
     try {
       onResult(await typecheck(run));
     } catch (error) {
-      onResult(error as Error);
+      onResult(errorOf(error));
     }
     running = false;
     if (again) {

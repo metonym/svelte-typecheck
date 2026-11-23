@@ -17,6 +17,7 @@ import { createLocator } from "./output.ts";
 import { originalPosition } from "./sourcemap.ts";
 import { blankTypes } from "./strip.ts";
 import type { CompilerDiagnostic } from "./types.ts";
+import { field, messageOf, ownWrite, positionOf, stringOf } from "./unknown.ts";
 
 interface Warning {
   code: string;
@@ -24,6 +25,18 @@ interface Warning {
   start?: { line: number; column: number };
   end?: { line: number; column: number };
 }
+// Read field by field, since the compiler throws more than one shape.
+function warningOf(error: unknown): Warning {
+  const start = positionOf(field(error, "start"));
+  const end = positionOf(field(error, "end"));
+  return {
+    code: stringOf(error, "code") ?? "compile_error",
+    message: messageOf(error),
+    ...(start && { start }),
+    ...(end && { end }),
+  };
+}
+
 interface Compiler {
   compile(
     source: string,
@@ -88,7 +101,7 @@ function diagnosticsOf(
       ...positionsOf(w),
     }));
   } catch (error) {
-    const e = error as Warning;
+    const e = warningOf(error);
     return [
       {
         severity: "error",
@@ -133,7 +146,7 @@ function moduleDiagnostics(
       ...positionsOf(w),
     }));
   } catch (error) {
-    const e = error as Warning;
+    const e = warningOf(error);
     return [
       {
         severity: "error",
@@ -207,7 +220,7 @@ async function preprocessedDiagnostics(
   } else {
     const map =
       typeof processed.map === "string"
-        ? (JSON.parse(processed.map) as { mappings: string })
+        ? { mappings: stringOf(JSON.parse(processed.map), "mappings") ?? "" }
         : processed.map;
     const toOriginal = originalPosition(map);
     diagnostics = diagnosticsOf(
@@ -305,7 +318,7 @@ function isJson(value: unknown): boolean {
   return (
     typeof value === "object" &&
     Object.getPrototypeOf(value) === Object.prototype &&
-    Object.values(value as object).every((v) => v === undefined || isJson(v))
+    Object.values(value).every((v) => v === undefined || isJson(v))
   );
 }
 
@@ -411,7 +424,7 @@ export async function compileAll(
 }
 
 interface Pending {
-  done: (result: never) => void;
+  done: (result: unknown) => void;
   fail: (error: Error) => void;
   /** The job, run on this thread, when the worker can't run it. */
   here: () => Promise<unknown>;
@@ -444,7 +457,7 @@ function startWorker(): Worker {
       pending.delete(reply.id);
       waitedFor.delete(reply.id);
       if (waitedFor.size === 0) started.unref();
-      if (reply.error === undefined) job.done(reply.result as never);
+      if (reply.error === undefined) job.done(reply.result);
       else job.fail(new Error(reply.error));
     },
   );
@@ -455,7 +468,7 @@ function startWorker(): Worker {
     const jobs = [...pending.values()];
     pending.clear();
     waitedFor.clear();
-    for (const job of jobs) job.here().then(job.done as never, job.fail);
+    for (const job of jobs) job.here().then(job.done, job.fail);
   };
   started.on("error", fallBack);
   started.on("exit", fallBack);
@@ -467,7 +480,8 @@ function post<T>(message: object, here: () => Promise<T>) {
   const running = (worker ??= startWorker());
   const id = nextId++;
   const result = new Promise<T>((done, fail) => {
-    pending.set(id, { done: done as never, fail, here });
+    // The worker's reply, or `here`'s result, is the job's own result.
+    pending.set(id, { done: (r) => done(ownWrite<T>(r)), fail, here });
     running.postMessage({ id, ...message });
   });
   // Unhandled until waited for: a rejection is the run's then.

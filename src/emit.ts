@@ -25,6 +25,7 @@ import {
   kitRuneProp,
 } from "./kit.ts";
 import { Output } from "./output.ts";
+import { field } from "./unknown.ts";
 
 /**
  * Turns a component into TypeScript (or JS with JSDoc, for a component
@@ -321,7 +322,7 @@ function parseComponentSource(source: string): {
   try {
     return { ast: parse(source, { css: false }), tsInJs: [] };
   } catch (error) {
-    if (!(error as { start?: unknown }).start) throw error;
+    if (!field(error, "start")) throw error;
     const ast = parse(source, { css: false, script: false });
     const tsInJs: TsInJs[] = [];
     for (const script of [ast.instance, ast.module]) {
@@ -664,10 +665,10 @@ export function emit(
    * component's type. `@template` alone doesn't make the component
    * generic, as in svelte-check.
    */
-  const jsGenerics = {
-    params: [] as string[],
-    names: [] as string[],
-    tags: [] as string[],
+  const jsGenerics: { params: string[]; names: string[]; tags: string[] } = {
+    params: [],
+    names: [],
+    tags: [],
   };
   if (instance) {
     const tags: string[] = [];

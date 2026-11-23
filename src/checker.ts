@@ -3,6 +3,7 @@ import { delimiter, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import type { Checker } from "./types.ts";
+import { field, stringOf } from "./unknown.ts";
 
 /**
  * In the order picked when none is named: the project's own TypeScript
@@ -117,21 +118,20 @@ export function checkerCommand(
   for (const [name, bin, major] of PACKAGES[checker]) {
     const dir = packageDir(name, cwd);
     if (!dir) continue;
-    const pkg = JSON.parse(
+    const pkg: unknown = JSON.parse(
       readFileSync(join(dir, "package.json"), "utf-8"),
-    ) as {
-      version?: string;
-      bin?: string | Record<string, string>;
-    };
-    if (major !== undefined && !(Number.parseInt(pkg.version ?? "") >= major))
+    );
+    const version = stringOf(pkg, "version");
+    if (major !== undefined && !(Number.parseInt(version ?? "") >= major))
       continue;
-    const relative = typeof pkg.bin === "string" ? pkg.bin : pkg.bin?.[bin];
+    const bins = field(pkg, "bin");
+    const relative = typeof bins === "string" ? bins : stringOf(bins, bin);
     if (!relative) continue;
     const path = join(dir, relative);
     const head = readFileSync(path, "utf-8").slice(0, 100);
     return NODE_SHEBANG.test(head)
-      ? { command: process.execPath, prefix: [path], version: pkg.version }
-      : { command: path, prefix: [], version: pkg.version };
+      ? { command: process.execPath, prefix: [path], version }
+      : { command: path, prefix: [], version };
   }
   const found = onPath(checker);
   if (!found) return;
@@ -157,10 +157,13 @@ export async function nativeCommand(
   const lookup = join(dirname(launcher), "..", "lib", "getExePath.js");
   if (!existsSync(lookup)) return command;
   try {
-    const { default: getExePath } = (await import(
-      pathToFileURL(lookup).href
-    )) as { default: () => string };
-    return { ...command, command: getExePath(), prefix: [] };
+    const mod: unknown = await import(pathToFileURL(lookup).href);
+    const getExePath = field(mod, "default");
+    if (typeof getExePath !== "function") return command;
+    const exe: unknown = Reflect.apply(getExePath, undefined, []);
+    return typeof exe === "string"
+      ? { ...command, command: exe, prefix: [] }
+      : command;
   } catch {
     return command;
   }
