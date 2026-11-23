@@ -72,10 +72,10 @@ export function createLocator(text: string) {
       let hi = starts.length - 1;
       while (lo < hi) {
         const mid = (lo + hi + 1) >> 1;
-        if (starts[mid] <= offset) lo = mid;
+        if ((starts[mid] ?? Infinity) <= offset) lo = mid;
         else hi = mid - 1;
       }
-      return { line: lo + 1, column: offset - starts[lo] + 1 };
+      return { line: lo + 1, column: offset - (starts[lo] ?? 0) + 1 };
     },
     offset(line: number, column: number) {
       return (starts[line - 1] ?? text.length) + column - 1;
