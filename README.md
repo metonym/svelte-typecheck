@@ -1,8 +1,13 @@
 # svelte-typecheck
 
-> Type-check Svelte components with `bun check`, tsrs, tsgo or `tsc`. Fast, light, svelte-check compatible.
+A drop-in svelte-check replacement: up to 11× faster, zero dependencies.
 
-svelte-typecheck is a zero-dependency, drop-in replacement for svelte-check. It takes the same options and prints the same output, but runs a command-line checker on the components instead of TypeScript's language service, which makes it up to 11 times faster. It runs on Node 22+ or Bun.
+svelte-typecheck type-checks Svelte components with `bun check`, tsrs,
+tsgo or `tsc`.
+It takes the same options and prints the same output,
+but runs a command-line checker on the components instead of
+TypeScript's language service, which makes it up to 11 times faster.
+It runs on Node 22+ or Bun.
 
 ```diff
 - "check": "svelte-check --tsconfig ./tsconfig.json"
@@ -19,7 +24,9 @@ A cold run on carbon-components-svelte (1,200+ components) takes:
 | tsrs                  | 3.7 s  | 11.1×            |
 | `bun check`           | 3.6 s  | 11.3×            |
 
-The [benchmarks](https://github.com/metonym/svelte-typecheck/blob/master/docs/benchmarks.md) have more, including runs after a change.
+The
+[benchmarks](https://github.com/metonym/svelte-typecheck/blob/master/docs/benchmarks.md)
+have more, including runs after a change.
 
 ## Quick start
 

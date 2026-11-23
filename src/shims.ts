@@ -1,10 +1,8 @@
-import { readFileSync } from "node:fs";
+import { shimText } from "./shim-text.ts" with { type: "macro" };
 
-/**
- * A file in `shims/`: the generated code's ambient types. The build inlines
- * each one, without its comments, so the package ships no `.d.ts` beside its
- * own.
- */
+/** A file in `shims/`: the generated code's ambient types. */
 export function shim(file: "shims.d.ts" | "svelte3-elements.d.ts"): string {
-  return readFileSync(new URL(`./shims/${file}`, import.meta.url), "utf-8");
+  return file === "shims.d.ts"
+    ? shimText("shims.d.ts")
+    : shimText("svelte3-elements.d.ts");
 }

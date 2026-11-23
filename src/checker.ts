@@ -1,12 +1,19 @@
 import { existsSync, readFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
+
 import type { Checker } from "./types.ts";
 
-/** In the order picked when none is named: the project's own TypeScript first. */
+/**
+ * In the order picked when none is named: the project's own TypeScript
+ * first.
+ */
 export const CHECKERS: Checker[] = ["tsc", "tsgo", "tsrs", "bun"];
 
-/** A package that provides a checker, its bin, and the least major version that counts. */
+/**
+ * A package that provides a checker, its bin, and the least major version
+ * that counts.
+ */
 type Provider = [name: string, bin: string, major?: number];
 
 /**
@@ -26,7 +33,10 @@ const PACKAGES: Record<Exclude<Checker, "bun">, Provider[]> = {
 };
 const NODE_SHEBANG = /^#!.*\bnode\b/;
 
-/** How to run a checker: the command, and arguments before the checker's own. */
+/**
+ * How to run a checker: the command, and arguments before the checker's
+ * own.
+ */
 export interface CheckerCommand {
   command: string;
   prefix: string[];

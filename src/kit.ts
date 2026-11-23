@@ -1,4 +1,5 @@
 import { parseModule } from "svelte-ast";
+
 import { Output } from "./output.ts";
 
 // eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
@@ -114,7 +115,10 @@ export function kitFile(
     fn.type === "ArrowFunctionExpression"
       ? source.lastIndexOf("=>", fn.body.start)
       : fn.body.start;
-  /** Where TypeScript reads a function's JSDoc: before `export function`, or the arrow. */
+  /**
+   * Where TypeScript reads a function's JSDoc: before `export function`, or
+   * the arrow.
+   */
   const jsdocAt = (e: Export) =>
     e.node.type === "FunctionDeclaration" ? e.statement.start : e.node.start;
   const jsdocParam = (e: Export, type: string) => {
@@ -221,7 +225,10 @@ export function kitFile(
   return out.copy(at, source.length);
 }
 
-/** A module's `export function`s and single `export const`s, as svelte2tsx reads them. */
+/**
+ * A module's `export function`s and single `export const`s, as svelte2tsx
+ * reads them.
+ */
 function exportsOf(source: string, isTs: boolean): Map<string, Export> {
   const exports = new Map<string, Export>();
   let previous = 0;
@@ -297,7 +304,10 @@ export function kitPropType(
   return;
 }
 
-/** A prop svelte2tsx types in a route's or `+error.svelte`'s untyped `$props()`. */
+/**
+ * A prop svelte2tsx types in a route's or `+error.svelte`'s untyped
+ * `$props()`.
+ */
 export function kitRuneProp(
   basename: string,
   name: string,

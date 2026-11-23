@@ -28,28 +28,101 @@ What svelte-typecheck does that svelte-check doesn't:
 
 ## Differences from svelte-check
 
-- **CSS diagnostics** (`--diagnostic-sources css`): accepted, but nothing is reported. svelte-check runs a CSS language service on `<style>`, a dependency this package leaves out; Svelte's compiler still reports invalid CSS.
-- **The default output under a coding agent** is `agent`. svelte-check prints `machine` when `CLAUDECODE=1`. Pass `--output machine` for svelte-check's output.
-- **`COMPLETED <n> FILES`** counts components, not every file in TypeScript's program.
-- **`--diagnostic-sources svelte`** with a tsconfig reports no type errors, as svelte-check's docs say; svelte-check itself reports them.
-- **`--tsgo-experimental-api`** is accepted, and does what `--tsgo` does.
-- **tsconfig option errors** that only matter to an emitting build, such as a JS file that `tsc` would overwrite, aren't reported: the checker runs with `noEmit`.
-- **A union's members** can print in another order, as TypeScript orders them by when it first meets each type: `Element | Document` where svelte-check has `Document | Element`.
-  The same order picks what a generic call infers from a union: `render(cond ? A : B, …)` with two components can be an error in one tool and not the other, as each checks its files, and so meets the types, in its own order.
-- **A syntax error in a TS or JS file** stops `tsc` and the other CLI checkers from type-checking at all, so only syntax errors are reported until it's fixed; svelte-check's language service reports the type errors in other files too. A component's syntax errors don't do this.
-- **Svelte 3 and 4 with `lang="ts"` and no svelte.config**: svelte-check strips the types with a fallback preprocessor before it compiles. Here the types are blanked out instead, so the compiler's warnings match. A script with an `enum` or a constructor's `private` parameter can't be blanked, and the compiler can't read it, so it reports no warnings.
-- **`generics` that don't parse**, such as a conditional type as a constraint: svelte-check pastes the text in more places, so it reports more syntax errors, and type errors they cause. Here only the first ones are reported, at the same positions.
-- **A JS component with a `@template` tag and no `generics`**: svelte-check reports an error at each use, even a valid one, as it keeps `T` unresolved. Here the component isn't generic: each prop is typed by its constraint.
-- **A JS component's JSDoc block with a `@typedef` and the `@type` of `$props()`**, as `/** @typedef {{ count: number }} Props @type {Props} */` on two lines: svelte-check reports a false "Duplicate identifier 'Props'", as svelte2tsx declares its own `Props` from the same comment. Here it passes. In two blocks, both pass.
-- **Svelte 5 with TS-only syntax and no preprocessors**, such as an `enum` or a constructor's `private` parameter: svelte-check strips the types first, so the compiler never sees them. Here the compiler reports that it doesn't support them, and stops, so the file's other compiler warnings are lost.
-- **Svelte 3's element types** are Svelte 4's, read from the project's `svelte/elements`, without svelte2tsx's deprecated `svelte.JSX` namespace: a project that augments or references `svelte.JSX` should move to `svelteHTML` or `svelte/elements`. An ARIA attribute's type prints as `Booleanish` where svelte-check spells out `boolean | "true" | "false"`.
-- **Slot content for a Svelte 5 component without a `children` prop** is reported at the tag's name. svelte-check places the error where svelte2tsx's text rewriting happens to anchor its inserted `children`: an attribute's opening quote, the start of a line, or after an attribute.
-- **A tsconfig without `moduleResolution`** resolves with `bundler`, or with TypeScript's default under a `node*` module. svelte-check uses `node10`, which TypeScript 6 deprecates and TypeScript 7 removed, so it warns about an option the tsconfig doesn't set.
-- **`--out-dir` outside the project** can't find its packages from the generated code; the default is inside `node_modules`.
-- **`<svelte:element this={tag}>` whose tag may be any element**, such as a component's generic `Tag extends keyof HTMLElementTagNameMap`: svelte-check reports TypeScript's "union type too complex" and checks none of the element's attributes; here its attributes are checked as an element's. An attribute error on it names the attributes' type with the tag widened: `keyof HTMLElementTagNameMap extends Tag ? string : Tag`.
-- **A repeated `on:` on `<svelte:document>`**, such as two `on:click`s: svelte-check reports TypeScript's "An object literal cannot have multiple properties with the same name" about its generated code, as it drops that error on other elements only. Here it isn't reported on any element.
+- **CSS diagnostics** (`--diagnostic-sources css`):
+  accepted, but nothing is reported.
+  svelte-check runs a CSS language service on `<style>`,
+  a dependency this package leaves out;
+  Svelte's compiler still reports invalid CSS.
+- **The default output under a coding agent** is `agent`.
+  svelte-check prints `machine` when `CLAUDECODE=1`.
+  Pass `--output machine` for svelte-check's output.
+- **`COMPLETED <n> FILES`** counts components,
+  not every file in TypeScript's program.
+- **`--diagnostic-sources svelte`** with a tsconfig reports no type
+  errors, as svelte-check's docs say; svelte-check itself reports them.
+- **`--tsgo-experimental-api`** is accepted,
+  and does what `--tsgo` does.
+- **tsconfig option errors** that only matter to an emitting build,
+  such as a JS file that `tsc` would overwrite, aren't reported:
+  the checker runs with `noEmit`.
+- **A union's members** can print in another order,
+  as TypeScript orders them by when it first meets each type:
+  `Element | Document` where svelte-check has `Document | Element`.
+  The same order picks what a generic call infers from a union:
+  `render(cond ? A : B, …)` with two components can be an error in one
+  tool and not the other, as each checks its files,
+  and so meets the types, in its own order.
+- **A syntax error in a TS or JS file** stops `tsc`
+  and the other CLI checkers from type-checking at all,
+  so only syntax errors are reported until it's fixed;
+  svelte-check's language service reports the type errors in other files
+  too.
+  A component's syntax errors don't do this.
+- **Svelte 3 and 4 with `lang="ts"` and no svelte.config**:
+  svelte-check strips the types with a fallback preprocessor before it
+  compiles.
+  Here the types are blanked out instead,
+  so the compiler's warnings match.
+  A script with an `enum` or a constructor's `private` parameter can't
+  be blanked, and the compiler can't read it, so it reports no warnings.
+- **`generics` that don't parse**, such as a conditional type as a
+  constraint: svelte-check pastes the text in more places,
+  so it reports more syntax errors, and type errors they cause.
+  Here only the first ones are reported, at the same positions.
+- **A JS component with a `@template` tag and no `generics`**:
+  svelte-check reports an error at each use, even a valid one,
+  as it keeps `T` unresolved.
+  Here the component isn't generic: each prop is typed by its
+  constraint.
+- **A JS component's JSDoc block with a `@typedef`
+  and the `@type` of `$props()`**, as
+  `/** @typedef {{ count: number }} Props @type {Props} */` on two
+  lines: svelte-check reports a false "Duplicate identifier 'Props'",
+  as svelte2tsx declares its own `Props` from the same comment.
+  Here it passes.
+  In two blocks, both pass.
+- **Svelte 5 with TS-only syntax and no preprocessors**,
+  such as an `enum` or a constructor's `private` parameter:
+  svelte-check strips the types first, so the compiler never sees them.
+  Here the compiler reports that it doesn't support them, and stops,
+  so the file's other compiler warnings are lost.
+- **Svelte 3's element types** are Svelte 4's,
+  read from the project's `svelte/elements`,
+  without svelte2tsx's deprecated `svelte.JSX` namespace:
+  a project that augments or references `svelte.JSX` should move to
+  `svelteHTML` or `svelte/elements`.
+  An ARIA attribute's type prints as `Booleanish`
+  where svelte-check spells out `boolean | "true" | "false"`.
+- **Slot content for a Svelte 5 component without a `children` prop** is
+  reported at the tag's name.
+  svelte-check places the error where svelte2tsx's text rewriting
+  happens to anchor its inserted `children`:
+  an attribute's opening quote, the start of a line,
+  or after an attribute.
+- **A tsconfig without `moduleResolution`** resolves with `bundler`,
+  or with TypeScript's default under a `node*` module.
+  svelte-check uses `node10`, which TypeScript 6 deprecates
+  and TypeScript 7 removed, so it warns about an option the tsconfig
+  doesn't set.
+- **`--out-dir` outside the project** can't find its packages from the
+  generated code; the default is inside `node_modules`.
+- **`<svelte:element this={tag}>` whose tag may be any element**,
+  such as a component's generic
+  `Tag extends keyof HTMLElementTagNameMap`:
+  svelte-check reports TypeScript's "union type too complex"
+  and checks none of the element's attributes;
+  here its attributes are checked as an element's.
+  An attribute error on it names the attributes' type with the tag
+  widened: `keyof HTMLElementTagNameMap extends Tag ? string : Tag`.
+- **A repeated `on:` on `<svelte:document>`**, such as two `on:click`s:
+  svelte-check reports TypeScript's "An object literal cannot have
+  multiple properties with the same name" about its generated code,
+  as it drops that error on other elements only.
+  Here it isn't reported on any element.
 
 ## Limitations
 
-- **Type-checking only:** no editor support. Your editor keeps the Svelte language server, which can disagree with it at the edges.
+- **Type-checking only:** no editor support.
+  Your editor keeps the Svelte language server,
+  which can disagree with it at the edges.
 - **No CSS diagnostics.**

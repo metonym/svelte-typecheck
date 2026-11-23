@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { relative, sep } from "node:path";
+
 import type {
   Baseline,
   BaselineEntry,

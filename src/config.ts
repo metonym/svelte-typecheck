@@ -26,7 +26,10 @@ interface RawConfig {
 const VITE_CONFIGS = ["js", "mjs", "ts", "cjs", "mts", "cts"].map(
   (ext) => `vite.config.${ext}`,
 );
-/** `svelte.config.ts` only where the runtime runs TypeScript: Bun, or Node 22.6+ stripping types. */
+/**
+ * `svelte.config.ts` only where the runtime runs TypeScript: Bun, or Node
+ * 22.6+ stripping types.
+ */
 const SVELTE_CONFIGS = [
   "js",
   "cjs",
@@ -41,9 +44,9 @@ const SVELTE_CONFIG = /^svelte\.config\./;
 /**
  * The project's Svelte config, found as svelte-check finds it (through
  * `@sveltejs/load-config`): from `dir` up, a folder's vite.config first,
- * resolved by the project's own Vite for SvelteKit's or vite-plugin-svelte's
- * options, then its svelte.config. Nothing found, or a config that fails
- * to load, is no config.
+ * resolved by the project's own Vite for SvelteKit's or
+ * vite-plugin-svelte's options, then its svelte.config. Nothing found, or
+ * a config that fails to load, is no config.
  */
 export async function svelteConfigOf(
   dir: string,
@@ -133,7 +136,8 @@ async function fromDir(dir: string): Promise<RawConfig | undefined> {
     if (result && result !== "error") return result;
     const svelte = firstIn(at, SVELTE_CONFIGS);
     if (svelte) return fromSvelteConfig(svelte);
-    // A vite.config that fails, with no svelte.config beside it, ends the search.
+    // A vite.config that fails, with no svelte.config beside it, ends the
+    // search.
     if (result === "error" || dirname(at) === at) return;
   }
 }
@@ -161,9 +165,9 @@ interface Vite {
 let resolving: Promise<unknown> = Promise.resolve();
 
 /**
- * The options a vite.config gives SvelteKit's plugin or vite-plugin-svelte,
- * by the project's own Vite; `undefined` with neither (or no Vite), or
- * `"error"` when the config fails.
+ * The options a vite.config gives SvelteKit's plugin or
+ * vite-plugin-svelte, by the project's own Vite; `undefined` with neither
+ * (or no Vite), or `"error"` when the config fails.
  */
 async function fromVite(
   root: string,
@@ -207,7 +211,10 @@ async function fromVite(
   }
 }
 
-/** The project's Vite, by its package's ESM entry; never a dependency of ours. */
+/**
+ * The project's Vite, by its package's ESM entry; never a dependency of
+ * ours.
+ */
 async function importVite(root: string): Promise<Vite | undefined> {
   try {
     const pkgPath = createRequire(join(root, "package.json")).resolve(

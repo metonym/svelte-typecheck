@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { parseArgs } from "node:util";
+
 import { applyBaseline, createBaseline } from "./baseline.ts";
 import { EmitError, typecheck } from "./check.ts";
 import { SERVE, serveDaemon } from "./daemon.ts";
@@ -224,7 +225,10 @@ export async function main(argv: string[]): Promise<0 | 1> {
   }
 }
 
-/** The run's options from parsed flags, as the CLI passes them to `typecheck`. */
+/**
+ * The run's options from parsed flags, as the CLI passes them to
+ * `typecheck`.
+ */
 function optionsOf(
   values: ReturnType<typeof parse>["values"],
   rest: string[],
@@ -251,7 +255,10 @@ function optionsOf(
   };
 }
 
-/** The options the CLI runs with for `argv`: the parity eval runs the same check. */
+/**
+ * The options the CLI runs with for `argv`: the parity eval runs the same
+ * check.
+ */
 export function cliOptions(argv: string[]): TypecheckOptions {
   const { values, rest } = parse(argv);
   return optionsOf(values, rest);
@@ -334,7 +341,10 @@ function parse(argv: string[]) {
   return { values, rest };
 }
 
-/** `a11y_missing_attribute:ignore,css_unused_selector:error`, as svelte-check takes it. */
+/**
+ * `a11y_missing_attribute:ignore,css_unused_selector:error`, as
+ * svelte-check takes it.
+ */
 function parseCompilerWarnings(
   list: string | undefined,
 ): Record<string, "ignore" | "error"> | undefined {

@@ -20,6 +20,7 @@ import { createRequire } from "node:module";
 import { connect, createServer, type Socket } from "node:net";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join, resolve } from "node:path";
+
 import { configFingerprint } from "./config.ts";
 
 /** Turns `--daemon` on for every run, as the flag does. */
@@ -365,8 +366,8 @@ function loadedState(argv: string[]): string {
 
 /**
  * Serves runs on `socket` one at a time with `main`, until it's idle for
- * `SVELTE_TYPECHECK_DAEMON_IDLE` seconds, stopped, or asked for a run whose
- * loaded state changed since it loaded it.
+ * `SVELTE_TYPECHECK_DAEMON_IDLE` seconds, stopped, or asked for a run
+ * whose loaded state changed since it loaded it.
  */
 export async function serveDaemon(
   socket: string,

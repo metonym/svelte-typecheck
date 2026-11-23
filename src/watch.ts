@@ -1,5 +1,6 @@
 import { type FSWatcher, watch as watchFiles } from "node:fs";
 import { resolve, sep } from "node:path";
+
 import { typecheck } from "./check.ts";
 import type { TypecheckOptions, TypecheckResult } from "./types.ts";
 

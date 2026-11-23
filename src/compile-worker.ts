@@ -1,6 +1,7 @@
 // The compiler's pass on a worker thread: the other side of
 // `compileOffThread` and `compileFilesOffThread`.
 import { parentPort } from "node:worker_threads";
+
 import {
   compileAll,
   compileFiles,

@@ -1,6 +1,7 @@
 # CLI
 
-A drop-in replacement for svelte-check: the same options, the same output in all four formats, the same exit codes.
+A drop-in replacement for svelte-check: the same options,
+the same output in all four formats, the same exit codes.
 
 ```diff
 - "check": "svelte-check --tsconfig ./tsconfig.json"
@@ -42,7 +43,9 @@ A drop-in replacement for svelte-check: the same options, the same output in all
 
 ## The checker's flags
 
-Everything after `--` goes to the checker, after svelte-typecheck's own arguments, as `npm run` and `cargo test` pass theirs on:
+Everything after `--` goes to the checker,
+after svelte-typecheck's own arguments,
+as `npm run` and `cargo test` pass theirs on:
 
 ```sh
 svelte-typecheck --checker tsrs -- --fast            # tsrs's fast mode
@@ -51,7 +54,8 @@ svelte-typecheck -- --noUncheckedIndexedAccess       # a stricter option, withou
 svelte-typecheck --checker tsrs -- --fast --checkers 8 --maxMemory 4G  # several flags
 ```
 
-A compiler option works with every checker. The rest are the checker's own:
+A compiler option works with every checker.
+The rest are the checker's own:
 
 | Checker                    | Flags                                                                                                                                |
 | :------------------------- | :----------------------------------------------------------------------------------------------------------------------------------- |
@@ -60,25 +64,50 @@ A compiler option works with every checker. The rest are the checker's own:
 | tsrs                       | TypeScript 7's, and `--fast`, `--maxMemory <size>`, `--checkerCostCache <file>`, `--checkerAssignment go\|locality`, `--lazyMembers` |
 | `bun check`                | `--threads <n>`                                                                                                                      |
 
-A flag that changes how the checker runs, what it prints or what it writes, such as `--watch`, `--pretty`, `--outDir` or `--extendedDiagnostics`, fails the run. A flag the checker doesn't know fails as the checker reports it: on your tsconfig for `tsc`, tsgo and tsrs. Through an npm script, npm takes the first `--`, so pass two (`npm run check -- -- --fast`), or write the flags into the script. The API takes them as an array, one item per word: `checkerArgs: ["--fast", "--checkers", "8"]`.
+A flag that changes how the checker runs,
+what it prints or what it writes, such as `--watch`, `--pretty`,
+`--outDir` or `--extendedDiagnostics`, fails the run.
+A flag the checker doesn't know fails as the checker reports it:
+on your tsconfig for `tsc`, tsgo and tsrs.
+Through an npm script, npm takes the first `--`,
+so pass two (`npm run check -- -- --fast`),
+or write the flags into the script.
+The API takes them as an array, one item per word:
+`checkerArgs: ["--fast", "--checkers", "8"]`.
 
 ## The daemon
 
-Each run starts a runtime, loads and optimizes svelte-typecheck, loads the Svelte compiler and config, and reads its caches. With `--daemon`, a process kept alive for the folder does all of that once, and each run is handed to it. It's for tools that check again and again: an agent after each edit, a pre-commit hook, scripts that run several checks. For a terminal you're watching, `--watch` already keeps a process alive.
+Each run starts a runtime, loads and optimizes svelte-typecheck,
+loads the Svelte compiler and config, and reads its caches.
+With `--daemon`, a process kept alive for the folder does all of that
+once, and each run is handed to it.
+It's for tools that check again and again: an agent after each edit,
+a pre-commit hook, scripts that run several checks.
+For a terminal you're watching, `--watch` already keeps a process alive.
 
 ```sh
 svelte-typecheck --daemon --changed     # started on the first run, reused after
 export SVELTE_TYPECHECK_DAEMON=1        # or for every run, without the flag
 ```
 
-On carbon-components-svelte (1,276 components), a run after one component changes is about 15 to 24% faster with tsrs, tsgo and `bun check`, and one with nothing changed about 10%. The checker still starts fresh each run.
+On carbon-components-svelte (1,276 components),
+a run after one component changes is about 15 to 24% faster with tsrs,
+tsgo and `bun check`, and one with nothing changed about 10%.
+The checker still starts fresh each run.
 
-A run on the daemon prints what it would print here, with its own arguments, environment and terminal: under Claude Code, machine output, as here. A daemon:
+A run on the daemon prints what it would print here,
+with its own arguments, environment and terminal: under Claude Code,
+machine output, as here.
+A daemon:
 
-- serves one folder, built from one install of svelte-typecheck, and its runs one at a time.
-- starts again when its config (`svelte.config.*`, `vite.config.*`), the lockfile or the installed Svelte changes, as it keeps them loaded.
-- runs the check here instead when it can't start or fails partway; its output is printed once the run ends, so nothing is printed twice.
-- exits after 10 idle minutes (`SVELTE_TYPECHECK_DAEMON_IDLE` in seconds).
+- serves one folder, built from one install of svelte-typecheck,
+  and its runs one at a time.
+- starts again when its config (`svelte.config.*`, `vite.config.*`),
+  the lockfile or the installed Svelte changes, as it keeps them loaded.
+- runs the check here instead when it can't start or fails partway;
+  its output is printed once the run ends, so nothing is printed twice.
+- exits after 10 idle minutes
+  (`SVELTE_TYPECHECK_DAEMON_IDLE` in seconds).
 - isn't used on CI (`CI` set), with `--watch` or with `--no-daemon`.
 
 ```sh
@@ -87,4 +116,5 @@ svelte-typecheck start    # start one ahead of the first run
 svelte-typecheck stop
 ```
 
-Its socket and log are in a folder of the user's own (`$XDG_RUNTIME_DIR` or the temp folder), or a named pipe on Windows.
+Its socket and log are in a folder of the user's own
+(`$XDG_RUNTIME_DIR` or the temp folder), or a named pipe on Windows.

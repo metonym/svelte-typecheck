@@ -3,7 +3,9 @@ import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { Worker } from "node:worker_threads";
+
 import { lexComponent } from "svelte-ast/lexer";
+
 import {
   configNeedsChdir,
   type Preprocessor,
@@ -155,9 +157,9 @@ function positionsOf(w: Warning) {
 }
 
 /**
- * What `svelte/compiler` reports for a component (a11y, unused CSS, invalid
- * markup), without generating code. `<!-- svelte-ignore -->` applies, as in
- * a build. A compile error comes back as one `error`.
+ * What `svelte/compiler` reports for a component (a11y, unused CSS,
+ * invalid markup), without generating code. `<!-- svelte-ignore -->`
+ * applies, as in a build. A compile error comes back as one `error`.
  */
 export function compilerDiagnostics(
   source: string,
@@ -426,11 +428,12 @@ const waitedFor = new Set<number>();
 let nextId = 0;
 
 function startWorker(): Worker {
-  // Beside this module, in the source and in the bundle.
-  const file = import.meta.url.endsWith(".ts")
-    ? "compile-worker.ts"
-    : "compile-worker.js";
-  const started = new Worker(new URL(file, import.meta.url));
+  // Beside this module, in the source and in the bundle; the built
+  // name is a literal so the bundler finds the worker.
+  const url = import.meta.url.endsWith(".ts")
+    ? new URL("./compile-worker.ts", import.meta.url)
+    : new URL("./compile-worker.js", import.meta.url);
+  const started = new Worker(url);
   started.unref();
   started.on(
     "message",

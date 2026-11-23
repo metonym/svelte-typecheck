@@ -1,5 +1,6 @@
 import { readFileSync, realpathSync } from "node:fs";
 import { relative, sep } from "node:path";
+
 import type { Diagnostic } from "./types.ts";
 
 /**
@@ -31,7 +32,10 @@ interface Colors {
   magenta(text: string): string;
 }
 
-/** ANSI colors, as picocolors decides them: a flag, then `NO_COLOR`/`FORCE_COLOR`, then a TTY. */
+/**
+ * ANSI colors, as picocolors decides them: a flag, then
+ * `NO_COLOR`/`FORCE_COLOR`, then a TTY.
+ */
 export function colors(force: boolean | undefined): Colors {
   const env = process.env;
   const enabled =
@@ -57,7 +61,10 @@ function lineOf(text: string, line: number): string {
   return text.split("\n")[line - 1] ?? "";
 }
 
-/** The line before, the line with the range highlighted, and the line after. */
+/**
+ * The line before, the line with the range highlighted, and the line
+ * after.
+ */
 function codeFrame(d: Diagnostic, c: Colors): string {
   let text: string;
   try {
@@ -119,14 +126,20 @@ function agentFrame(d: Diagnostic): string[] {
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-/** The numeric code svelte-check reports for a TypeScript error, else the compiler's. */
+/**
+ * The numeric code svelte-check reports for a TypeScript error, else the
+ * compiler's.
+ */
 function codeOf(d: Diagnostic): string | number {
   if (d.code.startsWith("TS")) return Number(d.code.slice(2));
   return NUMERIC.test(d.code) ? Number(d.code) : d.code;
 }
 const NUMERIC = /^-?\d+$/;
 
-/** svelte-check names a diagnostic's source except for a TS or JS file's type error. */
+/**
+ * svelte-check names a diagnostic's source except for a TS or JS file's
+ * type error.
+ */
 function sourceOf(d: Diagnostic): string | undefined {
   return d.file.endsWith(".svelte") || d.source === "svelte"
     ? d.source
@@ -166,7 +179,10 @@ export function summarize(diagnostics: Diagnostic[], files: number): Summary {
 
 const DRIVE = /^[A-Z]:/;
 
-/** A workspace as svelte-check prints it: a file URI's path, whose drive letter is lowercase on Windows. */
+/**
+ * A workspace as svelte-check prints it: a file URI's path, whose drive
+ * letter is lowercase on Windows.
+ */
 function displayed(workspace: string): string {
   return process.platform === "win32"
     ? workspace.replace(DRIVE, (drive) => drive.toLowerCase())

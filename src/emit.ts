@@ -7,6 +7,7 @@ import {
   walk,
 } from "svelte-ast";
 import { analyzeScopes } from "svelte-ast/scope";
+
 import {
   isKitErrorFile,
   isKitRouteFile,
@@ -21,7 +22,8 @@ import { Output } from "./output.ts";
  * does: the instance script becomes a `$$render` function, the markup an
  * `async () => {}` inside it, and the component the default export, typed
  * from what `$$render` returns. The `$$check` helpers it calls are
- * declared in `shims.d.ts`, and `svelteHTML` in svelte's `svelte-html.d.ts`.
+ * declared in `shims.d.ts`, and `svelteHTML` in svelte's
+ * `svelte-html.d.ts`.
  */
 const TS_LANG = /^(ts|typescript)$/;
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
@@ -54,7 +56,10 @@ const NUMBER_ATTRIBUTES = new Set(
 const keyOf = (name: string) =>
   IDENTIFIER.test(name) ? name : JSON.stringify(name);
 
-/** A generated `$$bindings` check for a component's `bind:`, and the directive. */
+/**
+ * A generated `$$bindings` check for a component's `bind:`, and the
+ * directive.
+ */
 interface BindingCheck {
   /** The check, as generated offsets. */
   start: number;
@@ -144,7 +149,10 @@ function parseGenerics(generics: string): {
   return { params, parsed: true };
 }
 
-/** `generics="T extends A = B, U"` as JSDoc: `@template {A} [T=B]`, `@template U`. */
+/**
+ * `generics="T extends A = B, U"` as JSDoc: `@template {A} [T=B]`,
+ * `@template U`.
+ */
 function jsdocTemplates(params: GenericParam[]) {
   return params.map(({ name, isConst, constraint, fallback }) => {
     const modifier = isConst ? "const " : "";
@@ -256,7 +264,10 @@ function parseComponent(source: string): { ast: AnyNode; tsInJs: TsInJs[] } {
   return parsed;
 }
 
-/** A JSDoc `@type` or `@satisfies` comment, and the space after it, ending the text. */
+/**
+ * A JSDoc `@type` or `@satisfies` comment, and the space after it, ending
+ * the text.
+ */
 const LEADING_CAST =
   /\/\*\*(?:(?!\*\/)[\s\S])*@(?:type|satisfies)\b(?:(?!\*\/)[\s\S])*\*\/\s*$/;
 const TEMPLATE_EXPRESSIONS = ["expression", "test"];
@@ -362,7 +373,10 @@ const TS_ONLY: Record<string, [code: string, message: string]> = {
   ],
 };
 
-/** Where TypeScript reports a JS file's TypeScript syntax: the type, the name, or the node. */
+/**
+ * Where TypeScript reports a JS file's TypeScript syntax: the type, the
+ * name, or the node.
+ */
 function typescriptOnly(program: AnyNode): TsInJs[] {
   const found: TsInJs[] = [];
   walk(program, {
@@ -464,7 +478,10 @@ export function emit(
   };
 
   // --- Module script and the instance script's imports, at the top level.
-  /** Copies a statement, pointing an import that leaves the workspace at its target. */
+  /**
+   * Copies a statement, pointing an import that leaves the workspace at its
+   * target.
+   */
   const copyStatement = (s: Node) => {
     const spec = s.source?.value;
     const next = typeof spec === "string" ? rewriteImport?.(spec) : undefined;
@@ -483,7 +500,10 @@ export function emit(
     out.copy(at, module.content.end).raw("\n");
   }
   const body: Node[] = instance?.content.body ?? [];
-  /** Svelte 5's `await` at the instance script's top level makes `$$render` async. */
+  /**
+   * Svelte 5's `await` at the instance script's top level makes `$$render`
+   * async.
+   */
   let topLevelAwait = false;
   if (svelte >= 5)
     for (const s of body)
@@ -849,7 +869,10 @@ export function emit(
       .copy(target.start, target.end)
       .raw(" = $$check.any(null);");
   };
-  /** `bind:x={get, set}` as svelte2tsx checks it: `set` takes what `get` returns. */
+  /**
+   * `bind:x={get, set}` as svelte2tsx checks it: `set` takes what `get`
+   * returns.
+   */
   const isGetSet = (e: Node) =>
     e.type === "SequenceExpression" && e.expressions.length === 2;
   const bound = (e: Node) => {
@@ -1322,7 +1345,10 @@ export function emit(
     fragment(node.body);
     out.raw("}; return $$check.any(0); },");
   }
-  /** A snippet as svelte2tsx declares it: an arrow that returns a snippet's result. */
+  /**
+   * A snippet as svelte2tsx declares it: an arrow that returns a snippet's
+   * result.
+   */
   function snippet(node: Node) {
     out.raw("const ").copy(node.expression.start, node.expression.end);
     if (isTs) {
@@ -1786,7 +1812,8 @@ export function emit(
   out.raw(
     `, exports: ${exportsValue}, bindings: "", slots: ${typed.has("$$Slots") ? "{} as unknown as $$Slots, __slots: {" : "{"}`,
   );
-  // A slot's props, as `let:` reads them; `any` for a value the markup scopes.
+  // A slot's props, as `let:` reads them; `any` for a value the markup
+  // scopes.
   for (const [name, attributes] of slots) {
     out.raw(`${JSON.stringify(name)}: {`);
     for (const a of attributes)
@@ -1953,7 +1980,10 @@ export function emit(
     );
   }
 
-  /** A runes component: a function typed by `$props()`, as svelte2tsx types it. */
+  /**
+   * A runes component: a function typed by `$props()`, as svelte2tsx types
+   * it.
+   */
   function runesExport() {
     const exported = `{${entries(exportsOf)}}`;
     const bindable = `$$check.bindings(${bindings.length > 0 ? bindings.map((b) => JSON.stringify(b)).join(", ") : '""'})`;

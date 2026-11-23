@@ -1,11 +1,38 @@
 # How it works
 
-1. **Find the project.** The tsconfig svelte-check would use (the nearer of tsconfig.json and jsconfig.json from the workspace up), and the components its `include` names.
-2. **Parse.** [svelte-ast](https://github.com/metonym/svelte-ast) parses each component and resolves its scopes: props, `$:` declarations, runes, stores, `{#each}`, `let:` and snippet scopes, every read and write.
-3. **Generate.** Each component becomes TypeScript (or JS with JSDoc) the way svelte2tsx writes it, with a map from each piece back to its source ([examples](#the-generated-code)). The code, the helper types it calls and a tsconfig that extends yours go to `node_modules/.cache/svelte-typecheck`. The helpers are svelte-typecheck's own, except the few names a message prints, which keep svelte2tsx's (MIT) so messages read as svelte-check's do.
-4. **Check and compile, at once.** One checker process type-checks the whole program while Svelte's compiler reports its warnings on a worker thread. With nothing kept from a last run, the worker starts as soon as the components are found, and reads them itself. A component that no preprocessor can change compiles without Svelte's `preprocess`.
-5. **Map and order.** The program's order, each file after the files it imports, is worked out while the checker runs, as nothing it reports changes it. Each error then maps back to its `.svelte` line, with svelte-check's rewrites and filters, in the order svelte-check prints them.
-6. **Keep.** What each step learned is kept for the next run.
+1. **Find the project.**
+   The tsconfig svelte-check would use
+   (the nearer of tsconfig.json and jsconfig.json from the workspace
+   up), and the components its `include` names.
+2. **Parse.**
+   [svelte-ast](https://github.com/metonym/svelte-ast) parses each
+   component and resolves its scopes: props, `$:` declarations, runes,
+   stores, `{#each}`, `let:` and snippet scopes, every read and write.
+3. **Generate.**
+   Each component becomes TypeScript (or JS with JSDoc) the way
+   svelte2tsx writes it, with a map from each piece back to its source
+   ([examples](#the-generated-code)).
+   The code, the helper types it calls and a tsconfig that extends yours
+   go to `node_modules/.cache/svelte-typecheck`.
+   The helpers are svelte-typecheck's own,
+   except the few names a message prints,
+   which keep svelte2tsx's (MIT) so messages read as svelte-check's do.
+4. **Check and compile, at once.**
+   One checker process type-checks the whole program
+   while Svelte's compiler reports its warnings on a worker thread.
+   With nothing kept from a last run, the worker starts as soon as the
+   components are found, and reads them itself.
+   A component that no preprocessor can change compiles without Svelte's
+   `preprocess`.
+5. **Map and order.**
+   The program's order, each file after the files it imports,
+   is worked out while the checker runs,
+   as nothing it reports changes it.
+   Each error then maps back to its `.svelte` line,
+   with svelte-check's rewrites and filters,
+   in the order svelte-check prints them.
+6. **Keep.**
+   What each step learned is kept for the next run.
 
 ## What makes it fast
 
@@ -22,13 +49,30 @@
 
 ## The generated code
 
-Each component becomes one TypeScript file, or a JS file with JSDoc for a component without `lang="ts"`. The instance script is copied into a `$$render` function, the markup becomes statements inside an `async () => {}` arrow in that function, and the component's type is built from what `$$render` returns. None of it runs. The arrow is never called, and it's `async` so that `{#await}` can use `await`.
+Each component becomes one TypeScript file,
+or a JS file with JSDoc for a component without `lang="ts"`.
+The instance script is copied into a `$$render` function,
+the markup becomes statements inside an `async () => {}` arrow in that
+function, and the component's type is built from what `$$render`
+returns.
+None of it runs.
+The arrow is never called, and it's `async` so that `{#await}` can use
+`await`.
 
-The samples below put svelte-typecheck's output next to svelte2tsx's (0.7.63, which svelte-check uses) for the same component. Both have been run through `bun fmt` to make them readable. The generator itself writes one line per markup node and wraps each copied expression in parentheses, so that text such as `{a, b}` or an object literal is read as an expression and not as a block. The formatter removes those parentheses.
+The samples below put svelte-typecheck's output next to svelte2tsx's
+(0.7.63, which svelte-check uses) for the same component.
+Both have been run through `bun fmt` to make them readable.
+The generator itself writes one line per markup node
+and wraps each copied expression in parentheses,
+so that text such as `{a, b}` or an object literal is read as an
+expression and not as a block.
+The formatter removes those parentheses.
 
 ### Where the files go
 
-For a project with `src/Counter.svelte`, the output folder (`node_modules/.cache/svelte-typecheck` by default) holds:
+For a project with `src/Counter.svelte`,
+the output folder (`node_modules/.cache/svelte-typecheck` by default)
+holds:
 
 ```
 tsconfig.json                   extends the project's tsconfig
@@ -40,7 +84,26 @@ tsbuildinfo                     the checker's build cache
 *.json                          svelte-typecheck's own caches
 ```
 
-The generated tsconfig lists its files instead of globbing them, in the order svelte-check's program has them: the components, the project's own TS and JS, then `shims.d.ts` and Svelte's `svelte-html.d.ts`. It sets `rootDirs: ["../../..", "svelte"]`, so `svelte/src/` is treated as the same folder as `src/` and a component's relative imports of `.ts` files still resolve. It also sets `allowArbitraryExtensions`, so `import Counter from "./Counter.svelte"` resolves to `Counter.d.svelte.ts`. That file re-exports `++Counter.svelte.ts`. `noEmit`, `composite: false` and its own `tsBuildInfoFile` keep the checker from writing anything of the project's. A package whose `exports` name a component as its types, as `"types": "./Editor.svelte"`, gets a `paths` entry to that component's generated code, which TypeScript would find no file for. Errors in it aren't reported, as svelte-check reports none. It sets `contentMappers: []`, since the components are already TypeScript: a content mapper the project declares (TypeScript 7.1) would claim them again, and needs `--runExternalCode` to run at all.
+The generated tsconfig lists its files instead of globbing them,
+in the order svelte-check's program has them: the components,
+the project's own TS and JS, then `shims.d.ts`
+and Svelte's `svelte-html.d.ts`.
+It sets `rootDirs: ["../../..", "svelte"]`,
+so `svelte/src/` is treated as the same folder as `src/`
+and a component's relative imports of `.ts` files still resolve.
+It also sets `allowArbitraryExtensions`,
+so `import Counter from "./Counter.svelte"` resolves to
+`Counter.d.svelte.ts`.
+That file re-exports `++Counter.svelte.ts`.
+`noEmit`, `composite: false` and its own `tsBuildInfoFile` keep the
+checker from writing anything of the project's.
+A package whose `exports` name a component as its types,
+as `"types": "./Editor.svelte"`, gets a `paths` entry to that
+component's generated code, which TypeScript would find no file for.
+Errors in it aren't reported, as svelte-check reports none.
+It sets `contentMappers: []`, since the components are already
+TypeScript: a content mapper the project declares (TypeScript 7.1) would
+claim them again, and needs `--runExternalCode` to run at all.
 
 ### A runes component
 
@@ -135,14 +198,43 @@ const Counter__SvelteComponent_ = __sveltets_2_fn_component($$render());
 /*Ωignore_endΩ*/ export default Counter__SvelteComponent_;
 ```
 
-The two have the same structure, and that is deliberate. The checker sees the same program svelte-check's language service sees, so it reports the same errors with the same messages.
+The two have the same structure, and that is deliberate.
+The checker sees the same program svelte-check's language service sees,
+so it reports the same errors with the same messages.
 
-- `$props()`'s type annotation is pulled out as `$$ComponentProps`, so the component's type can name it. svelte2tsx moves it above `$$render`. svelte-typecheck leaves it where the script declared it, inside `$$render`.
-- Each element is a `svelteHTML.createElement(tag, attributes)` call. `svelteHTML` comes from Svelte's own `svelte-html.d.ts`, which maps each tag to its attribute types, so `disabled={count > 3}` is checked against `HTMLButtonAttributes`. svelte2tsx writes the call for every element. svelte-typecheck leaves it out for an element whose attributes write nothing, such as the `<p>` here, or one with only static `data-` attributes: `{}` can't fail against attributes that are all optional, and the call would have the checker build that tag's attribute types, about 800 instantiations a tag. A custom element (`<my-el>`) keeps it, as its declared attributes can be required.
-- svelte-typecheck names an element (`const $$_el0 = …`) only for `bind:this={el}`, written as `el = $$_el0`, which checks that `el` can hold that element type.
-- `{expr}` becomes an expression statement, and `{#each items as item}` becomes a `for…of` loop. `$$check.each` (svelte2tsx's `__sveltets_2_ensureArray`) accepts an array-like or iterable value and returns its items, so `item` is a `string` here.
-- The returned object describes the component: its props, exports, bindable props, slots and events. The component's type is computed from `ReturnType<typeof $$render>`.
-- At the end, svelte2tsx calls a helper, `__sveltets_2_fn_component($$render())`, and the checker infers the component's type from that call. svelte-typecheck declares `$$Component` with its type written out as Svelte's `Component<Props, Exports, Bindings>`.
+- `$props()`'s type annotation is pulled out as `$$ComponentProps`,
+  so the component's type can name it.
+  svelte2tsx moves it above `$$render`.
+  svelte-typecheck leaves it where the script declared it,
+  inside `$$render`.
+- Each element is a `svelteHTML.createElement(tag, attributes)` call.
+  `svelteHTML` comes from Svelte's own `svelte-html.d.ts`,
+  which maps each tag to its attribute types,
+  so `disabled={count > 3}` is checked against `HTMLButtonAttributes`.
+  svelte2tsx writes the call for every element.
+  svelte-typecheck leaves it out for an element whose attributes write
+  nothing, such as the `<p>` here, or one with only static `data-`
+  attributes: `{}` can't fail against attributes that are all optional,
+  and the call would have the checker build that tag's attribute types,
+  about 800 instantiations a tag.
+  A custom element (`<my-el>`) keeps it,
+  as its declared attributes can be required.
+- svelte-typecheck names an element (`const $$_el0 = …`) only for
+  `bind:this={el}`, written as `el = $$_el0`,
+  which checks that `el` can hold that element type.
+- `{expr}` becomes an expression statement,
+  and `{#each items as item}` becomes a `for…of` loop.
+  `$$check.each` (svelte2tsx's `__sveltets_2_ensureArray`) accepts an
+  array-like or iterable value and returns its items,
+  so `item` is a `string` here.
+- The returned object describes the component: its props, exports,
+  bindable props, slots and events.
+  The component's type is computed from `ReturnType<typeof $$render>`.
+- At the end, svelte2tsx calls a helper,
+  `__sveltets_2_fn_component($$render())`,
+  and the checker infers the component's type from that call.
+  svelte-typecheck declares `$$Component` with its type written out as
+  Svelte's `Component<Props, Exports, Bindings>`.
 
 ### Components, `bind:` and `{#if}`
 
@@ -187,12 +279,32 @@ async () => {
 };
 ```
 
-svelte2tsx writes the same statements, with `__sveltets_2_ensureComponent` in place of `$$check.component`, `__sveltets_2_any()` in place of `$$check.target`, and a scrambled variable name (`$$_dleiF0`, the tag's name reversed). It also wraps the `bind:` check in ignore comments. svelte-typecheck names the instance (`const $$_c0 = …`) only when something reads it, here the `bind:` check; a component with no `on:`, `bind:` or slot `let:` is a bare `new $$_c0C(…)`.
+svelte2tsx writes the same statements,
+with `__sveltets_2_ensureComponent` in place of `$$check.component`,
+`__sveltets_2_any()` in place of `$$check.target`,
+and a scrambled variable name (`$$_dleiF0`, the tag's name reversed).
+It also wraps the `bind:` check in ignore comments.
+svelte-typecheck names the instance (`const $$_c0 = …`) only
+when something reads it, here the `bind:` check;
+a component with no `on:`, `bind:` or slot `let:`
+is a bare `new $$_c0C(…)`.
 
-- `$$check.component(Field)` accepts a Svelte 5 function component, a Svelte 4 class, or anything typed as `ConstructorOfATypedSvelteComponent`, and returns a constructor. Constructing it with `props` checks each attribute against the child's props, including that a required prop isn't missing.
-- `bind:value` produces two checks. `() => (value = $$check.any(null))` checks that `value` can be assigned to, so binding a `const` or an import is an error. `$$_c0.$$bindings = "value"` checks that `Field` marks `value` as `$bindable()`. Field's own output returns `bindings: $$check.bindings("value")`, and that becomes the type `$$bindings` accepts.
-- `{#if}` and `{:else}` become `if` and `else`, so TypeScript narrows inside them as it does in a script.
-- The empty `{}` after the component is where its slot content and snippets would go.
+- `$$check.component(Field)` accepts a Svelte 5 function component,
+  a Svelte 4 class, or anything typed as
+  `ConstructorOfATypedSvelteComponent`, and returns a constructor.
+  Constructing it with `props` checks each attribute against the child's
+  props, including that a required prop isn't missing.
+- `bind:value` produces two checks.
+  `() => (value = $$check.any(null))` checks that `value` can be
+  assigned to, so binding a `const` or an import is an error.
+  `$$_c0.$$bindings = "value"` checks that `Field` marks `value` as
+  `$bindable()`.
+  Field's own output returns `bindings: $$check.bindings("value")`,
+  and that becomes the type `$$bindings` accepts.
+- `{#if}` and `{:else}` become `if` and `else`,
+  so TypeScript narrows inside them as it does in a script.
+- The empty `{}` after the component is where its slot content
+  and snippets would go.
 
 ### Svelte 4 syntax
 
@@ -296,13 +408,44 @@ const Legacy__SvelteComponent_ = __sveltets_2_isomorphic_component_slots(
 /*Ωignore_endΩ*/ export default Legacy__SvelteComponent_;
 ```
 
-- Imports move above `$$render`, since a function body can't contain them. Both tools do this.
-- `export let name: string` becomes a plain `let`, followed by an assignment from `any` so that TypeScript doesn't report it as used before assignment. The prop and its type go into `props`.
-- Each store a component reads as `$count` gets a `let $count = $$check.store(count)` declaration right after the store's own. If `count` isn't a store, the error is at that generated declaration. svelte-check reports it at each `$count` in the source, and svelte-typecheck does the same: it records where the declaration and each use are, and reports the error once per use.
-- `$: greeting = …` becomes `let greeting = $$check.reactive(() => …)`. The helper returns what the arrow returns, so `greeting` gets the expression's type, as it would from a plain `let`.
-- `<slot item={name} />` becomes an object literal so its props are checked. The slot's props also go into the returned `slots`, which is where a parent's `let:item` gets its type. svelte2tsx calls a slot helper instead. svelte-typecheck calls one, `$$slot`, only when the component declares `$$Slots`, to check the slot's props against it.
-- `$$props`, `$$restProps` and `$$slots` are declared only when the component uses them, as svelte2tsx does: none of them here.
-- A legacy component's type is `__sveltets_2_IsomorphicComponent`, which can be constructed with `new`, as Svelte 4 does, and also called, as Svelte 5 does. This name, and the few other names a type error can print, keep svelte2tsx's spelling in `shims.d.ts` so the messages read as svelte-check's do. Every other helper is in svelte-typecheck's `$$check` namespace. A Svelte script can't declare a `$$` name, so they can't collide with a component's own names.
+- Imports move above `$$render`, since a function body can't contain
+  them.
+  Both tools do this.
+- `export let name: string` becomes a plain `let`,
+  followed by an assignment from `any` so that TypeScript doesn't report
+  it as used before assignment.
+  The prop and its type go into `props`.
+- Each store a component reads as `$count` gets a
+  `let $count = $$check.store(count)` declaration right after the
+  store's own.
+  If `count` isn't a store, the error is at that generated declaration.
+  svelte-check reports it at each `$count` in the source,
+  and svelte-typecheck does the same:
+  it records where the declaration and each use are,
+  and reports the error once per use.
+- `$: greeting = …` becomes `let greeting = $$check.reactive(() => …)`.
+  The helper returns what the arrow returns,
+  so `greeting` gets the expression's type,
+  as it would from a plain `let`.
+- `<slot item={name} />` becomes an object literal
+  so its props are checked.
+  The slot's props also go into the returned `slots`,
+  which is where a parent's `let:item` gets its type.
+  svelte2tsx calls a slot helper instead.
+  svelte-typecheck calls one, `$$slot`,
+  only when the component declares `$$Slots`,
+  to check the slot's props against it.
+- `$$props`, `$$restProps` and `$$slots` are declared only
+  when the component uses them, as svelte2tsx does: none of them here.
+- A legacy component's type is `__sveltets_2_IsomorphicComponent`,
+  which can be constructed with `new`, as Svelte 4 does,
+  and also called, as Svelte 5 does.
+  This name, and the few other names a type error can print,
+  keep svelte2tsx's spelling in `shims.d.ts` so the messages read as
+  svelte-check's do.
+  Every other helper is in svelte-typecheck's `$$check` namespace.
+  A Svelte script can't declare a `$$` name,
+  so they can't collide with a component's own names.
 
 ### Generics, snippets and `{#await}`
 
@@ -406,15 +549,49 @@ type $$Component<T> = InstanceType<typeof $$Component<T>>;
 export default $$Component;
 ```
 
-- `generics="T"` becomes `$$render<T>`. The declarations keep each parameter whole (`const T extends C = D`), and the type arguments pass its name alone (`<T>`). Only `$$render` maps the text to the attribute, so an error in a constraint is reported once, where svelte-check reports it. A `$$Generic<C>` constraint stays unmapped, since svelte-check reports nothing there. A function's return type can't be read for a particular `T`, so the `$$Render<T>` class wraps each part of it, and `$$Generic` is a type that can be both called and constructed, with its own `<T>`. Using `<List items={[1, 2]} … />` then infers `T` as `number`, as calling a generic function would. svelte2tsx's output is the same apart from its names (`__sveltets_Render`, `$$IsomorphicComponent`).
-- A snippet becomes a `const` arrow function at the top of the fragment it's declared in, so the markup can use it before its `{#snippet}` tag. svelte2tsx moves snippets to the top in the same way. A root-level snippet goes first in `$$render`.
-- `{@render row(item)}` becomes `$$check.snippet(row(item))`, which checks that `row` is a snippet and that `item` matches its parameter.
-- `{#each … , i (i)}` declares the index as a number and checks the key expression.
-- `{#await}` stores the promise in a variable and then writes each branch in its own block. The pending branch is empty here. The `then` branch awaits the promise, and the `catch` branch declares its error as `any`. svelte2tsx writes only the branches the block has. svelte-typecheck always writes all three.
+- `generics="T"` becomes `$$render<T>`.
+  The declarations keep each parameter whole (`const T extends C = D`),
+  and the type arguments pass its name alone (`<T>`).
+  Only `$$render` maps the text to the attribute,
+  so an error in a constraint is reported once,
+  where svelte-check reports it.
+  A `$$Generic<C>` constraint stays unmapped,
+  since svelte-check reports nothing there.
+  A function's return type can't be read for a particular `T`,
+  so the `$$Render<T>` class wraps each part of it,
+  and `$$Generic` is a type that can be both called and constructed,
+  with its own `<T>`.
+  Using `<List items={[1, 2]} … />` then infers `T` as `number`,
+  as calling a generic function would.
+  svelte2tsx's output is the same apart from its names
+  (`__sveltets_Render`, `$$IsomorphicComponent`).
+- A snippet becomes a `const` arrow function at the top of the fragment
+  it's declared in, so the markup can use it before its `{#snippet}`
+  tag.
+  svelte2tsx moves snippets to the top in the same way.
+  A root-level snippet goes first in `$$render`.
+- `{@render row(item)}` becomes `$$check.snippet(row(item))`,
+  which checks that `row` is a snippet and that `item` matches its
+  parameter.
+- `{#each … , i (i)}` declares the index as a number
+  and checks the key expression.
+- `{#await}` stores the promise in a variable and
+  then writes each branch in its own block.
+  The pending branch is empty here.
+  The `then` branch awaits the promise,
+  and the `catch` branch declares its error as `any`.
+  svelte2tsx writes only the branches the block has.
+  svelte-typecheck always writes all three.
 
 ### JS with JSDoc
 
-A component without `lang="ts"` becomes a `.js` file, and the types that would be annotations become JSDoc. It's part of the program when the project sets `allowJs`, and TypeScript checks it when the project sets `checkJs`, as it would any JS file. Without `allowJs`, the component's importers see it as `any`, as they do with svelte-check.
+A component without `lang="ts"` becomes a `.js` file,
+and the types that would be annotations become JSDoc.
+It's part of the program when the project sets `allowJs`,
+and TypeScript checks it when the project sets `checkJs`,
+as it would any JS file.
+Without `allowJs`, the component's importers see it as `any`,
+as they do with svelte-check.
 
 ```svelte
 <script>
@@ -445,11 +622,13 @@ const $$Component =
 export default $$Component;
 ```
 
-`style:width="{size}px"` becomes the template literal `` `${size}px` ``, so `size` is still checked as an expression.
+`style:width="{size}px"` becomes the template literal `` `${size}px` ``,
+so `size` is still checked as an expression.
 
 ### Mapping an error back
 
-If `items` in the first sample is `[1, 2]`, tsgo reports the error in the generated file:
+If `items` in the first sample is `[1, 2]`,
+tsgo reports the error in the generated file:
 
 ```
 svelte/src/++Counter.svelte.ts(8,47): error TS2339: Property 'toUpperCase' does not exist on type 'number'.
@@ -461,19 +640,52 @@ svelte-typecheck reports it in the component:
 src/Counter.svelte:8:12 Property 'toUpperCase' does not exist on type 'number'.
 ```
 
-The mapping comes from `Output` (`src/output.ts`), which records every piece of text as the generator writes it.
+The mapping comes from `Output` (`src/output.ts`),
+which records every piece of text as the generator writes it.
 
-- `copy(start, end)` writes a range of the source unchanged and records `[generated start, source start, length]`. A position inside a copy maps to the same character in the source. Scripts, expressions, `{#each}` patterns and component names are written this way, so most errors land on the exact token.
-- `from(offset, fn)` records a range of generated text that maps to one source offset. It's used where TypeScript reports an error on generated code that stands for something in the source. For example, an error about an element's whole attributes object goes to the last letter of the tag name, which is where svelte2tsx's source map puts it. When spans are nested, the smallest one wins.
-- Anything else written with `raw` has no source. An error there is about generated code only, such as a helper's internals, and it's dropped. The one exception is the store error described above.
+- `copy(start, end)` writes a range of the source unchanged
+  and records `[generated start, source start, length]`.
+  A position inside a copy maps to the same character in the source.
+  Scripts, expressions, `{#each}` patterns and component names are
+  written this way, so most errors land on the exact token.
+- `from(offset, fn)` records a range of generated text that maps to one
+  source offset.
+  It's used where TypeScript reports an error on generated code that
+  stands for something in the source.
+  For example, an error about an element's whole attributes object goes
+  to the last letter of the tag name,
+  which is where svelte2tsx's source map puts it.
+  When spans are nested, the smallest one wins.
+- Anything else written with `raw` has no source.
+  An error there is about generated code only,
+  such as a helper's internals, and it's dropped.
+  The one exception is the store error described above.
 
-To map the error above, the checker's line and column are turned into an offset in the generated file. A binary search over the copies finds the one containing that offset (`item.toUpperCase()`, copied from the `{…}` on line 8), and the offset is converted back to a line and column in the `.svelte` file. The diagnostics are then rewritten and filtered as svelte-check does (a non-bindable `bind:`, a `$:` label, and so on) and sorted into svelte-check's order. If the generated code fails to parse, the run fails and reports it as a svelte-typecheck bug, instead of passing with no errors.
+To map the error above, the checker's line and column are turned into an
+offset in the generated file.
+A binary search over the copies finds the one containing that offset
+(`item.toUpperCase()`, copied from the `{…}` on line 8),
+and the offset is converted back to a line and column in the `.svelte`
+file.
+The diagnostics are then rewritten and filtered as svelte-check does
+(a non-bindable `bind:`, a `$:` label, and so on)
+and sorted into svelte-check's order.
+If the generated code fails to parse,
+the run fails and reports it as a svelte-typecheck bug,
+instead of passing with no errors.
 
-Svelte's compiler warnings take a separate path. The compiler runs on the original source after the project's preprocessors, and its warnings come with source positions, which are mapped through the preprocessors' source maps when they provide one (`src/sourcemap.ts`).
+Svelte's compiler warnings take a separate path.
+The compiler runs on the original source after the project's
+preprocessors, and its warnings come with source positions,
+which are mapped through the preprocessors' source maps
+when they provide one (`src/sourcemap.ts`).
 
 ## Compared with svelte2tsx
 
-svelte2tsx is the transform behind svelte-check and the Svelte language server. svelte-typecheck generates the same program, but it builds that program differently and checks it differently.
+svelte2tsx is the transform behind svelte-check and the Svelte language
+server.
+svelte-typecheck generates the same program,
+but it builds that program differently and checks it differently.
 
 |                            | svelte2tsx in svelte-check                                                                                                                      | svelte-typecheck                                                                                                                        |
 | :------------------------- | :---------------------------------------------------------------------------------------------------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
@@ -499,4 +711,18 @@ The helpers do the same jobs under different names:
 | `__sveltets_2_any`                                                     | `$$check.any`                        | A value of any type, where only the shape of the code matters |
 | `__sveltets_2_fn_component`, `__sveltets_2_isomorphic_component_slots` | the `declare const $$Component` type | The component's type                                          |
 
-svelte-typecheck doesn't use svelte2tsx itself, for two reasons. svelte2tsx needs the `typescript` package to analyze scripts, and writing the code from svelte-ast's AST removes that dependency, which is what lets the checker be TypeScript 7, tsrs or `bun check`. It's also faster: svelte-ast parses and generates every component in carbon-components-svelte in about 0.4 s, and mapping a position is a lookup in a table the generator already has, with no source map to decode. Matching svelte2tsx's output closely is still necessary, because the messages users see come from TypeScript's view of that output. Where the two differ, the parity tests compare svelte-typecheck's diagnostics with svelte-check's on the same fixtures, and any difference kept on purpose is listed in [Compared with svelte-check](svelte-check.md#differences-from-svelte-check).
+svelte-typecheck doesn't use svelte2tsx itself, for two reasons.
+svelte2tsx needs the `typescript` package to analyze scripts,
+and writing the code from svelte-ast's AST removes that dependency,
+which is what lets the checker be TypeScript 7, tsrs or `bun check`.
+It's also faster: svelte-ast parses and generates every component in
+carbon-components-svelte in about 0.4 s,
+and mapping a position is a lookup in a table the generator already has,
+with no source map to decode.
+Matching svelte2tsx's output closely is still necessary,
+because the messages users see come from TypeScript's view of that
+output.
+Where the two differ, the parity tests compare svelte-typecheck's
+diagnostics with svelte-check's on the same fixtures,
+and any difference kept on purpose is listed in
+[Compared with svelte-check](svelte-check.md#differences-from-svelte-check).

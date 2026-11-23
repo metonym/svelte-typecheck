@@ -2,7 +2,10 @@
 export type Checker = "bun" | "tsrs" | "tsgo" | "tsc";
 
 export interface TypecheckOptions {
-  /** The project root the other paths resolve against. Default: `process.cwd()`. */
+  /**
+   * The project root the other paths resolve against. Default:
+   * `process.cwd()`.
+   */
   cwd?: string;
   /** The project folder, relative to `cwd`. Default: `"."`. */
   workspace?: string;
@@ -18,7 +21,10 @@ export interface TypecheckOptions {
    * svelte-check's `--ignore` (a prefix, or `**` at the start or end).
    */
   ignore?: string[];
-  /** The svelte.config to read preprocessors from, relative to the workspace. Default: the nearest. */
+  /**
+   * The svelte.config to read preprocessors from, relative to the
+   * workspace. Default: the nearest.
+   */
   config?: string;
   /**
    * Default: the project's own TypeScript (`tsc`; native in TypeScript 7),
@@ -32,9 +38,15 @@ export interface TypecheckOptions {
    * what it prints, such as `--watch` or `--pretty`, throw.
    */
   checkerArgs?: string[];
-  /** Globs of the components to check, relative to the workspace, instead of the tsconfig's. */
+  /**
+   * Globs of the components to check, relative to the workspace, instead of
+   * the tsconfig's.
+   */
   components?: string[];
-  /** Where to write the generated code. Default: `node_modules/.cache/svelte-typecheck/<workspace>`. */
+  /**
+   * Where to write the generated code. Default:
+   * `node_modules/.cache/svelte-typecheck/<workspace>`.
+   */
   outDir?: string;
   /**
    * Whether an import of a checked component resolves to its generated
@@ -42,7 +54,10 @@ export interface TypecheckOptions {
    * `.svelte.d.ts`, as a library's generated declarations are.
    */
   declarations?: boolean;
-  /** The Svelte package to check against. Default: `svelte`, resolved from `cwd`. */
+  /**
+   * The Svelte package to check against. Default: `svelte`, resolved from
+   * `cwd`.
+   */
   svelte?: string;
   /**
    * What to report: `js` for type errors (in TS and JS), `svelte` for the
@@ -70,7 +85,10 @@ export interface TypecheckOptions {
 /** A kind of check, as svelte-check's `--diagnostic-sources` names them. */
 export type DiagnosticSource = "js" | "svelte" | "css";
 
-/** An error or warning, at its line and column (both 1-based) in the source. */
+/**
+ * An error or warning, at its line and column (both 1-based) in the
+ * source.
+ */
 export interface Diagnostic {
   /** An absolute path. */
   file: string;
@@ -80,7 +98,10 @@ export interface Diagnostic {
   endLine?: number;
   endColumn?: number;
   severity: "error" | "warning";
-  /** `ts` or `js` for a type error (by the file's language), `svelte` for the compiler. */
+  /**
+   * `ts` or `js` for a type error (by the file's language), `svelte` for the
+   * compiler.
+   */
   source: "ts" | "js" | "svelte";
   /** `TS2322`, or a compiler code such as `a11y_missing_attribute`. */
   code: string;
@@ -157,11 +178,12 @@ export interface BaselineResult {
 /**
  * Type-checks Svelte components, as svelte-check does: with a tsconfig
  * (given, or the nearest from the workspace up), the components it
- * includes, and its TS and JS files' errors too; with none, every component
- * under the workspace. Each component becomes TypeScript under `outDir`,
- * next to a tsconfig that extends the project's, a checker runs on it, and
- * each error maps back to its `.svelte` line. Errors in generated code are
- * dropped. Svelte's compiler reports its warnings in the same pass.
+ * includes, and its TS and JS files' errors too; with none, every
+ * component under the workspace. Each component becomes TypeScript under
+ * `outDir`, next to a tsconfig that extends the project's, a checker runs
+ * on it, and each error maps back to its `.svelte` line. Errors in
+ * generated code are dropped. Svelte's compiler reports its warnings in
+ * the same pass.
  */
 export declare function typecheck(
   options?: TypecheckOptions,
@@ -178,9 +200,9 @@ export declare function watch(
 ): () => void;
 
 /**
- * What `svelte/compiler` reports for a component (a11y, unused CSS, invalid
- * markup), without generating code. `<!-- svelte-ignore -->` applies, as in
- * a build. A compile error comes back as one `error`.
+ * What `svelte/compiler` reports for a component (a11y, unused CSS,
+ * invalid markup), without generating code. `<!-- svelte-ignore -->`
+ * applies, as in a build. A compile error comes back as one `error`.
  */
 export declare function compilerDiagnostics(
   source: string,

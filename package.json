@@ -1,79 +1,28 @@
 {
   "name": "svelte-typecheck",
   "version": "0.2.1",
+  "description": "A drop-in svelte-check replacement: up to 11× faster, zero dependencies.",
   "license": "MIT",
-  "description": "A drop-in svelte-check replacement that checks with tsc, tsgo, tsrs or bun check. Up to 11x faster, zero dependencies.",
   "author": "Eric Liu (https://github.com/metonym)",
-  "type": "module",
-  "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
-  "exports": {
-    ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
-    },
-    "./package.json": "./package.json"
-  },
-  "bin": {
-    "svelte-typecheck": "dist/cli.js"
-  },
-  "sideEffects": false,
-  "engines": {
-    "node": ">=22"
-  },
-  "scripts": {
-    "build": "bun scripts/build.ts",
-    "test": "bun run test:unit && bun run test:timing",
-    "test:unit": "bun test --parallel --timeout 30000 --path-ignore-patterns='tests/timing/**' ./tests",
-    "test:timing": "bun test --timeout 30000 ./tests/timing",
-    "test:changed": "bivium run --suite unit && bivium run --suite timing",
-    "test:package": "bun scripts/test-package.ts",
-    "bench": "ostia ci",
-    "bench:baseline": "ostia baseline save",
-    "typecheck": "bun check",
-    "knip": "knip-bun",
-    "fmt": "bun fmt",
-    "lint": "bun fmt --no-script --check && bun lint --no-script --max-warnings 0",
-    "verify": "bun run lint && bun run knip && bun run typecheck && bivium check --max-unknown 0",
-    "prepare": "git config core.hooksPath .githooks || true"
-  },
-  "workspaces": {
-    "packages": [
-      "bench",
-      "eval",
-      "tests/projects/*"
-    ],
-    "catalog": {
-      "@sveltejs/kit": "^3.1.1",
-      "@typescript/native": "npm:typescript@^7.0.2",
-      "svelte": "^5.57.3",
-      "svelte-check": "4.7.8",
-      "tsrs": "7.1.0-beta.tsrs3",
-      "typescript": "^6.0.3",
-      "vite": "^8.3.6"
-    }
-  },
-  "devDependencies": {
-    "bivium": "^0.4.0",
-    "bun-types": "1.4.4",
-    "knip": "^6.44.1",
-    "ostia": "^0.2.12",
-    "svelte-ast": "^0.12.0"
-  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/metonym/svelte-typecheck.git"
   },
   "homepage": "https://github.com/metonym/svelte-typecheck",
   "bugs": "https://github.com/metonym/svelte-typecheck/issues",
-  "keywords": [
-    "svelte",
-    "typecheck",
-    "typescript",
-    "svelte-check",
-    "tsgo",
-    "tsrs",
-    "bun",
-    "ci"
-  ]
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./index.d.ts",
+      "default": "./index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "bin": {
+    "svelte-typecheck": "cli.js"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "sideEffects": false
 }

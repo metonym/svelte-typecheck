@@ -1,6 +1,9 @@
 # Bring your own checker
 
-svelte-typecheck doesn't bundle or import TypeScript. It writes the generated code and a tsconfig to disk and runs a checker on them as a separate process, so any of these works, at whatever version your project installs:
+svelte-typecheck doesn't bundle or import TypeScript.
+It writes the generated code and a tsconfig to disk
+and runs a checker on them as a separate process, so any of these works,
+at whatever version your project installs:
 
 | `--checker` | Install                                                                                     | Runs                                               | Notes                                                                                                                                   |
 | :---------- | :------------------------------------------------------------------------------------------ | :------------------------------------------------- | :-------------------------------------------------------------------------------------------------------------------------------------- |
@@ -30,10 +33,25 @@ result.checkerVersion; // "7.1.0-beta.tsrs3", from its package.json
 | Configure | The generated tsconfig `extends` yours, so your compiler options (`strict`, `paths`, `lib`, `types`…) apply. It adds the generated code to `files` and `rootDirs`, and sets `noEmit` and its own `incremental` build info, so your files are never written. It turns off your `contentMappers`, as the components are already TypeScript                                                                                                            |
 | Read      | The checker prints errors as `tsc` does, `file(line,col): error TSxxxx: message`; each one maps back to its `.svelte` line, or to your TS file as it is. An error that names no file (a bad option) is reported on your tsconfig. A checker that exits with an error and prints none fails the run with its output                                                                                                                                  |
 
-To pass the checker flags of its own, put them after `--` (see [The checker's flags](cli.md#the-checkers-flags)). To try tsrs's [fast mode](https://github.com/oxc-project/tsrs#fast-mode), pass `--fast`: it adapts the checker count to your cores and resolves types lazily. On a big program it can check up to 2× faster, at some extra memory. On a small one it gains nothing, and can be slower. tsrs warns that it can change a diagnostic in rare cases, though none of the test fixtures hit one. Switching it on or off discards tsrs's build cache, so the next run checks everything.
+To pass the checker flags of its own,
+put them after `--`
+(see [The checker's flags](cli.md#the-checkers-flags)).
+To try tsrs's
+[fast mode](https://github.com/oxc-project/tsrs#fast-mode),
+pass `--fast`: it adapts the checker count to your cores
+and resolves types lazily.
+On a big program it can check up to 2× faster, at some extra memory.
+On a small one it gains nothing, and can be slower.
+tsrs warns that it can change a diagnostic in rare cases,
+though none of the test fixtures hit one.
+Switching it on or off discards tsrs's build cache,
+so the next run checks everything.
 
 ```sh
 svelte-typecheck --checker tsrs -- --fast
 ```
 
-Any version works as long as it reads a tsconfig and prints `tsc`'s format: to pin one, install it in the project. TypeScript 7 reads JSDoc in JS files more strictly than 6, so a JS codebase's error count can move a little between them.
+Any version works as long as it reads a tsconfig
+and prints `tsc`'s format: to pin one, install it in the project.
+TypeScript 7 reads JSDoc in JS files more strictly than 6,
+so a JS codebase's error count can move a little between them.

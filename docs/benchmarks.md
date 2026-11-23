@@ -1,8 +1,9 @@
 # Benchmarks
 
-The fastest of 5 cold runs on an 8-core Apple M2, each factor against
-svelte-check's default mode. svelte-check's own TypeScript 7 modes are
-in for comparison: the same tsgo, driven differently.
+The fastest of 5 cold runs on an 8-core Apple M2,
+each factor against svelte-check's default mode.
+svelte-check's own TypeScript 7 modes are in for comparison:
+the same tsgo, driven differently.
 
 | Tool                                   | Checker               | carbon-components-svelte | bits-ui      | realworld     |
 | :------------------------------------- | :-------------------- | :----------------------- | :----------- | :------------ |
@@ -14,13 +15,16 @@ in for comparison: the same tsgo, driven differently.
 | svelte-typecheck                       | `bun check`           | 3.6 s (11.3×)            | 1.4 s (4.7×) | 0.67 s (2.6×) |
 
 Peak memory falls with it: 0.85 GB against svelte-check's 1.74 GB on
-carbon-components-svelte with `bun check`. There, it also replaced
-svelte-check in CI, where the type tests went from 6 to 30 s to 1 to 3 s.
+carbon-components-svelte with `bun check`.
+There, it also replaced svelte-check in CI,
+where the type tests went from 6 to 30 s to 1 to 3 s.
 
-Those are cold runs. After the first, a run regenerates and recompiles
-only the components that changed, the checker reuses its build cache,
-and with nothing changed, the last result comes back without checking
-at all. On carbon-components-svelte, with svelte-check's runs all cold:
+Those are cold runs.
+After the first, a run regenerates and recompiles only the components
+that changed, the checker reuses its build cache,
+and with nothing changed, the last result comes back without checking at
+all.
+On carbon-components-svelte, with svelte-check's runs all cold:
 
 | Run                                  | `tsc`  | tsgo   | tsrs   | `bun check` |
 | :----------------------------------- | :----- | :----- | :----- | :---------- |
@@ -29,24 +33,29 @@ at all. On carbon-components-svelte, with svelte-check's runs all cold:
 | Nothing changed                      | 0.09 s | 0.09 s | 0.14 s | 0.09 s      |
 | `--watch`, from a save to its result | n/a    | 0.68 s | 0.37 s | 0.76 s      |
 
-`bun check` has no build cache of its own, so it checks the whole
-program again after a change. A run with nothing changed is known by
-each input's size and modification time: the components, the files
-the tsconfig includes and those it extends, the package manifests and
-lockfiles, the Svelte config and the versions, and the files the last
-run's program imported. An edit that none of those see, such as a
-hand-patched package in `node_modules`, needs `--no-incremental`.
+`bun check` has no build cache of its own,
+so it checks the whole program again after a change.
+A run with nothing changed is known by each input's size
+and modification time: the components,
+the files the tsconfig includes and those it extends,
+the package manifests and lockfiles, the Svelte config and the versions,
+and the files the last run's program imported.
+An edit that none of those see, such as a hand-patched package in
+`node_modules`, needs `--no-incremental`.
 
 ## Generated projects
 
-`tests/generate.ts` writes projects of any size: here, a barrel
+`tests/generate.ts` writes projects of any size:
+here, a barrel
 (`index.ts` re-exports every component, and each imports the next
-through it), a hub (every component imports one), and a chain (each
-imports the next). Each component has one planted error, and every run
-that finished reported all of them. One cold run each, on the same
-8-core Apple M2 with 8 GB of memory, while the machine ran other work (a load
-average of about 15), so the times are approximate. Node 24, svelte-check
-4.7.8, TypeScript 6.0.3 and 7.0.2, tsrs 0.22.
+through it), a hub (every component imports one),
+and a chain (each imports the next).
+Each component has one planted error,
+and every run that finished reported all of them.
+One cold run each, on the same 8-core Apple M2 with 8 GB of memory,
+while the machine ran other work (a load average of about 15),
+so the times are approximate.
+Node 24, svelte-check 4.7.8, TypeScript 6.0.3 and 7.0.2, tsrs 0.22.
 
 At 2,000 components:
 
@@ -67,8 +76,10 @@ At 8,000 components, where svelte-check runs out of Node's default heap
 
 From 2,000 to 8,000 components, svelte-check's time grows 40 to 50
 times, as it asks the language service for each file's diagnostics in
-turn, and with `--tsgo` 5 to 7 times. svelte-typecheck's grows 3 to 5
-times with each checker, about in proportion, which `tests/timing/scale.test.ts`
-checks. Peak memory at 8,000 is 2.3 to 2.8 GB for svelte-check and 0.4
-GB for svelte-typecheck with tsrs. The components are small and alike,
-so a real project's factors differ: see carbon-components-svelte's above.
+turn, and with `--tsgo` 5 to 7 times.
+svelte-typecheck's grows 3 to 5 times with each checker,
+about in proportion, which `tests/timing/scale.test.ts` checks.
+Peak memory at 8,000 is 2.3 to 2.8 GB for svelte-check
+and 0.4 GB for svelte-typecheck with tsrs.
+The components are small and alike, so a real project's factors differ:
+see carbon-components-svelte's above.

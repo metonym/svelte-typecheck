@@ -11,11 +11,13 @@ import {
 } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
+
 import {
   lexComponent,
   lexDynamicImports,
   lexImportsExports,
 } from "svelte-ast/lexer";
+
 import { version as TOOL_VERSION } from "../package.json";
 import {
   checkerArgs,
@@ -63,7 +65,10 @@ import type {
   TypecheckResult,
 } from "./types.ts";
 
-/** `path(line,col): error TSxxxx: message`, as tsc, tsgo, tsrs and `bun check` print. */
+/**
+ * `path(line,col): error TSxxxx: message`, as tsc, tsgo, tsrs and
+ * `bun check` print.
+ */
 const DIAGNOSTIC = /^(.+?)\((\d+),(\d+)\): error (TS\d+): (.*)$/;
 const CONTINUATION = /^\s+\S/;
 const GLOBAL_DIAGNOSTIC = /^error (TS\d+): (.*)$/;
@@ -77,15 +82,24 @@ const JS_FILE = /\.[cm]?jsx?$/;
 /** Errors that stop a checker before it type-checks anything. */
 const SYNTAX_CODE = /^TS[18]\d{3}$/;
 const STOPPED = /Stopped before type checking/;
-/** A deprecated option's error, and the `ignoreDeprecations` that silences it. */
+/**
+ * A deprecated option's error, and the `ignoreDeprecations` that silences
+ * it.
+ */
 const IGNORE_DEPRECATIONS =
   /is deprecated .*"ignoreDeprecations": "(\d+\.\d+)"/;
-/** tsgo's hint for a removed `baseUrl`: its folder, relative to our tsconfig. */
+/**
+ * tsgo's hint for a removed `baseUrl`: its folder, relative to our
+ * tsconfig.
+ */
 const BASE_URL_HINT = /"paths": \{"\*": \["(.*?)(\/\*)"\]\}/;
 /** The option an option's error names: `baseUrl`, `target=ES5`. */
 const OPTION_NAME = /^Option '([^'=]+)/;
 const TS_SCRIPT = /<script\b[^>]*\blang=["']?(ts|typescript)\b/;
-/** `A.d.svelte`, `A.d.svelte.ts`, `++A.svelte.ts` and `A.svelte.js`: `A.svelte`'s code. */
+/**
+ * `A.d.svelte`, `A.d.svelte.ts`, `++A.svelte.ts` and `A.svelte.js`:
+ * `A.svelte`'s code.
+ */
 const GENERATED_NAME =
   /(?:\+\+)?([^/\\]+?)(?:\.d\.svelte(?:\.ts)?|\.svelte\.[jt]s)$/;
 const DRIVE_PATH = /\b[A-Z]:\//g;
@@ -105,10 +119,16 @@ const escapeRegExp = (text: string) =>
 
 /** A type error, which a checker reports only once the program parses. */
 const TYPE_CODE = /^TS[2-7]\d{3}$/;
-/** What an error's range covers past its start: an identifier, number or string. */
+/**
+ * What an error's range covers past its start: an identifier, number or
+ * string.
+ */
 const TOKEN = /^(?:[\w$]+|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`]*`)/;
 
-/** "No overload matches this call", or a wrong argument: to `$$check.store`. */
+/**
+ * "No overload matches this call", or a wrong argument: to
+ * `$$check.store`.
+ */
 const STORE_ERROR = /^TS(2769|2345)$/;
 /** Unused label, and an unused comma operand. */
 const REACTIVE_NOISE = /^TS(7028|2695)$/;
@@ -213,7 +233,8 @@ function svelteCheckOptions(options: Project["options"]) {
     ...(target === "es3" || target === "es5" ? { target: "es2015" } : {}),
     ...(!module || OLD_MODULES.has(module) ? { module: "esnext" } : {}),
     ...(resolution === "classic" ? { moduleResolution: "node10" } : {}),
-    // TypeScript 5 resolves `esnext` with `classic`, which can't find a package.
+    // TypeScript 5 resolves `esnext` with `classic`, which can't find a
+    // package.
     ...(!resolution && !module?.startsWith("node")
       ? { moduleResolution: "bundler" }
       : {}),
@@ -229,10 +250,16 @@ const OLD_MODULES = new Set([
   "umd",
 ]);
 
-/** Thrown when generated code doesn't parse: an emitter bug, not a type error. */
+/**
+ * Thrown when generated code doesn't parse: an emitter bug, not a type
+ * error.
+ */
 export class EmitError extends Error {}
 
-/** A Windows shell argument, quoted when it has a space or a special character. */
+/**
+ * A Windows shell argument, quoted when it has a space or a special
+ * character.
+ */
 const SHELL_SPECIAL = /[\s"&|<>^()%!]/;
 const quote = (arg: string) =>
   SHELL_SPECIAL.test(arg) ? `"${arg.replaceAll('"', '""')}"` : arg;
@@ -325,8 +352,9 @@ const JS_EXTENSION = /\.([cm]?)js(x?)$/;
 /**
  * Files in TypeScript's program order: roots as it lists a folder (files
  * before subfolders, by name), each after the files it imports: its static
- * imports, then its `import()`s and import types, as TypeScript collects them.
- * Roots can be added later, after those visited, as more files turn up.
+ * imports, then its `import()`s and import types, as TypeScript collects
+ * them. Roots can be added later, after those visited, as more files turn
+ * up.
  */
 function programOrder(
   specifiersOf: (path: string) => string[],
@@ -421,7 +449,10 @@ function importResolver(
     const star = key.indexOf("*");
     return { key, star, targets };
   });
-  /** The targets of each `paths` key a specifier matches, or `undefined` for none. */
+  /**
+   * The targets of each `paths` key a specifier matches, or `undefined` for
+   * none.
+   */
   const pathTargets = (specifier: string): string[] | undefined => {
     let matched: string[] | undefined;
     for (const { key, star, targets } of patterns) {
@@ -488,7 +519,10 @@ function selfResolver(
   };
 }
 
-/** What a `paths` or `exports` key's `*` stands for in a specifier it matches. */
+/**
+ * What a `paths` or `exports` key's `*` stands for in a specifier it
+ * matches.
+ */
 function starOf(key: string, specifier: string): string | undefined {
   const star = key.indexOf("*");
   if (star === -1) return specifier === key ? "" : undefined;
@@ -524,7 +558,8 @@ function installedPackageDir(from: string, name: string): string | undefined {
 
 /**
  * The file a package's `exports`, in `paths`' shape, give a specifier, as
- * TypeScript tries them: its own key, then the longest pattern's first target.
+ * TypeScript tries them: its own key, then the longest pattern's first
+ * target.
  */
 function exportOf(
   exports: Record<string, string[]>,
@@ -609,11 +644,12 @@ function commonDir(paths: string[]): string {
 /**
  * Type-checks Svelte components, as svelte-check does: with a tsconfig
  * (given, or the nearest from the workspace up), the components it
- * includes, and its TS and JS files' errors too; with none, every component
- * under the workspace. Each component becomes TypeScript under `outDir`,
- * next to a tsconfig that extends the project's, a checker runs on it, and
- * each error maps back to its `.svelte` line. Errors in generated code are
- * dropped. Svelte's compiler reports its warnings in the same pass.
+ * includes, and its TS and JS files' errors too; with none, every
+ * component under the workspace. Each component becomes TypeScript under
+ * `outDir`, next to a tsconfig that extends the project's, a checker runs
+ * on it, and each error maps back to its `.svelte` line. Errors in
+ * generated code are dropped. Svelte's compiler reports its warnings in
+ * the same pass.
  */
 export async function typecheck(
   options: TypecheckOptions = {},
@@ -700,7 +736,10 @@ async function typecheckIn(
   // worker from here: it reads them, and loads the compiler and the config
   // (through Vite, up to half a second), while this thread reads them too
   // and generates code.
-  /** When the compiler's pass started, on the worker; on this thread, once code is generated. */
+  /**
+   * When the compiler's pass started, on the worker; on this thread, once
+   * code is generated.
+   */
   let compileStartedAt: number | undefined;
   const compilingEarly =
     sources.has("svelte") &&
@@ -888,7 +927,8 @@ async function typecheckIn(
         })
       : undefined;
   compilingModules?.catch(() => {});
-  // When it finished, for the run's timings, as this thread may be busy then.
+  // When it finished, for the run's timings, as this thread may be busy
+  // then.
   const compiledOffThreadAt = compilingOffThread?.then(
     () => performance.now(),
     () => undefined,
@@ -911,7 +951,10 @@ async function typecheckIn(
       >;
       /** A SvelteKit file's typed copy, whose syntax errors are the user's. */
       kit?: boolean;
-      /** A component whose `generics` don't parse: its syntax errors are the user's. */
+      /**
+       * A component whose `generics` don't parse: its syntax errors are the
+       * user's.
+       */
       userSyntax?: boolean;
     }
   >();
@@ -1190,7 +1233,8 @@ async function typecheckIn(
       const genFrom = join(genDir, relative(root, dirname(path)));
       const name = path.slice(path.lastIndexOf(sep) + 1, -".svelte".length);
       // A component's own `X.svelte.d.ts` is what an import of it finds, as
-      // TypeScript resolves it for svelte-check; the generated code types the rest.
+      // TypeScript resolves it for svelte-check; the generated code types the
+      // rest.
       const typed = declarations && !existsSync(`${path}.d.ts`);
       const key = hash(`${path}\0${typed}\0${texts[i] ?? ""}`);
       const cached = emitCache.entries[key];
@@ -1403,7 +1447,8 @@ async function typecheckIn(
       for (const file of glob(dir, ["**/*.{ts,js}"]))
         write(mirror(join(dir, file)), readFileSync(join(dir, file), "utf-8"));
     }
-    // An alias (`$lib/*`) finds a component's generated code before its source.
+    // An alias (`$lib/*`) finds a component's generated code before its
+    // source.
     const paths = Object.fromEntries(
       Object.entries(project.paths).map(([key, targets]) => [
         key,
@@ -1885,9 +1930,9 @@ async function typecheckIn(
   }
   diagnostics.push(...storeErrors);
   // A message that names generated code names its source, as svelte-check's
-  // name the `.svelte` file: `<out>/svelte/src/A.d.svelte` is `src/A.svelte`.
-  // TypeScript names a file `/`-separated, and on Windows svelte-check
-  // with a lowercase drive letter, as a file URI's path has it.
+  // name the `.svelte` file: `<out>/svelte/src/A.d.svelte` is
+  // `src/A.svelte`. TypeScript names a file `/`-separated, and on Windows
+  // svelte-check with a lowercase drive letter, as a file URI's path has it.
   const generatedPath = new RegExp(
     `${escapeRegExp(`${toPosix(genDir)}/`)}[^"'\\s]*`,
     "gi",
@@ -2400,7 +2445,10 @@ const PACKAGE_FILES = [
   "yarn.lock",
 ];
 
-/** The manifests and lockfiles from `dir` up, which a change of dependencies touches. */
+/**
+ * The manifests and lockfiles from `dir` up, which a change of
+ * dependencies touches.
+ */
 function packageFilesOf(dir: string): string[] {
   const found: string[] = [];
   for (let at = dir; ; at = dirname(at)) {
