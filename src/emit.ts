@@ -1122,8 +1122,13 @@ export function emit(
     out.raw("const {");
     for (const d of letDirectives) {
       const at = nameAt(d);
+      // The key maps to the name after `let:`, so a prop the slot lacks is
+      // reported there; quoted when it isn't an identifier.
       if (d.expression)
-        out.raw(`${d.name}:`).copy(d.expression.start, d.expression.end);
+        out
+          .from(at, () => out.raw(keyOf(d.name)))
+          .raw(":")
+          .copy(d.expression.start, d.expression.end);
       else out.copy(at, at + d.name.length);
       out.raw(",");
     }
