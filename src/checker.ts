@@ -37,7 +37,7 @@ const NODE_SHEBANG = /^#!.*\bnode\b/;
  * How to run a checker: the command, and arguments before the checker's
  * own.
  */
-export interface CheckerCommand {
+interface CheckerCommand {
   command: string;
   prefix: string[];
   /** The providing package's version, when it's known. */

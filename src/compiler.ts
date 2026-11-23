@@ -538,7 +538,7 @@ export interface CompileFilesRequest extends Omit<
   files: { path: string; filename: string }[];
 }
 
-export interface CompileFilesResult extends CompileResult {
+interface CompileFilesResult extends CompileResult {
   /** `compileKey` of each file, as it was read and compiled. */
   keys: string[];
 }

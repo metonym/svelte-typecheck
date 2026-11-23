@@ -159,7 +159,7 @@ function codeDescriptionOf(d: Diagnostic): { href: string } | undefined {
   };
 }
 
-export interface Summary {
+interface Summary {
   /** Files checked. */
   files: number;
   errors: number;

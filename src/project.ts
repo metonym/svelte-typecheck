@@ -311,7 +311,7 @@ export interface Project {
   reports(path: string): boolean;
 }
 
-export interface ProjectOptions {
+interface ProjectOptions {
   workspace: string;
   /**
    * A path relative to the workspace, `false` for none, or found from the
