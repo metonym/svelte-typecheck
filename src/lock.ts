@@ -47,6 +47,32 @@ export const lockPathOf = (outDir: string): string =>
  * when it's done, error or not. A process that exits drops its locks; one
  * killed leaves its lock, which the next run sees is a dead process's.
  */
+// One try, out of the loop so it waits on just the outcome: made, taken
+// over from a holder that's gone, held by a live one, or denied while
+// Windows deletes the last one.
+async function tryLock(
+  path: string,
+  content: string,
+  retryDenied: boolean,
+): Promise<"made" | "taken over" | "held" | "denied"> {
+  try {
+    const file = await open(path, "wx");
+    try {
+      await file.writeFile(content);
+    } finally {
+      await file.close();
+    }
+    return "made";
+  } catch (error) {
+    const code = codeOf(error);
+    // Windows can't make a file while the last one's delete is pending.
+    if (code === "EPERM" && process.platform === "win32" && retryDenied)
+      return "denied";
+    if (code !== "EEXIST") throw error;
+  }
+  return (await takeOver(path)) ? "taken over" : "held";
+}
+
 export async function lockOutDir(outDir: string): Promise<() => Promise<void>> {
   const path = lockPathOf(outDir);
   await mkdir(dirname(path), { recursive: true });
@@ -58,32 +84,14 @@ export async function lockOutDir(outDir: string): Promise<() => Promise<void>> {
   let wait = 5;
   let denied = 0;
   for (;;) {
-    try {
-      // eslint-disable-next-line eslint/no-await-in-loop -- until it's free
-      const file = await open(path, "wx");
-      try {
-        // eslint-disable-next-line eslint/no-await-in-loop -- once, when made
-        await file.writeFile(content);
-      } finally {
-        // eslint-disable-next-line eslint/no-await-in-loop -- as above
-        await file.close();
-      }
-      break;
-    } catch (error) {
-      const code = codeOf(error);
-      // Windows can't make a file while the last one's delete is pending.
-      if (code === "EPERM" && process.platform === "win32" && denied++ < 100) {
-        // eslint-disable-next-line eslint/no-await-in-loop -- until it's gone
-        await sleep(wait);
-        continue;
-      }
-      if (code !== "EEXIST") throw error;
-    }
-    // eslint-disable-next-line eslint/no-await-in-loop -- one look per try
-    if (await takeOver(path)) continue;
-    // eslint-disable-next-line eslint/no-await-in-loop -- until it's free
+    // eslint-disable-next-line eslint/no-await-in-loop -- one try at a time, until it's free
+    const outcome = await tryLock(path, content, denied < 100);
+    if (outcome === "made") break;
+    if (outcome === "taken over") continue;
+    if (outcome === "denied") denied++;
+    // eslint-disable-next-line eslint/no-await-in-loop -- as above
     await sleep(wait);
-    wait = Math.min(wait * 2, MAX_POLL_MS);
+    if (outcome === "held") wait = Math.min(wait * 2, MAX_POLL_MS);
   }
 
   held.set(path, content);

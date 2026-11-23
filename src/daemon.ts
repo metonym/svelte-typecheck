@@ -208,22 +208,26 @@ async function start(socket: string): Promise<Status> {
     env,
     stdio: "ignore",
   }).unref();
-  const until = Date.now() + START_MS;
-  for (;;) {
-    // eslint-disable-next-line eslint/no-await-in-loop -- until it listens
-    const running = await statusOf(socket);
-    if (running) return running;
-    if (Date.now() > until) throw new Error("The daemon didn't start");
-    // eslint-disable-next-line eslint/no-await-in-loop -- as above
-    await pause();
-  }
+  const running = await poll(() => statusOf(socket));
+  if (!running) throw new Error("The daemon didn't start");
+  return running;
 }
 
 /** Waits for a daemon that said it exits to stop answering. */
 async function stopped(socket: string): Promise<void> {
+  await poll(async () => !(await statusOf(socket)));
+}
+
+// Asks `check` until it answers, or as long as a daemon takes to start.
+async function poll<T>(check: () => Promise<T>): Promise<T> {
   const until = Date.now() + START_MS;
-  // eslint-disable-next-line eslint/no-await-in-loop -- until it's gone
-  while ((await statusOf(socket)) && Date.now() < until) await pause();
+  for (;;) {
+    // eslint-disable-next-line eslint/no-await-in-loop -- one look at a time, until it answers
+    const answer = await check();
+    if (answer || Date.now() > until) return answer;
+    // eslint-disable-next-line eslint/no-await-in-loop -- as above
+    await pause();
+  }
 }
 
 /**
