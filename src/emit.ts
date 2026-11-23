@@ -106,8 +106,8 @@ interface GenericParam {
   end: number;
   name: string;
   isConst: boolean;
-  constraint?: string;
-  fallback?: string;
+  constraint?: string | undefined;
+  fallback?: string | undefined;
 }
 
 const GENERICS_HEAD = "function $$generics<";
@@ -135,26 +135,27 @@ function parseGenerics(generics: string): {
     ],
     parsed: false,
   });
-  // eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
-  let declaration: any;
+  let declaration;
   try {
     declaration = parseModule(code, { typescript: true }).body[0];
   } catch {
     return whole();
   }
-  const list = declaration?.typeParameters;
+  const list =
+    declaration?.type === "FunctionDeclaration"
+      ? declaration.typeParameters
+      : undefined;
   // A `>` in the text closes the list early.
   if (list?.end !== GENERICS_HEAD.length + generics.length + 2) return whole();
   const text = (node: { start: number; end: number } | null) =>
     node ? code.slice(node.start, node.end) : undefined;
-  // eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
-  const params = list.params.map((p: any) => ({
+  const params = list.params.map((p) => ({
     start: p.start - GENERICS_HEAD.length,
     end: p.end - GENERICS_HEAD.length,
-    name: typeof p.name === "string" ? p.name : p.name.name,
+    name: p.name,
     isConst: Boolean(p.const),
-    constraint: text(p.constraint),
-    fallback: text(p.default),
+    constraint: text(p.constraint ?? null),
+    fallback: text(p.default ?? null),
   }));
   return { params, parsed: true };
 }
@@ -217,9 +218,9 @@ function typedefTags(block: string, offset: number) {
 const FUNCTION =
   /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|MethodDefinition|PropertyDefinition)$/;
 
-/** The type svelte2tsx infers for a prop from its default. */
-// eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
-function typeOfDefault(init: any, source: string): string {
+// svelte2tsx infers a prop's type from its default, so this infers the
+// same.
+function typeOfDefault(init: Expression, source: string): string {
   if (init.type === "TSAsExpression")
     return source.slice(init.typeAnnotation.start, init.typeAnnotation.end);
   if (init.type === "Literal") {
@@ -236,13 +237,14 @@ function typeOfDefault(init: any, source: string): string {
   return "any";
 }
 
-/** The `$props()` declarator of a statement, if it has one. */
-// eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
-function propsDeclaratorOf(s: any) {
+// Runes mode declares props with `let { … } = $props()`, so that
+// declarator marks them.
+function propsDeclaratorOf(
+  s: Program["body"][number],
+): VariableDeclarator | undefined {
   if (s.type !== "VariableDeclaration") return;
   return s.declarations.find(
-    // eslint-disable-next-line typescript/no-explicit-any -- as above
-    (d: any) =>
+    (d) =>
       d.init?.type === "CallExpression" &&
       d.init.callee.type === "Identifier" &&
       d.init.callee.name === "$props",
@@ -1803,7 +1805,8 @@ export function emit(
             .raw("));");
         } else out.raw(";() => {").copy(s.start, s.end).raw("}");
       } else if (runes && propsDeclaratorOf(s)) {
-        propsRune(s, propsDeclaratorOf(s), gapStart);
+        const declarator = propsDeclaratorOf(s);
+        if (declarator) propsRune(s, declarator, gapStart);
       } else {
         // `createEventDispatcher()` dispatches what `$$Events` declares.
         const call =
