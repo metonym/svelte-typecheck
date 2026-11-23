@@ -38,6 +38,6 @@ export const positionOf = (
 // cache keyed by its version and fingerprint, or a message between its own
 // processes, so the key it's read by already says it has this shape.
 export function ownWrite<T>(value: unknown): T {
-  // eslint-disable-next-line typescript/consistent-type-assertions, no-restricted-syntax -- written by this same version, as its key says
+  // eslint-disable-next-line typescript/consistent-type-assertions -- written by this same version, as its key says
   return value as T;
 }
