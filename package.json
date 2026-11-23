@@ -26,6 +26,6 @@
   },
   "sideEffects": false,
   "devDependencies": {
-    "svelte-ast": "0.13.0"
+    "svelte-ast": "0.14.0"
   }
 }
