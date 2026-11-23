@@ -101,7 +101,8 @@ function diagnosticsOf(
 }
 
 /** Whether a file is a Svelte module, which can use runes. */
-export const isSvelteModule = (path: string) => /\.svelte\.[jt]s$/.test(path);
+export const isSvelteModule = (path: string): boolean =>
+  /\.svelte\.[jt]s$/.test(path);
 
 /**
  * What `compileModule` reports for a `.svelte.js` or `.svelte.ts` module
@@ -544,7 +545,7 @@ interface CompileFilesResult extends CompileResult {
 }
 
 /** What a compile's result is kept by: the component's name and text. */
-export const compileKey = (filename: string, source: string) =>
+export const compileKey = (filename: string, source: string): string =>
   createHash("sha1").update(`${filename}\0${source}`).digest("hex");
 
 /** `compileAll` on files this reads. */

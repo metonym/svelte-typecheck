@@ -20,12 +20,12 @@ export class Output {
     this.source = source;
   }
 
-  raw(text: string) {
+  raw(text: string): this {
     this.code += text;
     return this;
   }
 
-  copy(start: number, end: number) {
+  copy(start: number, end: number): this {
     if (end > start) {
       this.copies.push([this.code.length, start, end - start]);
       this.code += this.source.slice(start, end);
@@ -34,7 +34,7 @@ export class Output {
   }
 
   /** Writes `fn`'s output, mapping what it doesn't copy to `offset`. */
-  from(offset: number, fn: () => void) {
+  from(offset: number, fn: () => void): this {
     const start = this.code.length;
     fn();
     this.spans.push([start, this.code.length, offset]);
@@ -67,7 +67,10 @@ export function createLocator(text: string) {
   for (let i = text.indexOf("\n"); i !== -1; i = text.indexOf("\n", i + 1))
     starts.push(i + 1);
   return {
-    position(offset: number) {
+    position(offset: number): {
+      line: number;
+      column: number;
+    } {
       let lo = 0;
       let hi = starts.length - 1;
       while (lo < hi) {
@@ -77,7 +80,7 @@ export function createLocator(text: string) {
       }
       return { line: lo + 1, column: offset - (starts[lo] ?? 0) + 1 };
     },
-    offset(line: number, column: number) {
+    offset(line: number, column: number): number {
       return (starts[line - 1] ?? text.length) + column - 1;
     },
   };

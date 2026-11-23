@@ -111,7 +111,7 @@ export function configNeedsChdir(dir: string, explicit?: string): boolean {
 }
 
 /** The path with its symlinks resolved, or as given if it doesn't exist. */
-export const realPath = (path: string) => {
+export const realPath = (path: string): string => {
   try {
     return realpathSync(path);
   } catch {

@@ -36,7 +36,7 @@ const held = new Map<string, string>();
 let exitHook = false;
 
 /** The lock for `outDir`: a dot file beside it, which no glob enters. */
-export const lockPathOf = (outDir: string) =>
+export const lockPathOf = (outDir: string): string =>
   join(dirname(outDir), `.${basename(outDir)}.lock`);
 
 /**

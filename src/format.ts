@@ -203,12 +203,21 @@ function humanSummary(
   else write(c.green(message));
 }
 
+/** Prints a run's progress and diagnostics in one output format. */
+interface Writer {
+  start(workspace: string, clearScreen?: boolean): void;
+  diagnostic(d: Diagnostic, workspace: string): void;
+  note(text: string): void;
+  completion(summary: Summary, watching?: boolean): void;
+  failure(error: Error): void;
+}
+
 /** Writes a run as svelte-check would, to `write`. */
 export function writer(
   format: OutputFormat,
   write: (text: string) => void,
   c: Colors,
-) {
+): Writer {
   const machine = format.startsWith("machine");
   const verbose = format.endsWith("verbose");
   const log = (message: string) => write(`${Date.now()} ${message}\n`);

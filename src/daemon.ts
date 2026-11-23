@@ -96,7 +96,7 @@ const ownArguments = (argv: string[]) => {
 };
 
 /** The arguments without the daemon's own flags, as the run takes them. */
-export const runArguments = (argv: string[]) => {
+export const runArguments = (argv: string[]): string[] => {
   const own = ownArguments(argv);
   return [
     ...own.filter((arg) => arg !== "--daemon" && arg !== "--no-daemon"),

@@ -457,6 +457,20 @@ function declaredName(declaration: object): string | undefined {
   return typeof name === "string" ? name : undefined;
 }
 
+/** A component as TypeScript, with what the checks after it need. */
+export interface Emitted {
+  out: Output;
+  isTs: boolean;
+  lang: string;
+  tsInJs: TsInJs[];
+  userSyntax: boolean;
+  reactive: [number, number][];
+  transitions: [number, number][];
+  repeatedKeys: [number, number][];
+  storeDeclarations: StoreDeclaration[];
+  bindingChecks: BindingCheck[];
+}
+
 export function emit(
   source: string,
   {
@@ -465,7 +479,7 @@ export function emit(
     basename = "",
     checkJs = true,
   }: EmitOptions = {},
-) {
+): Emitted {
   type Node = AnyNode;
   const { ast, tsInJs } = parseComponent(source);
   const scopes: Scopes = analyzeScopes(ast);
