@@ -14,6 +14,8 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install what the build bundles
+        run: npx -y bun@1.4.5-canary.20261121.1 install --no-save
       - name: Build with boatwright
         run: npx -y bun@1.4.5-canary.20261121.1 x --bun boatwright@0.2.4
       - name: Point npm at the token
