@@ -6,7 +6,17 @@ import {
   SKIP,
   walk,
 } from "svelte-ast";
-import { analyzeScopes } from "svelte-ast/scope";
+import type {
+  Expression,
+  Identifier,
+  Program,
+  SequenceExpression,
+  SimpleCallExpression,
+  StringLiteral,
+  VariableDeclarator,
+} from "svelte-ast";
+import { analyzeScopes, type Scopes } from "svelte-ast/scope";
+import type { AST } from "svelte-ast/walk";
 
 import {
   isKitErrorFile,
@@ -204,7 +214,6 @@ function typedefTags(block: string, offset: number) {
   return { owned, others };
 }
 
-const TS_WRAPPER = /^TS(As|Satisfies|NonNull)Expression$/;
 const FUNCTION =
   /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|MethodDefinition|PropertyDefinition)$/;
 
@@ -240,8 +249,8 @@ function propsDeclaratorOf(s: any) {
   );
 }
 
-// eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
-type AnyNode = any;
+// A node with offsets: every node svelte-ast gives but a Fragment.
+type AnyNode = Exclude<AST.SvelteNode, AST.Fragment>;
 
 /** TypeScript-only syntax in a JS script, as TypeScript reports it. */
 export interface TsInJs {
@@ -258,7 +267,10 @@ export interface TsInJs {
  * typed. A script that isn't TypeScript either, or markup that doesn't
  * parse, throws the parser's error.
  */
-function parseComponent(source: string): { ast: AnyNode; tsInJs: TsInJs[] } {
+function parseComponent(source: string): {
+  ast: AST.Root;
+  tsInJs: TsInJs[];
+} {
   const parsed = parseComponentSource(source);
   includeLeadingCasts(parsed.ast.fragment, source);
   return parsed;
@@ -278,7 +290,7 @@ const TEMPLATE_EXPRESSIONS = ["expression", "test"];
  * would drop it. Each template expression starts at its cast instead, as
  * svelte2tsx keeps it.
  */
-function includeLeadingCasts(node: AnyNode, source: string): void {
+function includeLeadingCasts(node: unknown, source: string): void {
   if (!node || typeof node !== "object") return;
   if (Array.isArray(node)) {
     for (const child of node) includeLeadingCasts(child, source);
@@ -287,15 +299,12 @@ function includeLeadingCasts(node: AnyNode, source: string): void {
   for (const [key, value] of Object.entries(node)) {
     if (!value || typeof value !== "object" || key === "parent") continue;
     if (TEMPLATE_EXPRESSIONS.includes(key)) {
-      const expression: AnyNode = value;
-      if (
-        typeof expression.start === "number" &&
-        source[expression.start] === "("
-      ) {
+      const start: unknown = Reflect.get(value, "start");
+      if (typeof start === "number" && source[start] === "(") {
         const cast = LEADING_CAST.exec(
-          source.slice(Math.max(0, expression.start - 1000), expression.start),
+          source.slice(Math.max(0, start - 1000), start),
         );
-        if (cast) expression.start -= cast[0].length;
+        if (cast) Reflect.set(value, "start", start - cast[0].length);
       }
       continue;
     }
@@ -304,14 +313,14 @@ function includeLeadingCasts(node: AnyNode, source: string): void {
 }
 
 function parseComponentSource(source: string): {
-  ast: AnyNode;
+  ast: AST.Root;
   tsInJs: TsInJs[];
 } {
   try {
     return { ast: parse(source, { css: false }), tsInJs: [] };
   } catch (error) {
     if (!(error as { start?: unknown }).start) throw error;
-    const ast: AnyNode = parse(source, { css: false, script: false });
+    const ast = parse(source, { css: false, script: false });
     const tsInJs: TsInJs[] = [];
     for (const script of [ast.instance, ast.module]) {
       if (!script) continue;
@@ -377,14 +386,13 @@ const TS_ONLY: Record<string, [code: string, message: string]> = {
  * Where TypeScript reports a JS file's TypeScript syntax: the type, the
  * name, or the node.
  */
-function typescriptOnly(program: AnyNode): TsInJs[] {
+function typescriptOnly(program: AST.SvelteNode): TsInJs[] {
   const found: TsInJs[] = [];
   walk(program, {
-    enter(node: AnyNode) {
+    enter(node) {
       if (
-        (node.type === "ImportDeclaration" ||
-          node.type === "ExportNamedDeclaration") &&
-        (node.importKind === "type" || node.exportKind === "type")
+        (node.type === "ImportDeclaration" && node.importKind === "type") ||
+        (node.type === "ExportNamedDeclaration" && node.exportKind === "type")
       ) {
         const keyword = node.type === "ImportDeclaration" ? "import" : "export";
         found.push({
@@ -397,10 +405,10 @@ function typescriptOnly(program: AnyNode): TsInJs[] {
       const ts = TS_ONLY[node.type];
       if (!ts) return;
       const at =
-        node.id?.start ??
-        node.typeAnnotation?.start ??
-        node.params?.[0]?.start ??
-        node.start;
+        startOf(node, "id") ??
+        startOf(node, "typeAnnotation") ??
+        startOf(node, "params") ??
+        ("start" in node ? node.start : 0);
       found.push({ at, code: ts[0], message: ts[1] });
       // An assertion's expression can hold more; a type can't.
       return node.type === "TSNonNullExpression" ||
@@ -413,6 +421,40 @@ function typescriptOnly(program: AnyNode): TsInJs[] {
   return found;
 }
 
+// TypeScript's own nodes keep their offsets in different fields, so the
+// first one present is read without knowing the node's type.
+function startOf(node: object, key: string): number | undefined {
+  const value: unknown = Reflect.get(node, key);
+  const first: unknown = Array.isArray(value) ? value[0] : value;
+  if (typeof first !== "object" || first === null) return undefined;
+  const start: unknown = Reflect.get(first, "start");
+  return typeof start === "number" ? start : undefined;
+}
+
+// `createEventDispatcher(…)`, which types the events a component sends.
+function isDispatcherCall(
+  init: Expression | null | undefined,
+): init is SimpleCallExpression {
+  return (
+    init?.type === "CallExpression" &&
+    init.callee.type === "Identifier" &&
+    init.callee.name === "createEventDispatcher"
+  );
+}
+
+// An export's name may be a string, as in `export { a as "b c" }`.
+function nameOf(name: Identifier | StringLiteral): string {
+  return name.type === "Identifier" ? name.name : name.value;
+}
+
+// Only some declarations have a name: a function's, a class's, a type's.
+function declaredName(declaration: object): string | undefined {
+  const id: unknown = Reflect.get(declaration, "id");
+  if (typeof id !== "object" || id === null) return undefined;
+  const name: unknown = Reflect.get(id, "name");
+  return typeof name === "string" ? name : undefined;
+}
+
 export function emit(
   source: string,
   {
@@ -422,17 +464,16 @@ export function emit(
     checkJs = true,
   }: EmitOptions = {},
 ) {
-  // eslint-disable-next-line typescript/no-explicit-any -- svelte-ast's AST is untyped here
-  type Node = any;
+  type Node = AnyNode;
   const { ast, tsInJs } = parseComponent(source);
-  const scopes: Node = analyzeScopes(ast);
+  const scopes: Scopes = analyzeScopes(ast);
   const out = new Output(source);
   const instance = ast.instance;
   const module = ast.module;
   /** The component's language, as its scripts say. */
   const lang = [instance, module].some((script) =>
     script?.attributes?.some(
-      (a: Node) => a.name === "lang" && TS_LANG.test(textOf(a)),
+      (a) => a.name === "lang" && TS_LANG.test(textOf(a)),
     ),
   )
     ? "ts"
@@ -457,14 +498,17 @@ export function emit(
   const runes = svelte >= 5 && isRunesMode(source);
   const bindingChecks: BindingCheck[] = [];
 
-  function textOf(attribute: Node) {
+  function textOf(attribute: AST.Attribute): string {
     const value = Array.isArray(attribute.value)
       ? attribute.value[0]
       : attribute.value;
-    return value?.data ?? "";
+    return typeof value === "object" && value.type === "Text" ? value.data : "";
   }
 
-  const idsOf = (pattern: Node, ids: string[] = []): string[] => {
+  const idsOf = (
+    pattern: AST.SvelteNode | null | undefined,
+    ids: string[] = [],
+  ): string[] => {
     if (!pattern) return ids;
     if (pattern.type === "Identifier") ids.push(pattern.name);
     else if (pattern.type === "ObjectPattern")
@@ -482,13 +526,14 @@ export function emit(
    * Copies a statement, pointing an import that leaves the workspace at its
    * target.
    */
-  const copyStatement = (s: Node) => {
-    const spec = s.source?.value;
+  const copyStatement = (s: Program["body"][number]) => {
+    const from = "source" in s ? s.source : null;
+    const spec = from?.value;
     const next = typeof spec === "string" ? rewriteImport?.(spec) : undefined;
-    if (next === undefined) return out.copy(s.start, s.end);
-    out.copy(s.start, s.source.start);
-    out.from(s.source.start, () => out.raw(JSON.stringify(next)));
-    return out.copy(s.source.end, s.end);
+    if (from == null || next === undefined) return out.copy(s.start, s.end);
+    out.copy(s.start, from.start);
+    out.from(from.start, () => out.raw(JSON.stringify(next)));
+    return out.copy(from.end, s.end);
   };
   if (module) {
     let at = module.content.start;
@@ -499,7 +544,7 @@ export function emit(
     }
     out.copy(at, module.content.end).raw("\n");
   }
-  const body: Node[] = instance?.content.body ?? [];
+  const body = instance?.content.body ?? [];
   /**
    * Svelte 5's `await` at the instance script's top level makes `$$render`
    * async.
@@ -508,7 +553,7 @@ export function emit(
   if (svelte >= 5)
     for (const s of body)
       walk(s, {
-        enter(node: Node) {
+        enter(node) {
           if (node.type === "AwaitExpression") topLevelAwait = true;
           return FUNCTION.test(node.type) ? SKIP : undefined;
         },
@@ -553,7 +598,7 @@ export function emit(
   }
   const strictEvents =
     typed.has("$$Events") ||
-    instance?.attributes?.some((a: Node) => a.name === "strictEvents");
+    instance?.attributes?.some((a) => a.name === "strictEvents");
 
   // --- Generics: `generics="…"` in TS, `@template` blocks in JS. TS 7 reads
   // only the JSDoc block right above a function, so merge the tags into one.
@@ -572,14 +617,19 @@ export function emit(
    */
   const typeParamWriters: (() => void)[] = [];
   /** `type T = $$Generic<C>` statements, which become type parameters. */
-  const genericAliases = new Set<Node>();
+  const genericAliases = new Set<Program["body"][number]>();
   if (instance && isTs)
     for (const s of body) {
-      const ref = s.type === "TSTypeAliasDeclaration" ? s.typeAnnotation : null;
-      if (ref?.type !== "TSTypeReference" || ref.typeName?.name !== "$$Generic")
+      if (s.type !== "TSTypeAliasDeclaration") continue;
+      const ref = s.typeAnnotation;
+      if (
+        ref.type !== "TSTypeReference" ||
+        ref.typeName.type !== "Identifier" ||
+        ref.typeName.name !== "$$Generic"
+      )
         continue;
       genericAliases.add(s);
-      const arg = (ref.typeArguments ?? ref.typeParameters)?.params?.[0];
+      const arg = ref.typeArguments?.params[0];
       typeParams.push(
         arg
           ? `${s.id.name} extends ${source.slice(arg.start, arg.end)}`
@@ -605,13 +655,14 @@ export function emit(
   };
   if (instance) {
     const tags: string[] = [];
-    const attr = instance.attributes.find((a: Node) => a.name === "generics");
+    const attr = instance.attributes.find((a) => a.name === "generics");
     const attrText = attr ? textOf(attr) : "";
     const value = Array.isArray(attr?.value) ? attr.value[0] : attr?.value;
     // Mapped only when the value is the source text as written: no
     // entity like `&gt;` decoded.
     const base =
-      value && source.slice(value.start, value.end) === attrText
+      typeof value === "object" &&
+      source.slice(value.start, value.end) === attrText
         ? value.start
         : undefined;
     const parsedGenerics = attr ? parseGenerics(attrText) : undefined;
@@ -695,7 +746,10 @@ export function emit(
         const top =
           scope === scopes.instance && b.kind !== "import"
             ? body.find(
-                (s: Node) => decl && s.start <= decl.start && decl.end <= s.end,
+                (s) =>
+                  decl.type !== "Fragment" &&
+                  s.start <= decl.start &&
+                  decl.end <= s.end,
               )
             : undefined;
         if (top)
@@ -717,22 +771,25 @@ export function emit(
 
   // --- Markup.
   /** A value with no expression in it: `a`, `a="b"`. */
-  const isStatic = (value: Node) =>
+  const isStatic = (value: AST.Attribute["value"]) =>
     value === true ||
-    (Array.isArray(value) ? value : [value]).every(
-      (p: Node) => p.type === "Text",
-    );
-  const attrValue = (value: Node) => {
+    (Array.isArray(value) ? value : [value]).every((p) => p.type === "Text");
+  const attrValue = (value: AST.Attribute["value"]) => {
     if (value === true) return out.raw("true");
     const parts = Array.isArray(value) ? value : [value];
-    if (parts.length === 1 && parts[0].type === "ExpressionTag")
+    const [first] = parts;
+    if (parts.length === 1 && first?.type === "ExpressionTag")
       return out
         .raw("(")
-        .copy(parts[0].expression.start, parts[0].expression.end)
+        .copy(first.expression.start, first.expression.end)
         .raw(")");
     if (isStatic(value))
-      return out.from(parts[0]?.start ?? 0, () =>
-        out.raw(JSON.stringify(parts.map((p: Node) => p.data).join(""))),
+      return out.from(first?.start ?? 0, () =>
+        out.raw(
+          JSON.stringify(
+            parts.map((p) => (p.type === "Text" ? p.data : "")).join(""),
+          ),
+        ),
       );
     out.raw("`");
     for (const p of parts) {
@@ -742,10 +799,11 @@ export function emit(
     }
     return out.raw("`");
   };
-  const key = (attribute: Node, name: string) =>
+  const key = (attribute: { start: number }, name: string) =>
     out.from(attribute.start, () => out.raw(JSON.stringify(name))).raw(":");
-  const nameAt = (attribute: Node) => source.indexOf(":", attribute.start) + 1;
-  const expression = (node: Node) =>
+  const nameAt = (attribute: { start: number }) =>
+    source.indexOf(":", attribute.start) + 1;
+  const expression = (node: { start: number; end: number }) =>
     out.raw("(").copy(node.start, node.end).raw(")");
 
   /**
@@ -753,7 +811,11 @@ export function emit(
    * animation's call. An error about the element points at the `=`, or
    * with no value at the name's last letter, as svelte-check reports it.
    */
-  const directiveCall = (a: Node, tag: string, extra = "") => {
+  const directiveCall = (
+    a: AST.UseDirective | AST.TransitionDirective | AST.AnimateDirective,
+    tag: string,
+    extra = "",
+  ) => {
     const at = nameAt(a);
     out.copy(at, at + a.name.length);
     const equals = a.expression
@@ -767,8 +829,12 @@ export function emit(
   };
 
   /** Writes an element's directives that aren't attributes, after it. */
-  const directives = (node: Node, elementId: string, tag: string) => {
-    for (const a of node.attributes ?? []) {
+  const directives = (
+    node: AST.ElementLike,
+    elementId: string,
+    tag: string,
+  ) => {
+    for (const a of node.attributes) {
       if (a.type === "BindDirective") {
         if (a.name === "this")
           out
@@ -795,10 +861,11 @@ export function emit(
   };
 
   /** `{name}`'s name, which svelte2tsx writes as a shorthand property. */
-  const shorthandOf = (a: Node): Node => {
+  const shorthandOf = (a: AST.Attribute): Identifier | undefined => {
     const value = Array.isArray(a.value) ? a.value[0] : a.value;
     return source[a.start] === "{" &&
-      value?.type === "ExpressionTag" &&
+      typeof value === "object" &&
+      value.type === "ExpressionTag" &&
       value.expression.type === "Identifier"
       ? value.expression
       : undefined;
@@ -861,9 +928,14 @@ export function emit(
    * narrowed to its first value. An `as`, `satisfies` or `!` comes off, as
    * an assignment target can't have one.
    */
-  const widen = (e: Node) => {
+  const widen = (e: Expression) => {
     let target = e;
-    while (TS_WRAPPER.test(target.type)) target = target.expression;
+    while (
+      target.type === "TSAsExpression" ||
+      target.type === "TSSatisfiesExpression" ||
+      target.type === "TSNonNullExpression"
+    )
+      target = target.expression;
     out
       .raw("() => ")
       .copy(target.start, target.end)
@@ -873,21 +945,24 @@ export function emit(
    * `bind:x={get, set}` as svelte2tsx checks it: `set` takes what `get`
    * returns.
    */
-  const isGetSet = (e: Node) =>
+  const isGetSet = (e: Expression): e is SequenceExpression =>
     e.type === "SequenceExpression" && e.expressions.length === 2;
-  const bound = (e: Node) => {
+  const bound = (e: Expression) => {
     if (!isGetSet(e)) return expression(e);
     const [get, set] = e.expressions;
+    if (!get || !set) return expression(e);
     out.raw("$$check.getSet(").copy(get.start, get.end).raw(",");
     return out.copy(set.start, set.end).raw(")");
   };
   /** `{@attach fn}`, which the element's typings take under a symbol key. */
-  const attach = (a: Node) =>
+  const attach = (a: AST.AttachTag) =>
     out
       .raw('[Symbol("@attach")]:')
       .copy(a.expression.start, a.expression.end)
       .raw(",");
-  const attributeKey = (a: Node): string | null => {
+  const attributeKey = (
+    a: AST.ElementLike["attributes"][number],
+  ): string | null => {
     if (a.type === "Attribute") return a.name;
     if (a.type === "OnDirective") return `on:${a.name}`;
     if (a.type === "BindDirective") return `bind:${a.name}`;
@@ -895,13 +970,13 @@ export function emit(
   };
 
   const element = (
-    node: Node,
+    node: AST.ElementLike,
     tag: () => void,
     tagText: string,
     inComponent: boolean,
   ) => {
     const id = `$$_el${uid++}`;
-    const attributes: Node[] = node.attributes ?? [];
+    const { attributes } = node;
     const boundary = node.type === "SvelteBoundary";
     // An error about the whole attributes object points at the tag name's
     // last letter, as svelte2tsx maps it, or after `<svelte:element this>`'s
@@ -909,7 +984,9 @@ export function emit(
     const objectAt =
       node.type === "RegularElement"
         ? node.start + node.name.length
-        : (node.tag?.end ?? node.start + 1);
+        : node.type === "SvelteElement"
+          ? node.tag.end
+          : node.start + 1;
     // A repeated `on:` repeats its key, as svelte2tsx writes it: the last
     // handler is the key's type, and TypeScript reports an error in it at
     // each key. That the key repeats (TS1117) is dropped, as svelte-check
@@ -990,12 +1067,20 @@ export function emit(
   };
 
   /** A component's children: its default slot, named slots and snippets. */
-  const slotOf = (slotted: Node) =>
-    (slotted.attributes ?? []).find(
-      (a: Node) => a.type === "Attribute" && a.name === "slot",
+  const attributesOf = (node: AST.SvelteNode): AST.ElementLike["attributes"] =>
+    "attributes" in node && "fragment" in node ? node.attributes : [];
+  const slotOf = (slotted: AST.SvelteNode) =>
+    attributesOf(slotted).find(
+      (a): a is AST.Attribute => a.type === "Attribute" && a.name === "slot",
     );
-  const lets = (node: Node) =>
-    (node.attributes ?? []).filter((a: Node) => a.type === "LetDirective");
+  const slotName = (slotted: AST.SvelteNode) => {
+    const slot = slotOf(slotted);
+    return slot ? textOf(slot) : "";
+  };
+  const lets = (node: AST.SvelteNode) =>
+    attributesOf(node).filter(
+      (a): a is AST.LetDirective => a.type === "LetDirective",
+    );
   /**
    * `let:` props from a slot. A slot the component doesn't have is reported
    * where svelte-check reports it: after the last `let:` (its last letter
@@ -1005,15 +1090,15 @@ export function emit(
    * comes before it in the output.
    */
   const destructureLets = (
-    letDirectives: Node[],
+    letDirectives: AST.LetDirective[],
     from: string,
     slotted?: Node,
   ) => {
-    const slotEnd = slotted ? slotOf(slotted).end - 1 : Infinity;
+    const slotEnd = slotted ? (slotOf(slotted)?.end ?? Infinity) - 1 : Infinity;
     if (letDirectives.length === 0) {
       if (!slotted) return;
-      const binds = (slotted.attributes ?? []).some(
-        (a: Node) => a.type === "BindDirective",
+      const binds = attributesOf(slotted).some(
+        (a) => a.type === "BindDirective",
       );
       out.from(binds ? slotEnd : slotted.start, () => out.raw(from)).raw(";");
       return;
@@ -1027,16 +1112,20 @@ export function emit(
       out.raw(",");
     }
     out.raw("} = ");
-    const last = letDirectives.at(-1).end;
+    const last = letDirectives.at(-1)?.end ?? 0;
     const after = WHITESPACE.test(source[last] ?? "") ? last : last - 1;
     out.from(Math.min(after, slotEnd), () => out.raw(from));
     out.raw(";");
   };
 
-  const component = (node: Node, ctor: () => void, inComponent = false) => {
+  const component = (
+    node: AST.Component | AST.SvelteComponent | AST.SvelteSelf,
+    ctor: () => void,
+    inComponent = false,
+  ) => {
     const id = `$$_c${uid++}`;
-    const attributes: Node[] = node.attributes ?? [];
-    const children: Node[] = node.fragment?.nodes ?? [];
+    const { attributes } = node;
+    const children = node.fragment.nodes;
     const snippets = children.filter((c) => c.type === "SnippetBlock");
     const named = children.filter(
       (c) => c.type !== "SnippetBlock" && slotOf(c),
@@ -1130,7 +1219,7 @@ export function emit(
       out.raw("{");
       destructureLets(
         lets(c),
-        `${id}.$$slot_def[${JSON.stringify(textOf(slotOf(c)))}]`,
+        `${id}.$$slot_def[${JSON.stringify(slotName(c))}]`,
         c,
       );
       if (c.type === "SvelteFragment") fragment(c.fragment);
@@ -1141,6 +1230,7 @@ export function emit(
   };
 
   const child = (node: Node, inComponent = false) => {
+    // eslint-disable-next-line typescript/switch-exhaustiveness-check -- the default walks any other node's fragment
     switch (node.type) {
       case "Text":
       case "Comment":
@@ -1209,8 +1299,9 @@ export function emit(
       case "SvelteSelf":
         return component(node, () => out.raw("$$check.any(0)"));
       case "SlotElement": {
-        const nameAttr = (node.attributes ?? []).find(
-          (a: Node) => a.type === "Attribute" && a.name === "name",
+        const nameAttr = node.attributes.find(
+          (a): a is AST.Attribute =>
+            a.type === "Attribute" && a.name === "name",
         );
         slots.set(
           nameAttr ? textOf(nameAttr) : "default",
@@ -1221,8 +1312,10 @@ export function emit(
           // A slot `$$Slots` doesn't declare: an error at its name.
           const name = JSON.stringify(nameAttr ? textOf(nameAttr) : "default");
           out.raw("$$slot(");
-          if (nameAttr?.value?.[0])
-            out.from(nameAttr.value[0].start, () => out.raw(name));
+          const first = Array.isArray(nameAttr?.value)
+            ? nameAttr.value[0]
+            : undefined;
+          if (first) out.from(first.start, () => out.raw(name));
           else out.raw(name);
           out.raw(", {");
         } else out.raw("({");
@@ -1284,18 +1377,21 @@ export function emit(
         expression(node.expression).raw(";");
         return fragment(node.fragment);
       default:
-        if (node.fragment) fragment(node.fragment);
+        if ("fragment" in node) fragment(node.fragment);
     }
   };
 
   /** Root snippets that read no instance binding, nor such a snippet. */
-  function hoistable(snippets: Node[]): Set<Node> {
+  function hoistable(snippets: AST.SnippetBlock[]): Set<AST.SnippetBlock> {
     const names = new Set(snippets.map((s) => s.expression.name));
-    const reads = new Map<Node, { instance: boolean; snippets: Set<string> }>();
+    const reads = new Map<
+      AST.SnippetBlock,
+      { instance: boolean; snippets: Set<string> }
+    >();
     for (const s of snippets) {
       const read = { instance: false, snippets: new Set<string>() };
       walk(s, {
-        enter(node: Node, parent: Node) {
+        enter(node, parent) {
           if (node === s.expression) return;
           // `<Foo>` reads `Foo`, which the instance script may import.
           let name: string | undefined;
@@ -1330,14 +1426,14 @@ export function emit(
   }
 
   /** A snippet's parameters, as written. */
-  function parameters(node: Node) {
-    for (const [i, p] of (node.parameters as Node[]).entries()) {
+  function parameters(node: AST.SnippetBlock) {
+    for (const [i, p] of node.parameters.entries()) {
       if (i) out.raw(",");
       out.copy(p.start, p.end);
     }
   }
   /** A snippet passed as a prop: a component's, or `<svelte:boundary>`'s. */
-  function snippetProp(node: Node) {
+  function snippetProp(node: AST.SnippetBlock) {
     out.from(node.expression.start, () => out.raw(keyOf(node.expression.name)));
     out.raw(":(");
     parameters(node);
@@ -1349,7 +1445,7 @@ export function emit(
    * A snippet as svelte2tsx declares it: an arrow that returns a snippet's
    * result.
    */
-  function snippet(node: Node) {
+  function snippet(node: AST.SnippetBlock) {
     out.raw("const ").copy(node.expression.start, node.expression.end);
     if (isTs) {
       out.raw(" = ");
@@ -1373,14 +1469,17 @@ export function emit(
    * Snippets first, as svelte2tsx hoists them, then `{@const}` tags: both
    * are visible to the whole fragment. The root's snippets start `$$render`.
    */
-  function fragment(f: Node, hoist = f !== ast.fragment) {
+  function fragment(
+    f: AST.Fragment | null | undefined,
+    hoist = f !== ast.fragment,
+  ) {
     if (!f) return;
     if (hoist)
       for (const n of f.nodes) if (n.type === "SnippetBlock") snippet(n);
     consts(f.nodes);
     for (const n of f.nodes) if (n.type !== "SnippetBlock") child(n);
   }
-  function consts(nodes: Node[]) {
+  function consts(nodes: AST.Fragment["nodes"]) {
     for (const n of nodes)
       if (n.type === "ConstTag") {
         const d = n.declaration;
@@ -1393,10 +1492,12 @@ export function emit(
 
   // With a module script, a root snippet that reads nothing of the
   // instance's goes to the top level, where the module script can export it.
-  const rootSnippets: Node[] = ast.fragment.nodes.filter(
-    (n: Node) => n.type === "SnippetBlock",
+  const rootSnippets = ast.fragment.nodes.filter(
+    (n): n is AST.SnippetBlock => n.type === "SnippetBlock",
   );
-  const moduleSnippets = module ? hoistable(rootSnippets) : new Set<Node>();
+  const moduleSnippets = module
+    ? hoistable(rootSnippets)
+    : new Set<AST.SnippetBlock>();
   for (const n of rootSnippets) if (moduleSnippets.has(n)) snippet(n);
   out.raw(templateDoc);
   const async = topLevelAwait ? "async " : "";
@@ -1430,7 +1531,7 @@ export function emit(
     local: string;
     optional: boolean;
     /** Its type annotation, for checking `$$Props`. */
-    type?: string;
+    type?: string | undefined;
   }[] = [];
   /** `[exported, local]` names of what the instance script exports. */
   const exportsOf: [string, string][] = [];
@@ -1442,7 +1543,11 @@ export function emit(
   const kitRoute = isKitRouteFile(basename);
   const kitLayout = kitRoute && basename.includes("layout");
   const kitError = isKitErrorFile(basename);
-  const propsRune = (s: Node, d: Node, gapStart: number) => {
+  const propsRune = (
+    s: Program["body"][number],
+    d: VariableDeclarator,
+    gapStart: number,
+  ) => {
     const pattern = d.id;
     const locals: string[] = [];
     const inferred: string[] = [];
@@ -1450,10 +1555,13 @@ export function emit(
     for (const p of pattern.type === "ObjectPattern"
       ? pattern.properties
       : []) {
+      if (p.type === "RestElement") {
+        withUnknown = true;
+        continue;
+      }
       const value =
-        p.value?.type === "AssignmentPattern" ? p.value.left : p.value;
+        p.value.type === "AssignmentPattern" ? p.value.left : p.value;
       if (
-        p.type === "RestElement" ||
         p.computed ||
         p.key.type !== "Identifier" ||
         value.type !== "Identifier"
@@ -1466,11 +1574,14 @@ export function emit(
         p.value.type === "AssignmentPattern" ? p.value.right : undefined;
       const call = init?.type === "TSAsExpression" ? init.expression : init;
       const bindable =
-        call?.type === "CallExpression" && call.callee.name === "$bindable";
+        call?.type === "CallExpression" &&
+        call.callee.type === "Identifier" &&
+        call.callee.name === "$bindable";
       if (bindable) {
         bindings.push(name);
         locals.push(value.name);
-        init = call.arguments[0];
+        const [first] = call.arguments;
+        init = first?.type === "SpreadElement" ? undefined : first;
       }
       if (kitRoute || kitError) {
         // svelte2tsx types only SvelteKit's props there, and drops the rest.
@@ -1490,7 +1601,10 @@ export function emit(
     // An identifier or `{}` names a type it never declares: any props.
     const declared =
       inferred.length > 0 || (withUnknown && pattern.type === "ObjectPattern");
-    const annotation = pattern.typeAnnotation?.typeAnnotation;
+    const annotation =
+      "typeAnnotation" in pattern
+        ? pattern.typeAnnotation?.typeAnnotation
+        : undefined;
     if (isTs && annotation) {
       if (annotation.type === "TSTypeReference") {
         runesProps = `{} as any as ${source.slice(annotation.start, annotation.end)}`;
@@ -1567,7 +1681,7 @@ export function emit(
   // svelte2tsx widens a prop to `any` where a parent could pass what its
   // default doesn't allow: with no default, a type, or a `true`/`false`
   // default, which TypeScript narrows.
-  const widensProp = (decl: Node, gapStart: number) =>
+  const widensProp = (decl: VariableDeclarator, gapStart: number) =>
     decl.id.type === "Identifier" &&
     (!decl.init ||
       decl.id.typeAnnotation ||
@@ -1579,10 +1693,10 @@ export function emit(
   const exportedLets = new Set<string>(
     runes
       ? []
-      : body.flatMap((s: Node) =>
+      : body.flatMap((s) =>
           s.type === "ExportNamedDeclaration" && !s.declaration
             ? s.specifiers
-                .map((spec: Node) => spec.local.name)
+                .map((spec) => nameOf(spec.local))
                 .filter(
                   (name: string) => scopes.instance.get(name)?.kind === "let",
                 )
@@ -1648,9 +1762,9 @@ export function emit(
               }
             }
           else
-            for (const name of d.declarations
-              ? d.declarations.flatMap((x: Node) => idsOf(x.id))
-              : [d.id?.name])
+            for (const name of d.type === "VariableDeclaration"
+              ? d.declarations.flatMap((x) => idsOf(x.id))
+              : [declaredName(d)])
               if (name) {
                 exportsOf.push([name, name]);
                 // A parent can pass an exported `const` or function too.
@@ -1658,14 +1772,16 @@ export function emit(
               }
         } else
           for (const spec of s.specifiers) {
-            const binding = scopes.instance.get(spec.local.name);
-            if (runes) exportsOf.push([spec.exported.name, spec.local.name]);
-            else if (binding?.kind === "let" || binding?.kind === "prop")
+            const local = nameOf(spec.local);
+            const exported = nameOf(spec.exported);
+            const binding = scopes.instance.get(local);
+            if (runes) exportsOf.push([exported, local]);
+            else if (binding?.kind === "let")
               props.push({
-                name: spec.exported.name,
-                local: spec.local.name,
+                name: exported,
+                local,
                 optional: true,
-                type: annotationOf(spec.local.name),
+                type: annotationOf(local),
               });
           }
       } else if (s.type === "LabeledStatement" && s.label.name === "$") {
@@ -1693,16 +1809,10 @@ export function emit(
         const call =
           typed.has("$$Events") && s.type === "VariableDeclaration"
             ? s.declarations
-                .map((d: Node) => d.init)
-                .find(
-                  (init: Node) =>
-                    init?.type === "CallExpression" &&
-                    init.callee?.name === "createEventDispatcher" &&
-                    !init.typeArguments &&
-                    !init.typeParameters,
-                )
+                .map((d) => d.init)
+                .find((init) => isDispatcherCall(init) && !init.typeArguments)
             : undefined;
-        if (call)
+        if (isDispatcherCall(call))
           out
             .copy(s.start, call.callee.end)
             .raw("<$$check.Details<$$Events>>")
@@ -1711,7 +1821,11 @@ export function emit(
         // A `let` exported by name is widened as an `export let` is.
         if (s.type === "VariableDeclaration" && s.kind === "let")
           for (const decl of s.declarations)
-            if (exportedLets.has(decl.id.name) && widensProp(decl, gapStart))
+            if (
+              decl.id.type === "Identifier" &&
+              exportedLets.has(decl.id.name) &&
+              widensProp(decl, gapStart)
+            )
               out.raw(
                 `;${decl.id.name} = $$check.any(${decl.init ? decl.id.name : 0});`,
               );
@@ -1727,15 +1841,18 @@ export function emit(
 
   // --- What the component exposes. With `accessors`, props are exports too.
   const accessors = ast.options?.attributes?.some(
-    (a: Node) => a.name === "accessors" && a.value !== false,
+    (a) => a.name === "accessors",
   );
   /** Whether a value reads a name the markup declares (`{#each}`, `let:`). */
-  const markupScoped = (value: Node) => {
+  const markupScoped = (
+    value:
+      AST.Attribute["value"] | Pick<AST.ExpressionTag, "type" | "expression">,
+  ) => {
     let scoped = false;
     for (const part of Array.isArray(value) ? value : [value])
-      if (part?.type === "ExpressionTag")
+      if (typeof part === "object" && part.type === "ExpressionTag")
         walk(part.expression, {
-          enter(node: Node, parent: Node) {
+          enter(node, parent) {
             if (node.type !== "Identifier" || !isReference(node, parent))
               return;
             const b = scopes.bindingOf(node);
@@ -1746,17 +1863,22 @@ export function emit(
     return scoped;
   };
   /** An `{#each}` item's type, as svelte2tsx gives a slot prop that is one. */
-  const eachItemOf = (value: Node): string | undefined => {
+  const eachItemOf = (value: AST.Attribute["value"]): string | undefined => {
     const parts = Array.isArray(value) ? value : [value];
     const only = parts.length === 1 ? parts[0] : undefined;
-    if (only?.type !== "ExpressionTag" || only.expression.type !== "Identifier")
+    if (
+      typeof only !== "object" ||
+      only.type !== "ExpressionTag" ||
+      only.expression.type !== "Identifier"
+    )
       return;
     const b = scopes.bindingOf(only.expression);
     if (b?.kind === "each-index") return "0";
     const block = b?.declaration;
     if (
       b?.kind !== "each" ||
-      block?.context?.type !== "Identifier" ||
+      block?.type !== "EachBlock" ||
+      block.context?.type !== "Identifier" ||
       markupScoped({ type: "ExpressionTag", expression: block.expression })
     )
       return;
@@ -1833,15 +1955,9 @@ export function emit(
   }
   // `createEventDispatcher<Events>()` types the events it dispatches.
   const dispatcher = body
-    .flatMap((s: Node) =>
-      s.type === "VariableDeclaration" ? s.declarations : [],
-    )
-    .map((d: Node) => d.init)
-    .find(
-      (init: Node) =>
-        init?.type === "CallExpression" &&
-        init.callee?.name === "createEventDispatcher",
-    );
+    .flatMap((s) => (s.type === "VariableDeclaration" ? s.declarations : []))
+    .map((d) => d.init)
+    .find(isDispatcherCall);
   const typings = dispatcher
     ? source
         .slice(dispatcher.callee.end, dispatcher.end)
@@ -1885,7 +2001,8 @@ export function emit(
     return { props: propsType, events, slots: slotTypes };
   };
   if (isTs && typeParams.length > 0 && svelte >= 4) {
-    // A generic component's type takes the parameters a use infers.
+    // A generic component's type takes the parameters, so a use infers
+    // them.
     const names = typeParamNames;
     const args = `<${names.join(", ")}>`;
     const rendered = topLevelAwait
@@ -1900,7 +2017,8 @@ export function emit(
         `const $$Component: $$Generic = null as any;\ntype $$Component${generics} = InstanceType<typeof $$Component${args}>;\n`,
     );
   } else if (!isTs && jsGenerics.params.length > 0 && svelte >= 4) {
-    // The TS form above, as JSDoc, with each part read from `$$render<T>`.
+    // The TS form above, as JSDoc, since a JS component has no type
+    // syntax; each part is read from `$$render<T>`.
     const { names } = jsGenerics;
     const params = `<${jsGenerics.params.join(", ")}>`;
     const args = `<${names.join(", ")}>`;
@@ -1931,7 +2049,8 @@ export function emit(
     const types = legacyTypes(rendered);
     const exported = `${rendered}["exports"]`;
     // Svelte 3 types a component as a `SvelteComponentTyped` class; 4 and
-    // 5 as one that's also callable, which takes slot content as `children`.
+    // 5 as one that's also callable, which takes slot content as
+    // `children`, so the type follows the Svelte the project has.
     const type =
       svelte < 4
         ? `new (options: import("svelte").ComponentConstructorOptions<${types.props}>) => import("svelte").SvelteComponentTyped<${types.props}, ${types.events}, ${types.slots}> & ${exported}`
