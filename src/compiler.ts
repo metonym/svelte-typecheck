@@ -628,8 +628,8 @@ const EXPORTED_TYPE = (name: string) =>
  * What svelte-check does with the compiler's diagnostics. Without
  * preprocessors, a `lang` it can't compile (`lang="scss"`, a non-TS
  * script) makes a parse error and that section's warnings false
- * positives; a parse error in a script or style gets a hint about
- * preprocessors.
+ * positives; a parse error in a script or style gets a hint
+ * about preprocessors.
  */
 function asSvelteCheck(
   diagnostics: CompilerDiagnostic[],

@@ -91,14 +91,14 @@ const JS_FILE = /\.[cm]?jsx?$/;
 const SYNTAX_CODE = /^TS[18]\d{3}$/;
 const STOPPED = /Stopped before type checking/;
 /**
- * A deprecated option's error, and the `ignoreDeprecations` that silences
- * it.
+ * A deprecated option's error, and the `ignoreDeprecations` that
+ * silences it.
  */
 const IGNORE_DEPRECATIONS =
   /is deprecated .*"ignoreDeprecations": "(\d+\.\d+)"/;
 /**
- * tsgo's hint for a removed `baseUrl`: its folder, relative to our
- * tsconfig.
+ * tsgo's hint for a removed `baseUrl`: its folder, relative to
+ * our tsconfig.
  */
 const BASE_URL_HINT = /"paths": \{"\*": \["(.*?)(\/\*)"\]\}/;
 /** The option an option's error names: `baseUrl`, `target=ES5`. */
@@ -128,14 +128,14 @@ const escapeRegExp = (text: string) =>
 /** A type error, which a checker reports only once the program parses. */
 const TYPE_CODE = /^TS[2-7]\d{3}$/;
 /**
- * What an error's range covers past its start: an identifier, number or
- * string.
+ * What an error's range covers past its start: an identifier, number
+ * or string.
  */
 const TOKEN = /^(?:[\w$]+|"(?:[^"\\\n]|\\.)*"|'(?:[^'\\\n]|\\.)*'|`[^`]*`)/;
 
 /**
- * "No overload matches this call", or a wrong argument: to
- * `$$check.store`.
+ * "No overload matches this call", or a wrong argument:
+ * to `$$check.store`.
  */
 const STORE_ERROR = /^TS(2769|2345)$/;
 /** Unused label, and an unused comma operand. */
@@ -241,8 +241,8 @@ function svelteCheckOptions(options: Project["options"]) {
     ...(target === "es3" || target === "es5" ? { target: "es2015" } : {}),
     ...(!module || OLD_MODULES.has(module) ? { module: "esnext" } : {}),
     ...(resolution === "classic" ? { moduleResolution: "node10" } : {}),
-    // TypeScript 5 resolves `esnext` with `classic`, which can't find a
-    // package.
+    // TypeScript 5 resolves `esnext` with `classic`, which can't find
+    // a package.
     ...(!resolution && !module?.startsWith("node")
       ? { moduleResolution: "bundler" }
       : {}),
@@ -259,14 +259,14 @@ const OLD_MODULES = new Set([
 ]);
 
 /**
- * Thrown when generated code doesn't parse: an emitter bug, not a type
- * error.
+ * Thrown when generated code doesn't parse: an emitter bug, not a
+ * type error.
  */
 export class EmitError extends Error {}
 
 /**
- * A Windows shell argument, quoted when it has a space or a special
- * character.
+ * A Windows shell argument, quoted when it has a space or a
+ * special character.
  */
 const SHELL_SPECIAL = /[\s"&|<>^()%!]/;
 const quote = (arg: string) =>
@@ -361,8 +361,8 @@ const JS_EXTENSION = /\.([cm]?)js(x?)$/;
  * Files in TypeScript's program order: roots as it lists a folder (files
  * before subfolders, by name), each after the files it imports: its static
  * imports, then its `import()`s and import types, as TypeScript collects
- * them. Roots can be added later, after those visited, as more files turn
- * up.
+ * them. Roots can be added later, after those visited, as more files
+ * turn up.
  */
 function programOrder(
   specifiersOf: (path: string) => string[],
@@ -458,8 +458,8 @@ function importResolver(
     return { key, star, targets };
   });
   /**
-   * The targets of each `paths` key a specifier matches, or `undefined` for
-   * none.
+   * The targets of each `paths` key a specifier matches, or `undefined`
+   * for none.
    */
   const pathTargets = (specifier: string): string[] | undefined => {
     let matched: string[] | undefined;
@@ -528,8 +528,8 @@ function selfResolver(
 }
 
 /**
- * What a `paths` or `exports` key's `*` stands for in a specifier it
- * matches.
+ * What a `paths` or `exports` key's `*` stands for in a specifier
+ * it matches.
  */
 function starOf(key: string, specifier: string): string | undefined {
   const star = key.indexOf("*");
@@ -566,8 +566,8 @@ function installedPackageDir(from: string, name: string): string | undefined {
 
 /**
  * The file a package's `exports`, in `paths`' shape, give a specifier, as
- * TypeScript tries them: its own key, then the longest pattern's first
- * target.
+ * TypeScript tries them: its own key, then the longest pattern's
+ * first target.
  */
 function exportOf(
   exports: Record<string, string[]>,
@@ -941,8 +941,8 @@ async function typecheckIn(
         })
       : undefined;
   compilingModules?.catch(() => {});
-  // When it finished, for the run's timings, as this thread may be busy
-  // then.
+  // When it finished, for the run's timings, as this thread may be
+  // busy then.
   const compiledOffThreadAt = compilingOffThread?.then(
     () => performance.now(),
     () => undefined,
@@ -966,8 +966,8 @@ async function typecheckIn(
       /** A SvelteKit file's typed copy, whose syntax errors are the user's. */
       kit?: boolean;
       /**
-       * A component whose `generics` don't parse: its syntax errors are the
-       * user's.
+       * A component whose `generics` don't parse: its syntax errors are
+       * the user's.
        */
       userSyntax?: boolean;
     }
@@ -1247,8 +1247,8 @@ async function typecheckIn(
       const genFrom = join(genDir, relative(root, dirname(path)));
       const name = path.slice(path.lastIndexOf(sep) + 1, -".svelte".length);
       // A component's own `X.svelte.d.ts` is what an import of it finds, as
-      // TypeScript resolves it for svelte-check; the generated code types the
-      // rest.
+      // TypeScript resolves it for svelte-check; the generated code types
+      // the rest.
       const typed = declarations && !existsSync(`${path}.d.ts`);
       const key = hash(`${path}\0${typed}\0${texts[i] ?? ""}`);
       const cached = emitCache.entries[key];
@@ -1462,8 +1462,8 @@ async function typecheckIn(
       for (const file of glob(dir, ["**/*.{ts,js}"]))
         write(mirror(join(dir, file)), readFileSync(join(dir, file), "utf-8"));
     }
-    // An alias (`$lib/*`) finds a component's generated code before its
-    // source.
+    // An alias (`$lib/*`) finds a component's generated code before
+    // its source.
     const paths = Object.fromEntries(
       Object.entries(project.paths).map(([key, targets]) => [
         key,

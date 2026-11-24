@@ -20,8 +20,8 @@ const STRING = /"(?:[^"\\]|\\.)*"/g;
 const PLACEHOLDER = /"\0(\d+)"/g;
 const WILDCARD = /[*?{]/;
 /**
- * A dot in the last segment, whichever separator: `D:\\a\\.tmp\\b` has
- * none.
+ * A dot in the last segment, whichever separator: `D:\\a\\.tmp\\b`
+ * has none.
  */
 const HAS_EXTENSION = /\.[^/\\]+$/;
 const NODE_MODULES_JS = /\/node_modules\/.+\.[cm]?js$/;
@@ -32,8 +32,8 @@ const DEFAULT_EXCLUDE = ["node_modules", "bower_components", "jspm_packages"];
  */
 const CONFIG_DIR = /^\$\{configDir\}/i;
 /**
- * Path options to write expanded where the generated tsconfig extends the
- * project's.
+ * Path options to write expanded where the generated tsconfig extends
+ * the project's.
  */
 const CONFIG_DIR_OPTIONS = ["baseUrl", "rootDir", "typeRoots"] as const;
 
@@ -98,8 +98,8 @@ interface Inputs {
   outDir?: string;
   declarationDir?: string;
   /**
-   * The options in `CONFIG_DIR_OPTIONS` set with `${configDir}`, as absolute
-   * paths.
+   * The options in `CONFIG_DIR_OPTIONS` set with `${configDir}`, as
+   * absolute paths.
    */
   configDirOptions?: ConfigDirOptions;
 }
@@ -271,8 +271,8 @@ export interface Project {
   /** The components to check, as absolute paths. */
   components: string[];
   /**
-   * The tsconfig's `files`, `include` and `exclude`, as absolute paths and
-   * patterns.
+   * The tsconfig's `files`, `include` and `exclude`, as absolute paths
+   * and patterns.
    */
   files: string[];
   include: string[];
@@ -329,8 +329,8 @@ interface ProjectOptions {
   /** With no tsconfig: folders and files to skip, relative to the workspace. */
   ignore?: string[] | undefined;
   /**
-   * Globs of components relative to the workspace, instead of the
-   * tsconfig's.
+   * Globs of components relative to the workspace, instead of
+   * the tsconfig's.
    */
   components?: string[] | undefined;
 }
@@ -621,8 +621,8 @@ export function relativeTo(from: string, path: string): string {
 
 /**
  * svelte-check's `--ignore`: a path prefix relative to the workspace, or
- * `**` at the start (anywhere in the path) or end (a prefix); no other
- * `*`.
+ * `**` at the start (anywhere in the path) or end (a prefix); no
+ * other `*`.
  */
 function ignoreMatcher(patterns: string[]): (path: string) => boolean {
   const tests = patterns.map((raw) => {

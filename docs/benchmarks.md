@@ -22,8 +22,8 @@ where the type tests went from 6 to 30 s to 1 to 3 s.
 Those are cold runs.
 After the first, a run regenerates and recompiles only the components
 that changed, the checker reuses its build cache,
-and with nothing changed, the last result comes back without checking at
-all.
+and with nothing changed, the last result comes back without checking
+at all.
 On carbon-components-svelte, with svelte-check's runs all cold:
 
 | Run                                  | `tsc`  | tsgo   | tsrs   | `bun check` |
@@ -66,8 +66,8 @@ At 2,000 components:
 | chain  | fails: "Maximum call stack size exceeded" | 6.4 s                 | 3.1 s                | 1.1 s | 1.1 s |
 
 At 8,000 components, where svelte-check runs out of Node's default heap
-(2.35 GB here) after about 21 s, and finishes with
-`--max-old-space-size=8192`:
+(2.35 GB here) after about 21 s, and finishes
+with `--max-old-space-size=8192`:
 
 | Shape  | svelte-check, 8 GB heap | svelte-check `--tsgo` | `tsc` (TypeScript 6) | tsgo  | tsrs  |
 | :----- | :---------------------- | :-------------------- | :------------------- | :---- | :---- |

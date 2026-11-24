@@ -137,8 +137,8 @@ async function fromDir(dir: string): Promise<RawConfig | undefined> {
     if (result && result !== "error") return result;
     const svelte = firstIn(at, SVELTE_CONFIGS);
     if (svelte) return fromSvelteConfig(svelte);
-    // A vite.config that fails, with no svelte.config beside it, ends the
-    // search.
+    // A vite.config that fails, with no svelte.config beside it, ends
+    // the search.
     if (result === "error" || dirname(at) === at) return;
   }
 }
@@ -213,8 +213,8 @@ async function fromVite(
 }
 
 /**
- * The project's Vite, by its package's ESM entry; never a dependency of
- * ours.
+ * The project's Vite, by its package's ESM entry; never a dependency
+ * of ours.
  */
 async function importVite(root: string): Promise<Vite | undefined> {
   try {

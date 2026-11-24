@@ -33,8 +33,8 @@ import { field } from "./unknown.ts";
  * does: the instance script becomes a `$$render` function, the markup an
  * `async () => {}` inside it, and the component the default export, typed
  * from what `$$render` returns. The `$$check` helpers it calls are
- * declared in `shims.d.ts`, and `svelteHTML` in svelte's
- * `svelte-html.d.ts`.
+ * declared in `shims.d.ts`, and `svelteHTML` in
+ * svelte's `svelte-html.d.ts`.
  */
 const TS_LANG = /^(ts|typescript)$/;
 const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
@@ -68,8 +68,8 @@ const keyOf = (name: string) =>
   IDENTIFIER.test(name) ? name : JSON.stringify(name);
 
 /**
- * A generated `$$bindings` check for a component's `bind:`, and the
- * directive.
+ * A generated `$$bindings` check for a component's `bind:`, and
+ * the directive.
  */
 interface BindingCheck {
   /** The check, as generated offsets. */
@@ -162,8 +162,8 @@ function parseGenerics(generics: string): {
 }
 
 /**
- * `generics="T extends A = B, U"` as JSDoc: `@template {A} [T=B]`,
- * `@template U`.
+ * `generics="T extends A = B, U"` as JSDoc:
+ * `@template {A} [T=B]`, `@template U`.
  */
 function jsdocTemplates(params: GenericParam[]) {
   return params.map(({ name, isConst, constraint, fallback }) => {
@@ -219,8 +219,8 @@ function typedefTags(block: string, offset: number) {
 const FUNCTION =
   /^(FunctionDeclaration|FunctionExpression|ArrowFunctionExpression|MethodDefinition|PropertyDefinition)$/;
 
-// svelte2tsx infers a prop's type from its default, so this infers the
-// same.
+// svelte2tsx infers a prop's type from its default, so this infers
+// the same.
 function typeOfDefault(init: Expression, source: string): string {
   if (init.type === "TSAsExpression")
     return source.slice(init.typeAnnotation.start, init.typeAnnotation.end);
@@ -540,8 +540,8 @@ export function emit(
 
   // --- Module script and the instance script's imports, at the top level.
   /**
-   * Copies a statement, pointing an import that leaves the workspace at its
-   * target.
+   * Copies a statement, pointing an import that leaves the workspace at
+   * its target.
    */
   const copyStatement = (s: Program["body"][number]) => {
     const from = "source" in s ? s.source : null;
@@ -563,8 +563,8 @@ export function emit(
   }
   const body = instance?.content.body ?? [];
   /**
-   * Svelte 5's `await` at the instance script's top level makes `$$render`
-   * async.
+   * Svelte 5's `await` at the instance script's top level makes
+   * `$$render` async.
    */
   let topLevelAwait = false;
   if (svelte >= 5)
@@ -959,8 +959,8 @@ export function emit(
       .raw(" = $$check.any(null);");
   };
   /**
-   * `bind:x={get, set}` as svelte2tsx checks it: `set` takes what `get`
-   * returns.
+   * `bind:x={get, set}` as svelte2tsx checks it: `set` takes what
+   * `get` returns.
    */
   const isGetSet = (e: Expression): e is SequenceExpression =>
     e.type === "SequenceExpression" && e.expressions.length === 2;
@@ -996,8 +996,8 @@ export function emit(
     const { attributes } = node;
     const boundary = node.type === "SvelteBoundary";
     // An error about the whole attributes object points at the tag name's
-    // last letter, as svelte2tsx maps it, or after `<svelte:element this>`'s
-    // value.
+    // last letter, as svelte2tsx maps it, or after
+    // `<svelte:element this>`'s value.
     const objectAt =
       node.type === "RegularElement"
         ? node.start + node.name.length
@@ -1162,8 +1162,8 @@ export function emit(
     ctor();
     out.raw("); ");
     // The instance is named only for what reads it below: `bind:this`, a
-    // Svelte 5 `bind:`'s check, an `on:` handler, and slots' `let:` and
-    // names.
+    // Svelte 5 `bind:`'s check, an `on:` handler, and slots' `let:`
+    // and names.
     const namesInstance =
       named.length > 0 ||
       attributes.some(
@@ -1464,8 +1464,8 @@ export function emit(
     out.raw("}; return $$check.any(0); },");
   }
   /**
-   * A snippet as svelte2tsx declares it: an arrow that returns a snippet's
-   * result.
+   * A snippet as svelte2tsx declares it: an arrow that returns a
+   * snippet's result.
    */
   function snippet(node: AST.SnippetBlock) {
     out.raw("const ").copy(node.expression.start, node.expression.end);
@@ -1957,8 +1957,8 @@ export function emit(
   out.raw(
     `, exports: ${exportsValue}, bindings: "", slots: ${typed.has("$$Slots") ? "{} as unknown as $$Slots, __slots: {" : "{"}`,
   );
-  // A slot's props, as `let:` reads them; `any` for a value the markup
-  // scopes.
+  // A slot's props, as `let:` reads them; `any` for a value the
+  // markup scopes.
   for (const [name, attributes] of slots) {
     out.raw(`${JSON.stringify(name)}: {`);
     for (const a of attributes)
@@ -2024,8 +2024,8 @@ export function emit(
     return { props: propsType, events, slots: slotTypes };
   };
   if (isTs && typeParams.length > 0 && svelte >= 4) {
-    // A generic component's type takes the parameters, so a use infers
-    // them.
+    // A generic component's type takes the parameters, so a use
+    // infers them.
     const names = typeParamNames;
     const args = `<${names.join(", ")}>`;
     const rendered = topLevelAwait
@@ -2123,8 +2123,8 @@ export function emit(
   }
 
   /**
-   * A runes component: a function typed by `$props()`, as svelte2tsx types
-   * it.
+   * A runes component: a function typed by `$props()`, as svelte2tsx
+   * types it.
    */
   function runesExport() {
     const exported = `{${entries(exportsOf)}}`;

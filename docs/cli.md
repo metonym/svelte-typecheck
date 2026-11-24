@@ -72,8 +72,8 @@ on your tsconfig for `tsc`, tsgo and tsrs.
 Through an npm script, npm takes the first `--`,
 so pass two (`npm run check -- -- --fast`),
 or write the flags into the script.
-The API takes them as an array, one item per word:
-`checkerArgs: ["--fast", "--checkers", "8"]`.
+The API takes them as an array, one item per
+word: `checkerArgs: ["--fast", "--checkers", "8"]`.
 
 ## The daemon
 

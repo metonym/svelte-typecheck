@@ -55,12 +55,12 @@ What svelte-typecheck does that svelte-check doesn't:
 - **A syntax error in a TS or JS file** stops `tsc`
   and the other CLI checkers from type-checking at all,
   so only syntax errors are reported until it's fixed;
-  svelte-check's language service reports the type errors in other files
-  too.
+  svelte-check's language service reports the type errors in other
+  files too.
   A component's syntax errors don't do this.
 - **Svelte 3 and 4 with `lang="ts"` and no svelte.config**:
-  svelte-check strips the types with a fallback preprocessor before it
-  compiles.
+  svelte-check strips the types with a fallback preprocessor before
+  it compiles.
   Here the types are blanked out instead,
   so the compiler's warnings match.
   A script with an `enum` or a constructor's `private` parameter can't
@@ -72,8 +72,8 @@ What svelte-typecheck does that svelte-check doesn't:
 - **A JS component with a `@template` tag and no `generics`**:
   svelte-check reports an error at each use, even a valid one,
   as it keeps `T` unresolved.
-  Here the component isn't generic: each prop is typed by its
-  constraint.
+  Here the component isn't generic: each prop is typed by
+  its constraint.
 - **A JS component's JSDoc block with a `@typedef`
   and the `@type` of `$props()`**, as
   `/** @typedef {{ count: number }} Props @type {Props} */` on two
@@ -108,10 +108,9 @@ What svelte-typecheck does that svelte-check doesn't:
   generated code; the default is inside `node_modules`.
 - **`<svelte:element this={tag}>` whose tag may be any element**,
   such as a component's generic
-  `Tag extends keyof HTMLElementTagNameMap`:
-  svelte-check reports TypeScript's "union type too complex"
-  and checks none of the element's attributes;
-  here its attributes are checked as an element's.
+  `Tag extends keyof HTMLElementTagNameMap`: svelte-check reports
+  TypeScript's "union type too complex" and checks none of the element's
+  attributes; here its attributes are checked as an element's.
   An attribute error on it names the attributes' type with the tag
   widened: `keyof HTMLElementTagNameMap extends Tag ? string : Tag`.
 - **A repeated `on:` on `<svelte:document>`**, such as two `on:click`s:

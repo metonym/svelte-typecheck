@@ -316,8 +316,8 @@ export function kitPropType(
 }
 
 /**
- * A prop svelte2tsx types in a route's or `+error.svelte`'s untyped
- * `$props()`.
+ * A prop svelte2tsx types in a route's or `+error.svelte`'s
+ * untyped `$props()`.
  */
 export function kitRuneProp(
   basename: string,

@@ -37,8 +37,8 @@ To pass the checker flags of its own,
 put them after `--`
 (see [The checker's flags](cli.md#the-checkers-flags)).
 To try tsrs's
-[fast mode](https://github.com/oxc-project/tsrs#fast-mode),
-pass `--fast`: it adapts the checker count to your cores
+[fast mode](https://github.com/oxc-project/tsrs#fast-mode), pass
+`--fast`: it adapts the checker count to your cores
 and resolves types lazily.
 On a big program it can check up to 2× faster, at some extra memory.
 On a small one it gains nothing, and can be slower.

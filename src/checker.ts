@@ -6,8 +6,8 @@ import type { Checker } from "./types.ts";
 import { field, stringOf } from "./unknown.ts";
 
 /**
- * In the order picked when none is named: the project's own TypeScript
- * first.
+ * In the order picked when none is named: the project's own
+ * TypeScript first.
  */
 export const CHECKERS: Checker[] = ["tsc", "tsgo", "tsrs", "bun"];
 
@@ -35,8 +35,8 @@ const PACKAGES: Record<Exclude<Checker, "bun">, Provider[]> = {
 const NODE_SHEBANG = /^#!.*\bnode\b/;
 
 /**
- * How to run a checker: the command, and arguments before the checker's
- * own.
+ * How to run a checker: the command, and arguments before the
+ * checker's own.
  */
 interface CheckerCommand {
   command: string;
@@ -171,8 +171,8 @@ export async function nativeCommand(
 
 /**
  * The arguments that check a project and print errors as `tsc` does.
- * `bun check` runs a package.json `check` script in its place, unless
- * `--no-script`.
+ * `bun check` runs a package.json `check` script in its place,
+ * unless `--no-script`.
  */
 export function checkerArgs(checker: Checker, tsconfig: string): string[] {
   return checker === "bun"

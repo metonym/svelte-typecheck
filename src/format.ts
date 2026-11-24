@@ -62,8 +62,8 @@ function lineOf(text: string, line: number): string {
 }
 
 /**
- * The line before, the line with the range highlighted, and the line
- * after.
+ * The line before, the line with the range highlighted, and the
+ * line after.
  */
 function codeFrame(d: Diagnostic, c: Colors): string {
   let text: string;
@@ -127,8 +127,8 @@ function agentFrame(d: Diagnostic): string[] {
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
 /**
- * The numeric code svelte-check reports for a TypeScript error, else the
- * compiler's.
+ * The numeric code svelte-check reports for a TypeScript error, else
+ * the compiler's.
  */
 function codeOf(d: Diagnostic): string | number {
   if (d.code.startsWith("TS")) return Number(d.code.slice(2));

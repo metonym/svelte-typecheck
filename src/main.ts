@@ -255,8 +255,8 @@ function sourceOf(name: string): DiagnosticSource {
 }
 
 /**
- * The run's options from parsed flags, as the CLI passes them to
- * `typecheck`.
+ * The run's options from parsed flags, as the CLI passes them
+ * to `typecheck`.
  */
 function optionsOf(
   values: ReturnType<typeof parse>["values"],
@@ -286,8 +286,8 @@ function optionsOf(
 }
 
 /**
- * The options the CLI runs with for `argv`: the parity eval runs the same
- * check.
+ * The options the CLI runs with for `argv`: the parity eval runs the
+ * same check.
  */
 export function cliOptions(argv: string[]): TypecheckOptions {
   const { values, rest } = parse(argv);

@@ -3,8 +3,8 @@ export type Checker = "bun" | "tsrs" | "tsgo" | "tsc";
 
 export interface TypecheckOptions {
   /**
-   * The project root the other paths resolve against. Default:
-   * `process.cwd()`.
+   * The project root the other paths resolve
+   * against. Default: `process.cwd()`.
    */
   cwd?: string | undefined;
   /** The project folder, relative to `cwd`. Default: `"."`. */
@@ -44,8 +44,8 @@ export interface TypecheckOptions {
    */
   components?: string[] | undefined;
   /**
-   * Where to write the generated code. Default:
-   * `node_modules/.cache/svelte-typecheck/<workspace>`.
+   * Where to write the generated
+   * code. Default: `node_modules/.cache/svelte-typecheck/<workspace>`.
    */
   outDir?: string | undefined;
   /**
@@ -55,8 +55,8 @@ export interface TypecheckOptions {
    */
   declarations?: boolean | undefined;
   /**
-   * The Svelte package to check against. Default: `svelte`, resolved from
-   * `cwd`.
+   * The Svelte package to check against. Default: `svelte`, resolved
+   * from `cwd`.
    */
   svelte?: string | undefined;
   /**
@@ -86,8 +86,8 @@ export interface TypecheckOptions {
 export type DiagnosticSource = "js" | "svelte" | "css";
 
 /**
- * An error or warning, at its line and column (both 1-based) in the
- * source.
+ * An error or warning, at its line and column (both 1-based) in
+ * the source.
  */
 export interface Diagnostic {
   /** An absolute path. */
@@ -99,8 +99,8 @@ export interface Diagnostic {
   endColumn?: number;
   severity: "error" | "warning";
   /**
-   * `ts` or `js` for a type error (by the file's language), `svelte` for the
-   * compiler.
+   * `ts` or `js` for a type error (by the file's language), `svelte` for
+   * the compiler.
    */
   source: "ts" | "js" | "svelte";
   /** `TS2322`, or a compiler code such as `a11y_missing_attribute`. */
