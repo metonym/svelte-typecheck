@@ -1,6 +1,6 @@
 {
   "name": "svelte-typecheck",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "A drop-in svelte-check replacement: up to 11× faster, zero dependencies.",
   "license": "MIT",
   "author": "Eric Liu (https://github.com/metonym)",
