@@ -34,7 +34,9 @@ svelte-check's options:
                             agent or github, for GitHub Actions annotations
                             (default: human-verbose, or agent when
                             AGENT, AI_AGENT, CLAUDECODE, CODEX_CI or
-                            CODEX_THREAD_ID is set, and not to 0)
+                            CODEX_THREAD_ID is set, and not to 0, which it
+                            says on stderr; SVELTE_TYPECHECK_OUTPUT sets
+                            another)
   --tsconfig <path>         tsconfig or jsconfig, relative to the workspace;
                             its TS and JS files' errors are reported too
                             (default: the nearest from the workspace up)
@@ -117,7 +119,12 @@ export async function main(argv: string[]): Promise<0 | 1> {
     console.log(version);
     return 0;
   }
-  const format = formatOf(values.output);
+  const { format, agentVariable } = formatOf(values.output);
+  if (agentVariable) {
+    process.stderr.write(
+      `svelte-typecheck: ${agentVariable} is set, so --output agent; pass --output or set SVELTE_TYPECHECK_OUTPUT for another.\n`,
+    );
+  }
   const out = writer(
     format,
     (text) => process.stdout.write(text),
@@ -312,14 +319,21 @@ export const AGENT_ENV: string[] = [
  * variable is set to a value other than empty or `0`, as `bun check`
  * reads its own.
  */
-function formatOf(output: string | undefined): OutputFormat {
-  const format = OUTPUT_FORMATS.find((f) => f === output);
-  if (format) return format;
-  const agent = AGENT_ENV.some((name) => {
-    const value = process.env[name];
+function formatOf(output: string | undefined): {
+  format: OutputFormat;
+  agentVariable?: string;
+} {
+  const env = process.env;
+  const given = output ?? env.SVELTE_TYPECHECK_OUTPUT;
+  const format = OUTPUT_FORMATS.find((f) => f === given);
+  if (format) return { format };
+  const agentVariable = AGENT_ENV.find((name) => {
+    const value = env[name];
     return value !== undefined && value !== "" && value !== "0";
   });
-  return agent ? "agent" : "human-verbose";
+  return agentVariable
+    ? { format: "agent", agentVariable }
+    : { format: "human-verbose" };
 }
 
 /**
