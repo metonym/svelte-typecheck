@@ -35,7 +35,8 @@ bun add -d svelte-typecheck
 bunx svelte-typecheck
 ```
 
-It exits with 1 when there's an error and 0 otherwise.
+It exits with 1 when there's an error, 0 otherwise,
+and 2 when called wrong, such as with an unknown option.
 
 ## CLI
 

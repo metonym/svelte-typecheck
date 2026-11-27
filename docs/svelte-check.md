@@ -42,6 +42,9 @@ What svelte-typecheck does that svelte-check doesn't:
   errors, as svelte-check's docs say; svelte-check itself reports them.
 - **`--tsgo-experimental-api`** is accepted,
   and does what `--tsgo` does.
+- **A usage error**, such as an unknown option or a missing value,
+  exits 2 with one line naming the nearest option;
+  svelte-check exits 1 and prints its usage.
 - **tsconfig option errors** that only matter to an emitting build,
   such as a JS file that `tsc` would overwrite, aren't reported:
   the checker runs with `noEmit`.

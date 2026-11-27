@@ -21,7 +21,7 @@ import type {
   TypecheckOptions,
   TypecheckResult,
 } from "./types.ts";
-import { errorOf, messageOf } from "./unknown.ts";
+import { codeOf, errorOf, messageOf } from "./unknown.ts";
 import { watch } from "./watch.ts";
 
 const HELP = `Usage: svelte-typecheck [options] [-- checker args]
@@ -93,23 +93,38 @@ The daemon:
   svelte-typecheck stop     Stop it
   svelte-typecheck status   Show whether it runs, and its log
 
-Exits 1 on an error, or a warning with --fail-on-warnings.`;
+Exits 1 on an error, or a warning with --fail-on-warnings, and 2 when
+called wrong: an unknown option, or a missing or bad value.`;
 
 /** Runs the CLI and returns its exit code. */
-export async function main(argv: string[]): Promise<0 | 1> {
+export async function main(argv: string[]): Promise<0 | 1 | 2> {
   // A daemon `cli.ts` started for `--daemon`, serving runs.
   if (argv[0] === SERVE && argv[1]) {
     await serveDaemon(argv[1], main);
     return new Promise(() => {});
   }
-  let values: ReturnType<typeof parse>["values"];
-  let rest: string[];
   try {
-    ({ values, rest } = parse(argv));
+    return await run(argv);
   } catch (error) {
-    console.error(`${messageOf(error)}\n\n${HELP}`);
-    return 1;
+    if (!(error instanceof UsageError)) throw error;
+    // One line that points the way: the whole usage would bury it.
+    console.error(`svelte-typecheck: ${error.message} (${error.hint})`);
+    return 2;
   }
+}
+
+// A separate class so a run called wrong exits 2, and a script tells it
+// from a run that found problems, which exits 1.
+class UsageError extends Error {
+  readonly hint: string;
+  constructor(message: string, hint = "see --help") {
+    super(message);
+    this.hint = hint;
+  }
+}
+
+async function run(argv: string[]): Promise<0 | 1> {
+  const { values, rest } = parse(argv);
   if (values.help) {
     console.log(HELP);
     return 0;
@@ -118,6 +133,28 @@ export async function main(argv: string[]): Promise<0 | 1> {
     const { version } = await import("../package.json");
     console.log(version);
     return 0;
+  }
+  const options = optionsOf(values, rest);
+  const baselinePath = values.baseline && resolve(values.baseline);
+  if (values["update-baseline"] && !baselinePath)
+    throw new UsageError("--update-baseline needs --baseline <file>");
+  const strict = values["strict-baseline"];
+  if (strict && !baselinePath)
+    throw new UsageError("--strict-baseline needs --baseline <file>");
+  // A baseline of some files' diagnostics would drop the rest's, and the
+  // rest would look fixed.
+  for (const flag of ["update-baseline", "strict-baseline"] as const)
+    if (values[flag] && (values.changed || values.since))
+      throw new UsageError(`--${flag} takes every file's: drop --changed`);
+  let baseline: Baseline | undefined;
+  if (baselinePath && !values["update-baseline"]) {
+    try {
+      baseline = JSON.parse(readFileSync(baselinePath, "utf-8")) as Baseline;
+    } catch {
+      throw new UsageError(
+        `no baseline at ${baselinePath}: write one with --update-baseline`,
+      );
+    }
   }
   const { format, agentVariable } = formatOf(values.output);
   if (agentVariable) {
@@ -130,48 +167,11 @@ export async function main(argv: string[]): Promise<0 | 1> {
     (text) => process.stdout.write(text),
     colors(colorFlag(values.color, values["no-color"])),
   );
-  let options: TypecheckOptions;
-  try {
-    options = optionsOf(values, rest);
-  } catch (error) {
-    console.error(`${messageOf(error)}\n\n${HELP}`);
-    return 1;
-  }
   if (values.changed || values.since) {
     try {
       options.only = changedFiles(process.cwd(), values.since);
     } catch (error) {
       out.failure(errorOf(error));
-      return 1;
-    }
-  }
-  const baselinePath = values.baseline && resolve(values.baseline);
-  if (values["update-baseline"] && !baselinePath) {
-    out.failure(new Error("--update-baseline needs --baseline <file>"));
-    return 1;
-  }
-  const strict = values["strict-baseline"];
-  if (strict && !baselinePath) {
-    out.failure(new Error("--strict-baseline needs --baseline <file>"));
-    return 1;
-  }
-  // A baseline of some files' diagnostics would drop the rest's, and the
-  // rest would look fixed.
-  for (const flag of ["update-baseline", "strict-baseline"] as const)
-    if (values[flag] && (values.changed || values.since)) {
-      out.failure(new Error(`--${flag} takes every file's: drop --changed`));
-      return 1;
-    }
-  let baseline: Baseline | undefined;
-  if (baselinePath && !values["update-baseline"]) {
-    try {
-      baseline = JSON.parse(readFileSync(baselinePath, "utf-8")) as Baseline;
-    } catch {
-      out.failure(
-        new Error(
-          `No baseline at ${baselinePath}: write one with --update-baseline`,
-        ),
-      );
       return 1;
     }
   }
@@ -248,14 +248,14 @@ function checkerOf(name: string | undefined): Checker | undefined {
   if (name === undefined) return undefined;
   const checker = CHECKERS.find((c) => c === name);
   if (!checker)
-    throw new Error(`--checker takes ${CHECKERS.join(", ")}, not ${name}`);
+    throw new UsageError(`--checker takes ${CHECKERS.join(", ")}, not ${name}`);
   return checker;
 }
 
 function sourceOf(name: string): DiagnosticSource {
   const source = SOURCES.find((s) => s === name);
   if (!source)
-    throw new Error(
+    throw new UsageError(
       `--diagnostic-sources takes ${SOURCES.join(", ")}, not ${name}`,
     );
   return source;
@@ -343,46 +343,121 @@ function formatOf(output: string | undefined): {
 function parse(argv: string[]) {
   const end = argv.indexOf("--");
   const rest = end === -1 ? [] : argv.slice(end + 1);
-  const { values } = parseArgs({
-    args: end === -1 ? argv : argv.slice(0, end),
-    options: {
-      workspace: { type: "string" },
-      output: { type: "string" },
-      tsconfig: { type: "string" },
-      "no-tsconfig": { type: "boolean", default: false },
-      ignore: { type: "string" },
-      config: { type: "string" },
-      "diagnostic-sources": { type: "string" },
-      threshold: { type: "string" },
-      "compiler-warnings": { type: "string" },
-      "fail-on-warnings": { type: "boolean", default: false },
-      color: { type: "boolean", default: false },
-      "no-color": { type: "boolean", default: false },
-      tsgo: { type: "boolean", default: false },
-      incremental: { type: "boolean", default: false },
-      "no-incremental": { type: "boolean", default: false },
-      watch: { type: "boolean", default: false },
-      preserveWatchOutput: { type: "boolean", default: false },
-      // svelte-check's, accepted for a drop-in.
-      "tsgo-experimental-api": { type: "boolean", default: false },
-      checker: { type: "string" },
-      components: { type: "string", multiple: true },
-      "out-dir": { type: "string" },
-      "no-declarations": { type: "boolean", default: false },
-      svelte: { type: "string" },
-      changed: { type: "boolean", default: false },
-      baseline: { type: "string" },
-      "update-baseline": { type: "boolean", default: false },
-      "strict-baseline": { type: "boolean", default: false },
-      since: { type: "string" },
-      // `cli.ts`'s, which hands the run to a daemon.
-      daemon: { type: "boolean", default: false },
-      "no-daemon": { type: "boolean", default: false },
-      help: { type: "boolean", short: "h", default: false },
-      version: { type: "boolean", short: "v", default: false },
-    },
-  });
-  return { values, rest };
+  try {
+    const { values } = parseArgs({
+      args: end === -1 ? argv : argv.slice(0, end),
+      options: OPTIONS,
+    });
+    return { values, rest };
+  } catch (error) {
+    throw usageOf(error) ?? error;
+  }
+}
+
+const OPTIONS = {
+  workspace: { type: "string" },
+  output: { type: "string" },
+  tsconfig: { type: "string" },
+  "no-tsconfig": { type: "boolean", default: false },
+  ignore: { type: "string" },
+  config: { type: "string" },
+  "diagnostic-sources": { type: "string" },
+  threshold: { type: "string" },
+  "compiler-warnings": { type: "string" },
+  "fail-on-warnings": { type: "boolean", default: false },
+  color: { type: "boolean", default: false },
+  "no-color": { type: "boolean", default: false },
+  tsgo: { type: "boolean", default: false },
+  incremental: { type: "boolean", default: false },
+  "no-incremental": { type: "boolean", default: false },
+  watch: { type: "boolean", default: false },
+  preserveWatchOutput: { type: "boolean", default: false },
+  // svelte-check's, accepted for a drop-in.
+  "tsgo-experimental-api": { type: "boolean", default: false },
+  checker: { type: "string" },
+  components: { type: "string", multiple: true },
+  "out-dir": { type: "string" },
+  "no-declarations": { type: "boolean", default: false },
+  svelte: { type: "string" },
+  changed: { type: "boolean", default: false },
+  baseline: { type: "string" },
+  "update-baseline": { type: "boolean", default: false },
+  "strict-baseline": { type: "boolean", default: false },
+  since: { type: "string" },
+  // `cli.ts`'s, which hands the run to a daemon.
+  daemon: { type: "boolean", default: false },
+  "no-daemon": { type: "boolean", default: false },
+  help: { type: "boolean", short: "h", default: false },
+  version: { type: "boolean", short: "v", default: false },
+} as const;
+
+// compat: parseArgs's messages differ between Node and Bun, and run to
+// several lines, so each is rewritten from its code; each names its
+// option or argument first, in quotes.
+function usageOf(error: unknown): UsageError | undefined {
+  const message = messageOf(error);
+  const named = /'([^' ]+)/.exec(message)?.[1] ?? "";
+  const code = codeOf(error);
+  if (code === "ERR_PARSE_ARGS_UNKNOWN_OPTION") {
+    // compat: Bun names a short option in a group without its dash.
+    const flag = named.startsWith("-") ? named : `-${named}`;
+    const near = nearestOption(flag);
+    return new UsageError(
+      `unknown option ${flag}`,
+      near ? `did you mean ${near}?` : undefined,
+    );
+  }
+  if (code === "ERR_PARSE_ARGS_UNEXPECTED_POSITIONAL")
+    return new UsageError(
+      `unexpected argument ${named}: the checker's arguments go after --`,
+    );
+  if (code === "ERR_PARSE_ARGS_INVALID_OPTION_VALUE")
+    return new UsageError(
+      message.includes("does not take")
+        ? `${named} takes no value`
+        : `${named} needs a value`,
+    );
+  return undefined;
+}
+
+// A long option within a third of its length in edits, so a typo finds
+// its flag and another word finds none. A short one is a letter from any
+// other, so it gets none.
+function nearestOption(flag: string): string | undefined {
+  if (!flag.startsWith("--")) return undefined;
+  const typed = flag.slice(2);
+  let nearest: string | undefined;
+  let best = Math.max(1, Math.floor(typed.length / 3)) + 1;
+  for (const name of Object.keys(OPTIONS)) {
+    const edits = distance(typed, name);
+    if (edits < best) {
+      nearest = `--${name}`;
+      best = edits;
+    }
+  }
+  return nearest;
+}
+
+// A swap of two neighbors, as in `--hlep`, counts as one edit, as typing
+// fast swaps letters; Levenshtein would count two.
+function distance(a: string, b: string): number {
+  const width = b.length + 1;
+  const cells = Array.from({ length: (a.length + 1) * width }, (_, k) =>
+    k < width ? k : k % width === 0 ? k / width : 0,
+  );
+  const at = (i: number, j: number) => cells[i * width + j] ?? 0;
+  for (let i = 1; i <= a.length; i++)
+    for (let j = 1; j <= b.length; j++) {
+      let edits = Math.min(
+        at(i - 1, j) + 1,
+        at(i, j - 1) + 1,
+        at(i - 1, j - 1) + (a[i - 1] === b[j - 1] ? 0 : 1),
+      );
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1])
+        edits = Math.min(edits, at(i - 2, j - 2) + 1);
+      cells[i * width + j] = edits;
+    }
+  return at(a.length, b.length);
 }
 
 /**

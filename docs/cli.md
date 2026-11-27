@@ -1,7 +1,15 @@
 # CLI
 
 A drop-in replacement for svelte-check: the same options,
-the same output in all four formats, the same exit codes.
+the same output in all four formats, the same exit codes,
+but for a usage error.
+It exits 0 when the check passes, 1 on an error
+(or a warning with `--fail-on-warnings`), and 2 when called wrong:
+an unknown option, a missing or bad value,
+or flags that don't go together.
+A usage error is one line on stderr that names the nearest
+option:
+`svelte-typecheck: unknown option --hlep (did you mean --help?)`.
 
 ```diff
 - "check": "svelte-check --tsconfig ./tsconfig.json"
